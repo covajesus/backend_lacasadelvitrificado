@@ -4,7 +4,7 @@ from sqlalchemy.orm import sessionmaker
 
 #SQLALCHEMY_DATABASE_URI = "mysql+pymysql://root:@localhost:3306/berger"
 
-SQLALCHEMY_DATABASE_URI = "mysql+pymysql://root:@localhost:3306/lacasadelvitrificado"
+SQLALCHEMY_DATABASE_URI = "mysql+pymysql://admin:@31.97.250.169:3306/lacasadelvitrificado"
 
 engine = create_engine(SQLALCHEMY_DATABASE_URI, pool_size=20, max_overflow=0, echo=False)
 
@@ -17,4 +17,5 @@ def get_db():
         yield db
     finally:
         db.close()
+
 
