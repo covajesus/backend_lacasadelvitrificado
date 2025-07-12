@@ -4,8 +4,8 @@ from fastapi import HTTPException, UploadFile
 class FileClass:
     def __init__(self, db):
         self.db = db
-        # self.files_dir = "/var/www/appvitrificadoschile.com/public_html/files"
-        # self.base_url = "https://appvitrificadoschile.com/files"
+        # self.files_dir = "/var/www/api.lacasadelvitrificado.com/files"
+        # self.base_url = "https://api.lacasadelvitrificado.com/files"
         self.files_dir = "C:/Users/jesus/berger_seidle_backend/files"
         self.base_url = "http://127.0.0.1:8000/files"
 
