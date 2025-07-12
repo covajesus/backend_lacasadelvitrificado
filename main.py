@@ -20,10 +20,10 @@ from app.backend.routers.customers import customers
 app = FastAPI(root_path="/api")
 application = app
 
-FILES_DIR = "C:/Users/jesus/berger_seidle_backend/files"
+#FILES_DIR = "C:/Users/jesus/berger_seidle_backend/files"
 
 # Montar como directorio estático
-app.mount("/files", StaticFiles(directory=FILES_DIR), name="files")
+#app.mount("/files", StaticFiles(directory=FILES_DIR), name="files")
 
 os.environ['SECRET_KEY'] = '7de4c36b48fce8dcb3a4bb527ba62d789ebf3d3a7582472ee49d430b01a7f868'
 os.environ['ALGORITHM'] = 'HS256'
