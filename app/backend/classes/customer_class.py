@@ -11,7 +11,7 @@ class CustomerClass:
                 self.db.query(
                     CustomerModel.id, 
                     CustomerModel.social_reason,
-                    CustomerModel.rut,
+                    CustomerModel.identification_number,
                     CustomerModel.address,
                     CustomerModel.phone,
                     CustomerModel.email
@@ -34,7 +34,7 @@ class CustomerClass:
                 serialized_data = [{
                     "id": customer.id,
                     "social_reason": customer.social_reason,
-                    "rut": customer.rut,
+                    "identification_number": customer.identification_number,
                     "address": customer.address,
                     "phone": customer.phone,
                 } for customer in data]
@@ -53,7 +53,7 @@ class CustomerClass:
                 serialized_data = [{
                     "id": customer.id,
                     "social_reason": customer.social_reason,
-                    "rut": customer.rut,
+                    "identification_number": customer.identification_number,
                     "address": customer.address,
                     "phone": customer.phone,
                 } for customer in data]
@@ -71,9 +71,10 @@ class CustomerClass:
             return "No data found"
 
         try:
-            existing_customer.rut = form_data.rut
+            existing_customer.identification_number = form_data.identification_number
             existing_customer.social_reason = form_data.social_reason
             existing_customer.region_id = form_data.region_id
+            existing_customer.activity = form_data.activity
             existing_customer.commune_id = form_data.commune_id
             existing_customer.address = form_data.address
             existing_customer.phone = form_data.phone
@@ -93,8 +94,9 @@ class CustomerClass:
             new_customer = CustomerModel(
                 region_id=customer_inputs.region_id,
                 commune_id=customer_inputs.commune_id,
-                rut=customer_inputs.rut,
+                identification_number=customer_inputs.identification_number,
                 social_reason=customer_inputs.social_reason,
+                activity=customer_inputs.activity,
                 address=customer_inputs.address,
                 phone=customer_inputs.phone,
                 email=customer_inputs.email,
@@ -119,20 +121,21 @@ class CustomerClass:
         try:
             data_query = self.db.query(
                 CustomerModel,
-                RegionModel.region,
-                CommuneModel.commune
+                RegionModel.id.label("region_id"),
+                CommuneModel.id.label("commune_id")
             ).join(RegionModel, RegionModel.id == CustomerModel.region_id, isouter=True).join(CommuneModel, CommuneModel.id == CustomerModel.commune_id, isouter=True).filter(CustomerModel.id == id).first()
 
             if data_query:
                 customer_data = {
                     "id": data_query.CustomerModel.id,
                     "social_reason": data_query.CustomerModel.social_reason,
-                    "rut": data_query.CustomerModel.rut,
+                    "identification_number": data_query.CustomerModel.identification_number,
                     "address": data_query.CustomerModel.address,
                     "phone": data_query.CustomerModel.phone,
                     "email": data_query.CustomerModel.email,
-                    "region": data_query.region,
-                    "commune": data_query.commune
+                    "region_id": int(data_query.region_id) if data_query.region_id is not None else None,
+                    "commune_id": int(data_query.commune_id) if data_query.commune_id is not None else None,
+                    "activity": data_query.CustomerModel.activity,
                 }
 
                 return {"customer_data": customer_data}
