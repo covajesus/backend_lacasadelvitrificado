@@ -34,7 +34,8 @@ class UpdateUser(BaseModel):
 
 class UpdateCustomer(BaseModel):
     social_reason: str
-    rut: str
+    identification_number: str
+    activity: str
     address: str
     phone: str
     email: str
@@ -43,7 +44,8 @@ class UpdateCustomer(BaseModel):
 
 class StoreCustomer(BaseModel):
     social_reason: str
-    rut: str
+    identification_number: str
+    activity: str
     address: str
     phone: str
     email: str

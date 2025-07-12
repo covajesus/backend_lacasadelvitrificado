@@ -46,7 +46,7 @@ class CustomerModel(Base):
     id = Column(Integer, primary_key=True)
     region_id = Column(Integer)
     commune_id = Column(Integer)
-    rut = Column(String(255))
+    identification_number = Column(String(255))
     social_reason = Column(String(255))
     activity = Column(String(255))
     address = Column(String(255))
