@@ -117,6 +117,14 @@ class CustomerClass:
             self.db.rollback()
             return {"status": "error", "message": str(e)}
 
+    def get_by_identification_number(self, identification_number):
+        customer = self.db.query(CustomerModel).filter(CustomerModel.identification_number == identification_number).first()
+
+        if not customer:
+            return {"status": "error", "message": "No data found"}
+        
+        return customer
+    
     def get(self, id):
         try:
             data_query = self.db.query(

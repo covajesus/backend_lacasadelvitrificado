@@ -135,6 +135,25 @@ class UserClass:
             return 1
         except Exception as e:
             return 0
+    
+    def store_login(self, user_inputs):
+        user = UserModel()
+        user.rut = user_inputs.identification_number
+        user.rol_id = 5
+        user.full_name = user_inputs.social_reason
+        user.hashed_password = generate_bcrypt_hash('123456')
+        user.email = user_inputs.email
+        user.phone = user_inputs.phone
+        user.added_date = datetime.now()
+        user.updated_date = datetime.now()
+
+        self.db.add(user)
+        try:
+            self.db.commit()
+
+            return 1
+        except Exception as e:
+            return 0
         
     def delete(self, id):
         try:

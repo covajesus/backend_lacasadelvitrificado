@@ -11,7 +11,7 @@ regions = APIRouter(
 )
 
 @regions.get("/no_paginations")
-def no_paginations(session_user: UserLogin = Depends(get_current_active_user), db: Session = Depends(get_db)):
+def no_paginations(db: Session = Depends(get_db)):
     data = RegionClass(db).get_all_no_paginations()
 
     return {"message": data}

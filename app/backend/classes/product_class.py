@@ -1,4 +1,4 @@
-from app.backend.db.models import ProductModel, LiterFeatureModel, SupplierModel, CategoryModel, LotItemModel, KilogramFeatureModel, UnitMeasureModel
+from app.backend.db.models import ProductModel, LiterFeatureModel, SupplierModel, CategoryModel, LotModel, LotItemModel, KilogramFeatureModel, UnitMeasureModel
 from app.backend.classes.file_class import FileClass
 from datetime import datetime
 from sqlalchemy import func
@@ -205,12 +205,14 @@ class ProductClass:
                         ProductModel.description,
                         func.max(LotItemModel.public_sale_price).label("public_sale_price"),
                         func.max(LotItemModel.private_sale_price).label("private_sale_price"),
-                        func.sum(LotItemModel.quantity).label("total_stock")
+                        func.sum(LotItemModel.quantity).label("total_stock"),
+                        func.group_concat(LotModel.lot_number.op('ORDER BY')(LotModel.lot_number)).label("lot_numbers")
                     )
                     .join(UnitMeasureModel, UnitMeasureModel.id == ProductModel.unit_measure_id, isouter=True)
                     .join(SupplierModel, SupplierModel.id == ProductModel.supplier_id, isouter=True)
                     .join(CategoryModel, CategoryModel.id == ProductModel.category_id, isouter=True)
                     .join(LotItemModel, LotItemModel.product_id == ProductModel.id)
+                    .join(LotModel, LotModel.id == LotItemModel.lot_id)
                     .group_by(
                         ProductModel.id,
                         ProductModel.code,
@@ -242,12 +244,14 @@ class ProductClass:
                         ProductModel.description,
                         func.max(LotItemModel.public_sale_price).label("public_sale_price"),
                         func.max(LotItemModel.private_sale_price).label("private_sale_price"),
-                        func.sum(LotItemModel.quantity).label("total_stock")
+                        func.sum(LotItemModel.quantity).label("total_stock"),
+                        func.group_concat(LotModel.lot_number.op('ORDER BY')(LotModel.lot_number)).label("lot_numbers")
                     )
                     .join(UnitMeasureModel, UnitMeasureModel.id == ProductModel.unit_measure_id, isouter=True)
                     .join(SupplierModel, SupplierModel.id == ProductModel.supplier_id, isouter=True)
                     .join(CategoryModel, CategoryModel.id == ProductModel.category_id, isouter=True)
                     .join(LotItemModel, LotItemModel.product_id == ProductModel.id)
+                    .join(LotModel, LotModel.id == LotItemModel.lot_id)
                     .filter(ProductModel.category_id == category_id)
                     .group_by(
                         ProductModel.id,
@@ -279,7 +283,8 @@ class ProductClass:
                     "description": product.description,
                     "public_sale_price": product.public_sale_price if product.public_sale_price is not None else 0,
                     "private_sale_price": product.private_sale_price if product.private_sale_price is not None else 0,
-                    "total_stock": product.total_stock if product.total_stock is not None else 0
+                    "total_stock": product.total_stock if product.total_stock is not None else 0,
+                    "lot_numbers": product.lot_numbers if product.lot_numbers else ""
                 } for product in data]
 
             return {
@@ -308,9 +313,11 @@ class ProductClass:
                     ProductModel.catalog,
                     func.max(LotItemModel.public_sale_price).label("public_sale_price"),
                     func.max(LotItemModel.private_sale_price).label("private_sale_price"),
-                    func.sum(LotItemModel.quantity).label("total_stock")
+                    func.sum(LotItemModel.quantity).label("total_stock"),
+                    func.group_concat(LotModel.lot_number.op('ORDER BY')(LotModel.lot_number)).label("lot_numbers")
                 )
                 .join(LotItemModel, LotItemModel.product_id == ProductModel.id)
+                .join(LotModel, LotModel.id == LotItemModel.lot_id)
                 .filter(ProductModel.id == id)
                 .group_by(
                     ProductModel.id,
@@ -347,6 +354,7 @@ class ProductClass:
                 "public_sale_price": data_query.public_sale_price if data_query.public_sale_price is not None else 0,
                 "private_sale_price": data_query.private_sale_price if data_query.private_sale_price is not None else 0,
                 "total_stock": data_query.total_stock if data_query.total_stock is not None else 0,
+                "lot_numbers": data_query.lot_numbers if data_query.lot_numbers else "",
                 "features": None
             }
 

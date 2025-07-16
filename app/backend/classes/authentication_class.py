@@ -14,12 +14,13 @@ class AuthenticationClass:
     def __init__(self, db):
         self.db = db
 
-    def authenticate_shopping_login(self, rut):
-        customer = CustomerClass(self.db).get('rut', rut)
-        print(customer)
-        response_data = json.loads(customer)
+    def authenticate_shopping_login(self, identification_number):
+        user = UserClass(self.db).get('rut', identification_number)
+        response_data = json.loads(user)
 
-        if not customer:
+        print(response_data)
+
+        if not user:
             raise HTTPException(status_code=401, detail="Could not validate credentials", headers={"WWW-Authenticate": "Bearer"})
 
         return response_data
