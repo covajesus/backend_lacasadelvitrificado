@@ -63,6 +63,7 @@ def delete(id: int, session_user: UserLogin = Depends(get_current_active_user), 
 
 @products.get("/edit/{id}")
 def edit(id: int, session_user: UserLogin = Depends(get_current_active_user), db: Session = Depends(get_db)):
+    print(f"Fetching product with ID: {id}")
     data = ProductClass(db).get(id)
 
     return {"message": data}

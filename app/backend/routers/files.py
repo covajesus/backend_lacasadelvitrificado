@@ -8,7 +8,7 @@ files = APIRouter(
     tags=["files"]
 )
 
-FILES_DIR = "C:/Users/jesus/berger_seidle_backend/files"
+FILES_DIR = "C:/Users/jesus/OneDrive/Escritorio/backend-lacasadelvitrificado/files"
 
 @files.get("/download/{file_path:path}")
 def download_file(file_path: str):

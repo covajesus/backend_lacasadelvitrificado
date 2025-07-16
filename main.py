@@ -16,14 +16,15 @@ from app.backend.routers.inventories import inventories
 from app.backend.routers.movement_types import movement_types
 from app.backend.routers.settings import settings
 from app.backend.routers.customers import customers
+from app.backend.routers.sales import sales
 
 app = FastAPI(root_path="/api")
 application = app
 
-# FILES_DIR = "C:/Users/jesus/berger_seidle_backend/files"
+#FILES_DIR = "C:/Users/jesus/OneDrive/Escritorio/backend-lacasadelvitrificado/files"
 
 # Montar como directorio estático
-# app.mount("/files", StaticFiles(directory=FILES_DIR), name="files")
+#app.mount("/files", StaticFiles(directory=FILES_DIR), name="files")
 
 os.environ['SECRET_KEY'] = '7de4c36b48fce8dcb3a4bb527ba62d789ebf3d3a7582472ee49d430b01a7f868'
 os.environ['ALGORITHM'] = 'HS256'
@@ -55,6 +56,7 @@ app.include_router(inventories)
 app.include_router(movement_types)
 app.include_router(settings)
 app.include_router(customers)
+app.include_router(sales)
 
 if __name__ == "__main__":
     uvicorn.run("main:app", port=8000, reload=True)

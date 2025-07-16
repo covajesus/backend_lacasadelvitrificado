@@ -51,9 +51,8 @@ def logout(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depen
     }
 
 @authentications.post("/shopping_login")
-def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
-    user = AuthenticationClass(db).authenticate_user(form_data.username, form_data.password)
-    print(user)
+def shopping_login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
+    user = AuthenticationClass(db).authenticate_shopping_login(form_data.username)
     rol = RolClass(db).get('id', user["user_data"]["rol_id"])
     token_expires = timedelta(minutes=120)
     token = AuthenticationClass(db).create_token({'sub': str(user["user_data"]["rut"])}, token_expires)

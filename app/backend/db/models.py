@@ -15,12 +15,13 @@ class SettingModel(Base):
 
     id = Column(Integer, primary_key=True)
     tax_value = Column(String(255))
-    identificacion_number = Column(String(255))
+    identification_number = Column(String(255))
     account_type = Column(String(255))
     account_number = Column(String(255))
     account_name = Column(String(255))
     bank = Column(String(255))
     delivery_cost = Column(Integer)
+    simplefactura_token = Column(Text())
 
 class SupplierModel(Base):
     __tablename__ = 'suppliers'
@@ -39,6 +40,34 @@ class UnitMeasureModel(Base):
     unit_measure = Column(String(255))
     added_date = Column(DateTime())
     updated_date = Column(DateTime())
+
+class SaleModel(Base):
+    __tablename__ = 'sales'
+
+    id = Column(Integer, primary_key=True)
+    customer_id = Column(Integer)
+    shipping_method_id = Column(Integer)
+    dte_type_id = Column(Integer)
+    status_id = Column(Integer)
+    subtotal = Column(Float)
+    tax = Column(Float)
+    total = Column(Float)
+    payment_support = Column(Text())
+    delivery_address = Column(Text())
+    added_date = Column(DateTime(), default=datetime.now)
+    updated_date = Column(DateTime(), default=datetime.now)
+
+class SaleProductModel(Base):
+    __tablename__ = 'sales_products'
+
+    id = Column(Integer, primary_key=True)
+    sale_id = Column(Integer)
+    product_id = Column(Integer)
+    inventory_movement_id = Column(Integer)
+    inventory_id = Column(Integer)
+    lot_item_id = Column(Integer)
+    quantity = Column(Integer)
+    price = Column(Integer)
 
 class CustomerModel(Base):
     __tablename__ = 'customers'
@@ -148,6 +177,7 @@ class CommuneModel(Base):
     __tablename__ = 'communes'
 
     id = Column(Integer, primary_key=True)
+    region_id = Column(Integer)
     commune = Column(String(255))
     added_date = Column(DateTime())
     updated_date = Column(DateTime())

@@ -318,7 +318,7 @@ class InventoryClass:
         except Exception as e:
             self.db.rollback()
             return {"status": "error", "message": str(e)}
-        
+
     def store(self, inventory_inputs):
         try:
             existence_status = (

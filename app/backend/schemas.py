@@ -70,6 +70,11 @@ class StoreLocation(BaseModel):
 class ProductList(BaseModel):
     page: int
 
+class SaleList(BaseModel):
+    page: int
+    rol_id: int
+    rut: str
+
 class UnitMeasureList(BaseModel):
     page: int
 
@@ -119,6 +124,50 @@ class RemoveAdjustmentInput(BaseModel):
     unit_cost: int
     minimum_stock: int
     maximum_stock: int
+
+class CartItem(BaseModel):
+    id: int
+    quantity: int
+    lot_numbers: Optional[str] = ""
+    public_sale_price: Optional[int] = 0
+    private_sale_price: Optional[int] = 0
+
+class StoreSale(BaseModel):
+    rol_id: int
+    customer_rut: str
+    document_type_id: int
+    delivery_address: Optional[str]
+    subtotal: float
+    tax: float
+    total: float
+    cart: List[CartItem]
+    shipping_method_id: int
+
+    @classmethod
+    def as_form(
+        cls,
+        rol_id: int = Form(...),
+        customer_rut: str = Form(...),
+        document_type_id: int = Form(...),
+        delivery_address: Optional[str] = Form(None),
+        subtotal: float = Form(...),
+        tax: float = Form(...),
+        total: float = Form(...),
+        cart: str = Form(...),
+        shipping_method_id: int = Form(...)
+    ):
+        import json
+        return cls(
+            rol_id=rol_id,
+            customer_rut=customer_rut,
+            document_type_id=document_type_id,
+            delivery_address=delivery_address,
+            subtotal=subtotal,
+            tax=tax,
+            total=total,
+            cart=json.loads(cart),
+            shipping_method_id=shipping_method_id
+        )
 
 class StoreProduct(BaseModel):
     supplier_id: int

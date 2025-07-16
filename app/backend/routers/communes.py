@@ -11,7 +11,7 @@ communes = APIRouter(
 )
 
 @communes.get("/no_paginations/{region_id}")
-def no_paginations(region_id: int, session_user: UserLogin = Depends(get_current_active_user), db: Session = Depends(get_db)):
+def no_paginations(region_id: int, db: Session = Depends(get_db)):
     data = CommuneClass(db).get_all_no_paginations(region_id)
 
     return {"message": data}
