@@ -2,9 +2,9 @@ from sqlalchemy import create_engine
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 
-#SQLALCHEMY_DATABASE_URI = "mysql+pymysql://root:@localhost:3306/berger"
+SQLALCHEMY_DATABASE_URI = "mysql+pymysql://root:@localhost:3306/berger"
 
-SQLALCHEMY_DATABASE_URI = "mysql+pymysql://admin:Admin2020!@31.97.250.169:3306/lacasadelvitrificado"
+#SQLALCHEMY_DATABASE_URI = "mysql+pymysql://admin:Admin2020!@31.97.250.169:3306/lacasadelvitrificado"
 
 engine = create_engine(SQLALCHEMY_DATABASE_URI, pool_size=20, max_overflow=0, echo=False)
 

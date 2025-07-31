@@ -1,4 +1,4 @@
-from app.backend.db.models import ProductModel, LiterFeatureModel, SupplierModel, CategoryModel, LotModel, LotItemModel, KilogramFeatureModel, UnitMeasureModel
+from app.backend.db.models import ProductModel, SupplierModel, UnitFeatureModel, CategoryModel, LotModel, LotItemModel, UnitMeasureModel
 from app.backend.classes.file_class import FileClass
 from datetime import datetime
 from sqlalchemy import func
@@ -135,6 +135,8 @@ class ProductClass:
                 category_id=product_inputs.category_id,
                 unit_measure_id=product_inputs.unit_measure_id,
                 code=product_inputs.code,
+                discount_percentage=product_inputs.discount_percentage,
+                final_unit_cost=product_inputs.final_unit_cost,
                 original_unit_cost=product_inputs.original_unit_cost,
                 product=product_inputs.product,
                 short_description=product_inputs.short_description,
@@ -149,8 +151,7 @@ class ProductClass:
             self.db.commit()
             self.db.refresh(new_product)
 
-            if product_inputs.unit_measure_id == 1:
-                new_kilogram_feature = KilogramFeatureModel(
+            new_unit_feature = UnitFeatureModel(
                     product_id=new_product.id,
                     quantity_per_package=product_inputs.quantity_per_package,
                     quantity_per_pallet=product_inputs.quantity_per_pallet,
@@ -159,23 +160,9 @@ class ProductClass:
                     added_date=datetime.utcnow()
                 )
 
-                self.db.add(new_kilogram_feature)
-                self.db.commit()
-                self.db.refresh(new_kilogram_feature)
-
-            if product_inputs.unit_measure_id == 2:
-                new_liter_feature = LiterFeatureModel(
-                    product_id=new_product.id,
-                    quantity_per_package=product_inputs.quantity_per_package,
-                    quantity_per_pallet=product_inputs.quantity_per_pallet,
-                    weight_per_liter=product_inputs.weight_per_liter,
-                    weight_per_pallet=product_inputs.weight_per_pallet,
-                    added_date=datetime.utcnow()
-                )
-
-                self.db.add(new_liter_feature)
-                self.db.commit()
-                self.db.refresh(new_liter_feature)
+            self.db.add(new_unit_feature)
+            self.db.commit()
+            self.db.refresh(new_unit_feature)
 
             return {
                 "status": "Producto registrado exitosamente.",
@@ -186,6 +173,107 @@ class ProductClass:
             self.db.rollback()
             return {"status": "error", "message": str(e)}
 
+    def sale_list_by_category(self, category_id):
+        try:
+
+            if category_id == 0 or category_id is None:
+                data = (
+                    self.db.query(
+                        ProductModel.id, 
+                        ProductModel.code,
+                        ProductModel.product,
+                        UnitMeasureModel.unit_measure,
+                        SupplierModel.supplier,
+                        CategoryModel.category,
+                        ProductModel.category_id,
+                        ProductModel.photo,
+                        ProductModel.catalog,
+                        ProductModel.short_description,
+                        ProductModel.description,
+                        func.max(LotItemModel.public_sale_price).label("public_sale_price"),
+                        func.max(LotItemModel.private_sale_price).label("private_sale_price"),
+                        func.sum(LotItemModel.quantity).label("total_stock"),
+                        func.group_concat(LotModel.lot_number.op('ORDER BY')(LotModel.lot_number)).label("lot_numbers")
+                    )
+                    .join(UnitMeasureModel, UnitMeasureModel.id == ProductModel.unit_measure_id, isouter=True)
+                    .join(SupplierModel, SupplierModel.id == ProductModel.supplier_id, isouter=True)
+                    .join(CategoryModel, CategoryModel.id == ProductModel.category_id, isouter=True)
+                    .join(LotItemModel, LotItemModel.product_id == ProductModel.id)
+                    .join(LotModel, LotModel.id == LotItemModel.lot_id)
+                    .group_by(
+                        ProductModel.id,
+                        ProductModel.code,
+                        ProductModel.product,
+                        UnitMeasureModel.unit_measure,
+                        SupplierModel.supplier,
+                        CategoryModel.category,
+                        ProductModel.category_id,
+                        ProductModel.photo,
+                        ProductModel.catalog,
+                        ProductModel.short_description,
+                        ProductModel.description
+                    )
+                    .order_by(ProductModel.id)
+                )
+            else:
+                data = (
+                    self.db.query(
+                        ProductModel.id, 
+                        ProductModel.code,
+                        ProductModel.product,
+                        UnitMeasureModel.unit_measure,
+                        SupplierModel.supplier,
+                        CategoryModel.category,
+                        ProductModel.category_id,
+                        ProductModel.photo,
+                        ProductModel.catalog,
+                        ProductModel.short_description,
+                        ProductModel.description,
+                        ProductModel.discount_percentage,
+                        ProductModel.final_unit_cost
+                    )
+                    .join(UnitMeasureModel, UnitMeasureModel.id == ProductModel.unit_measure_id, isouter=True)
+                    .join(SupplierModel, SupplierModel.id == ProductModel.supplier_id, isouter=True)
+                    .join(CategoryModel, CategoryModel.id == ProductModel.category_id, isouter=True)
+                    .filter(ProductModel.category_id == category_id)
+                    .group_by(
+                        ProductModel.id,
+                        ProductModel.code,
+                        ProductModel.product,
+                        UnitMeasureModel.unit_measure,
+                        SupplierModel.supplier,
+                        CategoryModel.category,
+                        ProductModel.category_id,
+                        ProductModel.photo,
+                        ProductModel.catalog,
+                        ProductModel.short_description,
+                        ProductModel.description
+                    )
+                    .order_by(ProductModel.id)
+                )
+
+            serialized_data = [{
+                    "id": product.id,
+                    "code": product.code,
+                    "product": product.product,
+                    "unit_measure": product.unit_measure,
+                    "supplier": product.supplier,
+                    "category": product.category,
+                    "category_id": product.category_id,
+                    "photo": product.photo,
+                    "catalog": product.catalog,
+                    "short_description": product.short_description,
+                    "description": product.description,
+                } for product in data]
+
+            return {
+                "data": serialized_data
+            }
+
+        except Exception as e:
+            error_message = str(e)
+            return {"status": "error", "message": error_message}
+        
     def sale_list(self, category_id):
         try:
 
@@ -358,10 +446,9 @@ class ProductClass:
                 "features": None
             }
 
-            # Buscar características según unit_measure_id
-            if data_query.unit_measure_id == 1:  # Kilogramos
-                features = self.db.query(KilogramFeatureModel).filter(
-                    KilogramFeatureModel.product_id == id
+            if data_query.unit_measure_id == 1 or data_query.unit_measure_id == 2 or data_query.unit_measure_id == 3:
+                features = self.db.query(UnitFeatureModel).filter(
+                    UnitFeatureModel.product_id == id
                 ).first()
                 if features:
                     product_data["features"] = {
@@ -374,21 +461,6 @@ class ProductClass:
                         "updated_date": features.updated_date,
                     }
 
-            elif data_query.unit_measure_id == 2:  # Litros
-                features = self.db.query(LiterFeatureModel).filter(
-                    LiterFeatureModel.product_id == id
-                ).first()
-                if features:
-                    product_data["features"] = {
-                        "product_id": features.product_id,
-                        "quantity_per_package": features.quantity_per_package,
-                        "quantity_per_pallet": features.quantity_per_pallet,
-                        "weight_per_liter": features.weight_per_liter,
-                        "weight_per_pallet": features.weight_per_pallet,
-                        "added_date": features.added_date,
-                        "updated_date": features.updated_date,
-                    }
-
             return {"product_data": product_data}
 
         except Exception as e:
@@ -396,7 +468,6 @@ class ProductClass:
         
     def get(self, id):
         try:
-            # Consulta del producto
             data_query = self.db.query(
                 ProductModel.id,
                 ProductModel.supplier_id,
@@ -404,6 +475,8 @@ class ProductClass:
                 ProductModel.code,
                 ProductModel.product,
                 ProductModel.original_unit_cost,
+                ProductModel.discount_percentage,
+                ProductModel.final_unit_cost,
                 ProductModel.short_description,
                 ProductModel.description,
                 ProductModel.unit_measure_id,
@@ -421,6 +494,8 @@ class ProductClass:
                 "category_id": data_query.category_id,
                 "code": data_query.code,
                 "original_unit_cost": data_query.original_unit_cost,
+                "final_unit_cost": data_query.final_unit_cost,
+                "discount_percentage": data_query.discount_percentage,
                 "product": data_query.product,
                 "short_description": data_query.short_description,
                 "description": data_query.description,
@@ -430,10 +505,9 @@ class ProductClass:
                 "features": None
             }
 
-            # Buscar características según unit_measure_id
-            if data_query.unit_measure_id == 1:  # Kilogramos
-                features = self.db.query(KilogramFeatureModel).filter(
-                    KilogramFeatureModel.product_id == id
+            if data_query.unit_measure_id == 1 or data_query.unit_measure_id == 2 or data_query.unit_measure_id == 3:
+                features = self.db.query(UnitFeatureModel).filter(
+                    UnitFeatureModel.product_id == id
                 ).first()
                 if features:
                     product_data["features"] = {
@@ -441,21 +515,6 @@ class ProductClass:
                         "quantity_per_package": features.quantity_per_package,
                         "quantity_per_pallet": features.quantity_per_pallet,
                         "weight_per_unit": features.weight_per_unit,
-                        "weight_per_pallet": features.weight_per_pallet,
-                        "added_date": features.added_date,
-                        "updated_date": features.updated_date,
-                    }
-
-            elif data_query.unit_measure_id == 2:  # Litros
-                features = self.db.query(LiterFeatureModel).filter(
-                    LiterFeatureModel.product_id == id
-                ).first()
-                if features:
-                    product_data["features"] = {
-                        "product_id": features.product_id,
-                        "quantity_per_package": features.quantity_per_package,
-                        "quantity_per_pallet": features.quantity_per_pallet,
-                        "weight_per_liter": features.weight_per_liter,
                         "weight_per_pallet": features.weight_per_pallet,
                         "added_date": features.added_date,
                         "updated_date": features.updated_date,
@@ -494,7 +553,6 @@ class ProductClass:
             return {"status": "error", "message": "No data found"}
 
         try:
-            # Actualización campos base del producto
             existing_product.supplier_id = form_data.supplier_id
             existing_product.category_id = form_data.category_id
             existing_product.code = form_data.code
@@ -503,13 +561,11 @@ class ProductClass:
             existing_product.description = form_data.description
             existing_product.unit_measure_id = form_data.unit_measure_id
 
-            # Actualizar foto
             if photo_remote_path:
                 if existing_product.photo:
                     FileClass(self.db).delete(existing_product.photo)
                 existing_product.photo = photo_remote_path
 
-            # Actualizar catálogo
             if catalog_remote_path:
                 if existing_product.catalog:
                     FileClass(self.db).delete(existing_product.catalog)
@@ -517,53 +573,24 @@ class ProductClass:
 
             existing_product.updated_date = datetime.utcnow()
 
-            # === Features update ===
-            if form_data.unit_measure_id == 1:  # Kilogramos
-                # Eliminar LiterFeature si existe
-                liter_feature = self.db.query(LiterFeatureModel).filter_by(product_id=id).first()
-                if liter_feature:
-                    self.db.delete(liter_feature)
+            if form_data.unit_measure_id == 1 or form_data.unit_measure_id == 2 or form_data.unit_measure_id == 3:
+                unit_feature = self.db.query(UnitFeatureModel).filter_by(product_id=id).first()
+                if unit_feature:
+                    self.db.delete(unit_feature)
 
-                # Insertar o actualizar KilogramFeature
-                kilo_feature = self.db.query(KilogramFeatureModel).filter_by(product_id=id).first()
-                if kilo_feature:
-                    kilo_feature.quantity_per_package = form_data.quantity_per_package
-                    kilo_feature.quantity_per_pallet = form_data.quantity_per_pallet
-                    kilo_feature.weight_per_unit = form_data.weight_per_unit
-                    kilo_feature.weight_per_pallet = form_data.weight_per_pallet
-                    kilo_feature.updated_date = datetime.utcnow()
+                unit_feature = self.db.query(UnitFeatureModel).filter_by(product_id=id).first()
+                if unit_feature:
+                    unit_feature.quantity_per_package = form_data.quantity_per_package
+                    unit_feature.quantity_per_pallet = form_data.quantity_per_pallet
+                    unit_feature.weight_per_unit = form_data.weight_per_unit
+                    unit_feature.weight_per_pallet = form_data.weight_per_pallet
+                    unit_feature.updated_date = datetime.utcnow()
                 else:
-                    new_feature = KilogramFeatureModel(
+                    new_feature = UnitFeatureModel(
                         product_id=id,
                         quantity_per_package=form_data.quantity_per_package,
                         quantity_per_pallet=form_data.quantity_per_pallet,
                         weight_per_unit=form_data.weight_per_unit,
-                        weight_per_pallet=form_data.weight_per_pallet,
-                        added_date=datetime.utcnow(),
-                        updated_date=datetime.utcnow()
-                    )
-                    self.db.add(new_feature)
-
-            elif form_data.unit_measure_id == 2:  # Litros
-                # Eliminar KilogramFeature si existe
-                kilo_feature = self.db.query(KilogramFeatureModel).filter_by(product_id=id).first()
-                if kilo_feature:
-                    self.db.delete(kilo_feature)
-
-                # Insertar o actualizar LiterFeature
-                liter_feature = self.db.query(LiterFeatureModel).filter_by(product_id=id).first()
-                if liter_feature:
-                    liter_feature.quantity_per_package = form_data.quantity_per_package
-                    liter_feature.quantity_per_pallet = form_data.quantity_per_pallet
-                    liter_feature.weight_per_liter = form_data.weight_per_liter
-                    liter_feature.weight_per_pallet = form_data.weight_per_pallet
-                    liter_feature.updated_date = datetime.utcnow()
-                else:
-                    new_feature = LiterFeatureModel(
-                        product_id=id,
-                        quantity_per_package=form_data.quantity_per_package,
-                        quantity_per_pallet=form_data.quantity_per_pallet,
-                        weight_per_liter=form_data.weight_per_liter,
                         weight_per_pallet=form_data.weight_per_pallet,
                         added_date=datetime.utcnow(),
                         updated_date=datetime.utcnow()

@@ -19,9 +19,66 @@ class SettingModel(Base):
     account_type = Column(String(255))
     account_number = Column(String(255))
     account_name = Column(String(255))
+    account_email = Column(String(255))
     bank = Column(String(255))
     delivery_cost = Column(Integer)
     simplefactura_token = Column(Text())
+    shop_address = Column(String(255))
+    updated_date = Column(DateTime())
+
+class ShoppingModel(Base):
+    __tablename__ = 'shoppings'
+
+    id = Column(Integer, primary_key=True)
+    supplier_id = Column(Integer)
+    status_id = Column(Integer)
+    email = Column(String(255))
+    total = Column(Numeric(10, 2)) 
+    maritime_freight = Column(Numeric(10, 2))
+    merchandise_insurance = Column(Numeric(10, 2))
+    manifest_opening = Column(Numeric(10, 2))
+    deconsolidation = Column(Numeric(10, 2))
+    land_freight = Column(Numeric(10, 2))
+    port_charges = Column(Numeric(10, 2))
+    honoraries = Column(Numeric(10, 2))
+    physical_assessment_expenses = Column(Numeric(10, 2))
+    administrative_expenses = Column(Numeric(10, 2))
+    dollar_value = Column(Numeric(10, 2))
+    folder_processing = Column(Numeric(10, 2))
+    valija_expenses = Column(Numeric(10, 2))
+    customs_company_support = Column(Text())
+    wire_transfer_amount = Column(Numeric(10, 2))
+    wire_transfer_date = Column(Date)
+    commission = Column(Numeric(10, 2))
+    exchange_rate = Column(Integer)
+    extra_expenses = Column(Numeric(10, 2))
+    payment_support = Column(Text())
+    added_date = Column(DateTime())
+    updated_date = Column(DateTime())
+
+    # Nuevos campos agregados sin modificar los anteriores
+    prepaid_status_id = Column(Integer)
+    wire_transfer_amount = Column(Numeric(10, 2))
+    wire_transfer_date = Column(Date)
+    commission = Column(Numeric(10, 2))
+    exchange_rate = Column(Integer)
+    payment_support = Column(String(255))
+
+class ShoppingProductModel(Base):
+    __tablename__ = 'shoppings_products'
+
+    id = Column(Integer, primary_key=True)
+    shopping_id = Column(Integer)
+    product_id = Column(Integer)
+    unit_measure_id = Column(Integer)
+    quantity = Column(Integer)
+    quantity_per_package = Column(Numeric(10, 2))
+    original_unit_cost = Column(Numeric(10, 2))
+    discount_percentage = Column(Integer)
+    final_unit_cost = Column(Numeric(10, 2))
+    amount = Column(Numeric(10, 2))
+    added_date = Column(DateTime())
+    updated_date = Column(DateTime())
 
 class SupplierModel(Base):
     __tablename__ = 'suppliers'
@@ -114,8 +171,19 @@ class LiterFeatureModel(Base):
     added_date = Column(DateTime())
     updated_date = Column(DateTime())
 
-class KilogramFeatureModel(Base):
-    __tablename__ = 'kilogram_features'
+class PreInventoryStockModel(Base):
+    __tablename__ = 'pre_inventory_stocks'
+
+    id = Column(Integer, primary_key=True)
+    product_id = Column(Integer)
+    shopping_id = Column(Integer)
+    lot_number = Column(Integer)
+    stock = Column(Integer)
+    added_date = Column(DateTime())
+    updated_date = Column(DateTime())
+
+class UnitFeatureModel(Base):
+    __tablename__ = 'unit_features'
 
     id = Column(Integer, primary_key=True)
     product_id = Column(Integer)
@@ -144,7 +212,9 @@ class ProductModel(Base):
     unit_measure_id = Column(Integer)
     code = Column(String(255))
     product = Column(String(255))
-    original_unit_cost = Column(Integer)
+    original_unit_cost = Column(Text())
+    discount_percentage = Column(Text())
+    final_unit_cost = Column(Text())
     short_description = Column(Text())
     description = Column(Text())
     photo = Column(Text())

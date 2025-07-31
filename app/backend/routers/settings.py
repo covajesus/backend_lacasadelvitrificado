@@ -12,7 +12,7 @@ settings = APIRouter(
 
 @settings.post("/update/{id}")
 def update(id: int, setting_inputs: UpdateSettings, session_user: UserLogin = Depends(get_current_active_user), db: Session = Depends(get_db)):
-    data = SettingClass(db).store(setting_inputs)
+    data = SettingClass(db).update(id, setting_inputs)
 
     return {"message": data}
 

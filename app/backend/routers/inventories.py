@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends
 from app.backend.db.database import get_db
 from sqlalchemy.orm import Session
-from app.backend.schemas import UserLogin, StoreInventory, InventoryList, AddAdjustmentInput, RemoveAdjustmentInput
+from app.backend.schemas import UserLogin, StoreInventory, InventoryList, AddAdjustmentInput, RemoveAdjustmentInput, PreInventoryStocks
 from app.backend.classes.inventory_class import InventoryClass
 from app.backend.auth.auth_user import get_current_active_user
 
@@ -21,6 +21,16 @@ def store(inventory_inputs: StoreInventory, session_user: UserLogin = Depends(ge
     data = InventoryClass(db).store(inventory_inputs)
 
     return {"message": data}
+
+@inventories.post("/pre_save_inventory_quantities/{shopping_id}")
+def pre_save_inventory_quantities(
+    shopping_id: int,
+    data: PreInventoryStocks,
+    db: Session = Depends(get_db)
+):
+    InventoryClass(db).pre_save_inventory_quantities(shopping_id, data)
+
+    return {"message": "Cantidades de inventario actualizadas correctamente"}
 
 @inventories.delete("/delete/{id}")
 def delete(id: int, session_user: UserLogin = Depends(get_current_active_user), db: Session = Depends(get_db)):
