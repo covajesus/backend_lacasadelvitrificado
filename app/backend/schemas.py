@@ -175,12 +175,13 @@ class StoreProduct(BaseModel):
     unit_measure_id: int
     code: str
     product: str
-    original_unit_cost: int
+    original_unit_cost: str
+    discount_percentage: str
+    final_unit_cost: str
     short_description: str
     description: str
     quantity_per_package: Union[str, None]
     quantity_per_pallet: Union[str, None]
-    weight_per_liter: Union[str, None]
     weight_per_pallet: Union[str, None]
     weight_per_unit: Union[str, None]
 
@@ -191,11 +192,12 @@ class StoreProduct(BaseModel):
                     unit_measure_id: int = Form(...),
                     code: str = Form(...),
                     product: str = Form(...),
-                    original_unit_cost: int = Form(...),
+                    original_unit_cost: str = Form(...),
+                    discount_percentage: str = Form(...),
+                    final_unit_cost: str = Form(...),
                     description: str = Form(...),
                     quantity_per_package: Optional[str] = Form(None),
                     quantity_per_pallet: Optional[str] = Form(None),
-                    weight_per_liter: Optional[str] = Form(None),
                     weight_per_pallet: Optional[str] = Form(None),
                     weight_per_unit: Optional[str] = Form(None),
                     short_description: str = Form(...)
@@ -207,14 +209,115 @@ class StoreProduct(BaseModel):
             code=code,
             product=product,
             original_unit_cost=original_unit_cost,
+            discount_percentage=discount_percentage,
+            final_unit_cost=final_unit_cost,
             description=description,
             quantity_per_package=quantity_per_package,
             quantity_per_pallet=quantity_per_pallet,
-            weight_per_liter=weight_per_liter,
             weight_per_pallet=weight_per_pallet,
             weight_per_unit=weight_per_unit,
             short_description=short_description
         )
+    
+class ShoppingProductInput(BaseModel):
+    category_id: int
+    product_id: int
+    quantity: int
+    quantity_per_package: float
+    discount_percentage: int
+    original_unit_cost: float
+    final_unit_cost: float
+    amount: float
+    unit_measure_id: int
+
+class ShoppingList(BaseModel):
+    page: int
+
+class SendCustomsCompanyInput(BaseModel):
+    customs_company_email: str
+
+class StoreCustomsCompanyDocuments(BaseModel):
+    maritime_freight: str
+    merchandise_insurance: str
+    manifest_opening: str
+    deconsolidation: str
+    land_freight: str
+    port_charges: str
+    honoraries: str
+    physical_assessment_expenses: str
+    administrative_expenses: str
+    dollar_value: str
+    folder_processing: str
+    valija_expenses: str
+
+    @classmethod
+    def as_form(cls,
+                    maritime_freight: str = Form(...),
+                    merchandise_insurance: str = Form(...),
+                    manifest_opening: str = Form(...),
+                    deconsolidation: str = Form(...),
+                    land_freight: str = Form(...),
+                    port_charges: str = Form(...),
+                    honoraries: str = Form(...),
+                    physical_assessment_expenses: str = Form(...),
+                    administrative_expenses: str = Form(...),
+                    dollar_value: str = Form(...),
+                    folder_processing: str = Form(...),
+                    valija_expenses: str = Form(...)
+                ):
+        return cls(
+            maritime_freight=maritime_freight,
+            merchandise_insurance=merchandise_insurance,
+            manifest_opening=manifest_opening,
+            deconsolidation=deconsolidation,
+            land_freight=land_freight,
+            port_charges=port_charges,
+            honoraries=honoraries,
+            physical_assessment_expenses=physical_assessment_expenses,
+            administrative_expenses=administrative_expenses,
+            dollar_value=dollar_value,
+            folder_processing=folder_processing,
+            valija_expenses=valija_expenses
+        )
+
+class PreInventoryItems(BaseModel):
+    product_id: int = Field(..., description="ID del producto")
+    stock: int = Field(..., ge=0, description="Cantidad real que ingresa al inventario")
+
+class PreInventoryStocks(BaseModel):
+    items: List[PreInventoryItems]
+
+class StorePaymentDocuments(BaseModel):
+    wire_transfer_amount: str
+    wire_transfer_date: str
+    commission: str
+    exchange_rate: str
+    extra_expenses: Optional[str] = None
+
+    @classmethod
+    def as_form(cls,
+                    wire_transfer_amount: str = Form(...),
+                    wire_transfer_date: str = Form(...),
+                    commission: str = Form(...),
+                    exchange_rate: str = Form(...),
+                    extra_expenses: Optional[str] = Form(None)
+                ):
+        return cls(
+            wire_transfer_amount=wire_transfer_amount,
+            wire_transfer_date=wire_transfer_date,
+            commission=commission,
+            exchange_rate=exchange_rate,
+            extra_expenses=extra_expenses
+        )
+    
+class ShoppingCreateInput(BaseModel):
+    products: List[ShoppingProductInput]
+    total: float
+    email: str
+    prepaid_status_id: Optional[int] = None
+    second_email: Optional[str] = None
+    third_email: Optional[str] = None
+    supplier_id: int
     
 class SupplierList(BaseModel):
     page: int
@@ -233,10 +336,12 @@ class StoreInventory(BaseModel):
     arrival_date: date
 
 class UpdateSettings(BaseModel):
-    tax_value: str
-    identificacion_number: str
+    tax_value: int
+    identification_number: str
     account_type: str
     account_number: str
     account_name: str
+    account_email: str
     bank: str
     delivery_cost: int
+    shop_address: str

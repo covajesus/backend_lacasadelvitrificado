@@ -1,4 +1,4 @@
-from app.backend.db.models import InventoryModel, ProductModel, LotModel, LotItemModel, InventoryLotItemModel, InventoryMovementModel, InventoryAuditModel
+from app.backend.db.models import InventoryModel, ProductModel, LotModel, LotItemModel, PreInventoryStockModel, InventoryLotItemModel, InventoryMovementModel, InventoryAuditModel
 from datetime import datetime
 from sqlalchemy import func
 
@@ -319,6 +319,21 @@ class InventoryClass:
             self.db.rollback()
             return {"status": "error", "message": str(e)}
 
+    def pre_save_inventory_quantities(self, shopping_id: int, data):
+        try:
+            for item in data.items:
+                new_pre_inventory_stock = PreInventoryStockModel(
+                    product_id=item.product_id,
+                    shopping_id=shopping_id,
+                    stock=item.stock
+                )
+                self.db.add(new_pre_inventory_stock)
+                self.db.commit()
+ 
+        except Exception as e:
+            self.db.rollback()
+            return {"status": "error", "message": str(e)}
+        
     def store(self, inventory_inputs):
         try:
             existence_status = (
