@@ -184,6 +184,8 @@ class StoreProduct(BaseModel):
     quantity_per_pallet: Union[str, None]
     weight_per_pallet: Union[str, None]
     weight_per_unit: Union[str, None]
+    is_compound: int
+    compound_product_id: Union[int, None]
 
     @classmethod
     def as_form(cls,
@@ -200,7 +202,9 @@ class StoreProduct(BaseModel):
                     quantity_per_pallet: Optional[str] = Form(None),
                     weight_per_pallet: Optional[str] = Form(None),
                     weight_per_unit: Optional[str] = Form(None),
-                    short_description: str = Form(...)
+                    short_description: str = Form(...),
+                    is_compound: int = Form(...),
+                    compound_product_id: Union[int, None] = Form(None)
                 ):
         return cls(
             supplier_id=supplier_id,
@@ -216,7 +220,9 @@ class StoreProduct(BaseModel):
             quantity_per_pallet=quantity_per_pallet,
             weight_per_pallet=weight_per_pallet,
             weight_per_unit=weight_per_unit,
-            short_description=short_description
+            short_description=short_description,
+            is_compound=is_compound,
+            compound_product_id=compound_product_id
         )
     
 class ShoppingProductInput(BaseModel):

@@ -219,6 +219,8 @@ class ProductModel(Base):
     description = Column(Text())
     photo = Column(Text())
     catalog = Column(Text())
+    is_compound = Column(Integer)
+    compound_product_id = Column(Integer)
     added_date = Column(DateTime())
     updated_date = Column(DateTime())
 
