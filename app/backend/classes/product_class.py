@@ -141,6 +141,8 @@ class ProductClass:
                 product=product_inputs.product,
                 short_description=product_inputs.short_description,
                 description=product_inputs.description,
+                is_compound=product_inputs.is_compound,
+                compound_product_id=product_inputs.compound_product_id,
                 photo=photo,
                 catalog=catalog,
                 added_date=datetime.utcnow(),
@@ -480,6 +482,8 @@ class ProductClass:
                 ProductModel.short_description,
                 ProductModel.description,
                 ProductModel.unit_measure_id,
+                ProductModel.is_compound,
+                ProductModel.compound_product_id,
                 ProductModel.photo,
                 ProductModel.catalog
             ).filter(ProductModel.id == id).first()
@@ -500,6 +504,8 @@ class ProductClass:
                 "short_description": data_query.short_description,
                 "description": data_query.description,
                 "unit_measure_id": data_query.unit_measure_id,
+                "is_compound": data_query.is_compound,
+                "compound_product_id": data_query.compound_product_id,
                 "photo": data_query.photo,
                 "catalog": data_query.catalog,
                 "features": None
@@ -559,7 +565,12 @@ class ProductClass:
             existing_product.product = form_data.product
             existing_product.short_description = form_data.short_description
             existing_product.description = form_data.description
+            existing_product.discount_percentage = form_data.discount_percentage
+            existing_product.original_unit_cost = form_data.original_unit_cost
+            existing_product.final_unit_cost = form_data.final_unit_cost
             existing_product.unit_measure_id = form_data.unit_measure_id
+            existing_product.is_compound = form_data.is_compound
+            existing_product.compound_product_id = form_data.compound_product_id
 
             if photo_remote_path:
                 if existing_product.photo:

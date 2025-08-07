@@ -69,7 +69,7 @@ def edit(id: int, session_user: UserLogin = Depends(get_current_active_user), db
     return {"message": data}
 
 @products.get("/sale/data/{id}")
-def edit(id: int, session_user: UserLogin = Depends(get_current_active_user), db: Session = Depends(get_db)):
+def sale(id: int, session_user: UserLogin = Depends(get_current_active_user), db: Session = Depends(get_db)):
     data = ProductClass(db).sale_data(id)
 
     return {"message": data}
@@ -83,6 +83,7 @@ def sale_list(category_id: int, session_user: UserLogin = Depends(get_current_ac
 @products.get("/sale_list_by_category/{category_id}")
 def sale_list(category_id: int, session_user: UserLogin = Depends(get_current_active_user), db: Session = Depends(get_db)):
     data = ProductClass(db).sale_list_by_category(category_id)
+    print(2)
 
     return {"message": data}
 
