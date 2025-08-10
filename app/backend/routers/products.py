@@ -94,7 +94,7 @@ def list(session_user: UserLogin = Depends(get_current_active_user), db: Session
     return {"message": data}
 
 @products.post("/update/{id}")
-def store(
+def update(
     id: int,
     form_data: StoreProduct = Depends(StoreProduct.as_form),
     photo: UploadFile = File(None),

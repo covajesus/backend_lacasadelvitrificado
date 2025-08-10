@@ -587,10 +587,6 @@ class ProductClass:
             if form_data.unit_measure_id == 1 or form_data.unit_measure_id == 2 or form_data.unit_measure_id == 3:
                 unit_feature = self.db.query(UnitFeatureModel).filter_by(product_id=id).first()
                 if unit_feature:
-                    self.db.delete(unit_feature)
-
-                unit_feature = self.db.query(UnitFeatureModel).filter_by(product_id=id).first()
-                if unit_feature:
                     unit_feature.quantity_per_package = form_data.quantity_per_package
                     unit_feature.quantity_per_pallet = form_data.quantity_per_pallet
                     unit_feature.weight_per_unit = form_data.weight_per_unit
