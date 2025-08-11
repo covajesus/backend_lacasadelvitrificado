@@ -18,7 +18,7 @@ class ProductClass:
                     ProductModel.product                )
                 .join(SupplierModel, SupplierModel.id == ProductModel.supplier_id, isouter=True)
                 .join(CategoryModel, CategoryModel.id == ProductModel.category_id, isouter=True)
-                .order_by(ProductModel.product.asc())
+                .order_by(ProductModel.product)
             )
 
             if page > 0:
