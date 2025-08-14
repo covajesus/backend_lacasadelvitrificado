@@ -4,25 +4,10 @@ from io import BytesIO
 from app.backend.db.models import SupplierModel, ProductModel, CategoryModel, UnitFeatureModel, ShoppingProductModel
 from datetime import datetime
 import math
-import os
 
 class TemplateClass:
     def __init__(self, db):
         self.db = db
-
-        path_wkhtmltopdf = '/usr/bin/wkhtmltopdf'
-        
-        # Configuración de pdfkit
-        self.config = pdfkit.configuration(wkhtmltopdf=path_wkhtmltopdf)
-
-    def html_to_pdf(self, html_content, output_path):
-        """Convierte HTML a PDF"""
-        try:
-            pdfkit.from_string(html_content, output_path, configuration=self.config)
-            return True
-        except Exception as e:
-            print(f"Error generando PDF: {e}")
-            return False
 
     def generate_shopping_html_for_own_company(self, data: ShoppingCreateInput, id) -> str:
         logo_url = "file:///C:/Users/jesus/OneDrive/Escritorio/backend-lacasadelvitrificado/public/assets/logo.png"
@@ -411,6 +396,21 @@ class TemplateClass:
         """
 
         return html
+
+    def html_to_pdf_bytes(self, html: str) -> bytes:
+        path_wkhtmltopdf = '/usr/bin/wkhtmltopdf'
+        
+        config = pdfkit.configuration(
+            wkhtmltopdf=path_wkhtmltopdf
+        )
+
+        options = {
+            'enable-local-file-access': ''
+        }
+
+        pdf_bytes = pdfkit.from_string(html, False, configuration=config, options=options)
+        return pdf_bytes
+
 
     def spanish_generate_email_content_html(self, data: ShoppingCreateInput) -> str:
         logo_url = "file:///C:/Users/jesus/OneDrive/Escritorio/backend-lacasadelvitrificado/public/assets/logo.png"
