@@ -99,6 +99,9 @@ class TemplateClass:
 
     def html_to_pdf_bytes(self, html: str) -> bytes:
         # Si estamos en Windows, usar la ruta de Windows
+
+        #path_wkhtmltopdf = r"C:\Program Files\wkhtmltopdf\bin\wkhtmltopdf.exe"
+
         path_wkhtmltopdf = '/usr/bin/wkhtmltopdf'
 
         if not os.path.exists(path_wkhtmltopdf):
