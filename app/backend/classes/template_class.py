@@ -10,8 +10,8 @@ class TemplateClass:
         self.db = db
 
     def generate_shopping_html_for_own_company(self, data: ShoppingCreateInput, id) -> str:
-        logo_url = "file:///C:/Users/jesus/OneDrive/Escritorio/backend-lacasadelvitrificado/public/assets/logo.png"
-        vitrificado_logo_url = "file:///C:/Users/jesus/OneDrive/Escritorio/backend-lacasadelvitrificado/public/assets/vitrificado-logo.png"
+        logo_url = "file:/var/www/api.lacasadelvitrificado.com/public/assets/logo.png"
+        vitrificado_logo_url = "file:/var/www/api.lacasadelvitrificado.com/public/assets/vitrificado-logo.png"
         supplier_data = self.db.query(SupplierModel).filter(SupplierModel.id == data.supplier_id).first()
         date = datetime.utcnow().strftime("%Y-%m-%d")
 
@@ -110,8 +110,8 @@ class TemplateClass:
         return html
 
     def generate_shopping_html_for_customs_company(self, data: ShoppingCreateInput, id) -> str:
-        logo_url = "file:///C:/Users/jesus/OneDrive/Escritorio/backend-lacasadelvitrificado/public/assets/logo.png"
-        vitrificado_logo_url = "file:///C:/Users/jesus/OneDrive/Escritorio/backend-lacasadelvitrificado/public/assets/vitrificado-logo.png"
+        logo_url = "file:/var/www/api.lacasadelvitrificado.com/public/assets/logo.png"
+        vitrificado_logo_url = "file:/var/www/api.lacasadelvitrificado.com/public/assets/vitrificado-logo.png"
         date = datetime.utcnow().strftime("%Y-%m-%d")
 
         html = f"""
@@ -304,8 +304,8 @@ class TemplateClass:
         return html
     
     def generate_shopping_html_for_supplier(self, data: ShoppingCreateInput, id) -> str:
-        logo_url = "file:///C:/Users/jesus/OneDrive/Escritorio/backend-lacasadelvitrificado/public/assets/logo.png"
-        vitrificado_logo_url = "file:///C:/Users/jesus/OneDrive/Escritorio/backend-lacasadelvitrificado/public/assets/vitrificado-logo.png"
+        logo_url = "file:/var/www/api.lacasadelvitrificado.com/public/assets/logo.png"
+        vitrificado_logo_url = "file:/var/www/api.lacasadelvitrificado.com/public/assets/vitrificado-logo.png"
         supplier_data = self.db.query(SupplierModel).filter(SupplierModel.id == data.supplier_id).first()
         date = datetime.utcnow().strftime("%Y-%m-%d")
 
@@ -413,8 +413,8 @@ class TemplateClass:
 
 
     def spanish_generate_email_content_html(self, data: ShoppingCreateInput) -> str:
-        logo_url = "file:///C:/Users/jesus/OneDrive/Escritorio/backend-lacasadelvitrificado/public/assets/logo.png"
-        vitrificado_logo_url = "file:///C:/Users/jesus/OneDrive/Escritorio/backend-lacasadelvitrificado/public/assets/vitrificado-logo.png"
+        logo_url = "file:/var/www/api.lacasadelvitrificado.com/public/assets/logo.png"
+        vitrificado_logo_url = "file:/var/www/api.lacasadelvitrificado.com/public/assets/vitrificado-logo.png"
         supplier_data = self.db.query(SupplierModel).filter(SupplierModel.id == data.supplier_id).first()
 
         html = f"""
@@ -461,8 +461,8 @@ class TemplateClass:
         return html
     
     def english_generate_email_content_html(self, data: ShoppingCreateInput) -> str:
-        logo_url = "file:///C:/Users/jesus/OneDrive/Escritorio/backend-lacasadelvitrificado/public/assets/logo.png"
-        vitrificado_logo_url = "file:///C:/Users/jesus/OneDrive/Escritorio/backend-lacasadelvitrificado/public/assets/vitrificado-logo.png"
+        logo_url = "file:/var/www/api.lacasadelvitrificado.com/public/assets/logo.png"
+        vitrificado_logo_url = "file:/var/www/api.lacasadelvitrificado.com/public/assets/vitrificado-logo.png"
         supplier_data = self.db.query(SupplierModel).filter(SupplierModel.id == data.supplier_id).first()
 
         html = f"""
