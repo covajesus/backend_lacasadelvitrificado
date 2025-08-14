@@ -128,14 +128,12 @@ class SaleClass:
             quantity_to_deduct = item.quantity  # Total por descontar
 
             for lot_id in lot_ids:
-                print(2323232323)
                 print(lot_id)
                 lot_id = lot_id.strip()
                 if not lot_id or quantity_to_deduct <= 0:
                     continue
 
                 # Obtener el lote individual por número de lote y producto
-                print(55555555555555888)
                 lot_item, lot = (
                     self.db.query(LotItemModel, LotModel)
                     .join(LotModel, LotModel.id == LotItemModel.lot_id)

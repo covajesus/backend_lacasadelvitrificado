@@ -113,7 +113,7 @@ def send_customs_company_email(id:int, send_customs_company_inputs:SendCustomsCo
     email_html_content = TemplateClass(db).spanish_generate_email_content_html(data)
     pdf_bytes = TemplateClass(db).html_to_pdf_bytes(html_content)
 
-    email_client = EmailClass("informacion@jisparking.com", "VitrificadosChile", "pksh nfit pcwj dfte")
+    email_client = EmailClass("bergerseidle@vitrificadoschile.com", "VitrificadosChile", "uhwy oflr siuu faoo")
 
     result = email_client.send_email(
         receiver_email=send_customs_company_inputs.customs_company_email,
@@ -129,7 +129,7 @@ def send_customs_company_email(id:int, send_customs_company_inputs:SendCustomsCo
 
 @shoppings.post("/store")
 def store_shopping(data: ShoppingCreateInput, db: Session = Depends(get_db)):
-    email_client = EmailClass("informacion@jisparking.com", "VitrificadosChile", "pksh nfit pcwj dfte")
+    email_client = EmailClass("bergerseidle@vitrificadoschile.com", "VitrificadosChile", "uhwy oflr siuu faoo")
 
     # Construir lista de destinatarios
     to_email = data.email
