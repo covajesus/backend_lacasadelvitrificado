@@ -98,17 +98,18 @@ class TemplateClass:
         return html
 
     def html_to_pdf_bytes(self, html: str) -> bytes:
-        # Detectar si es Windows o Linux
-        if os.name == 'nt':  # Windows
-            path_wkhtmltopdf = r"C:\Program Files\wkhtmltopdf\bin\wkhtmltopdf.exe"
-        else:  # Linux
-            path_wkhtmltopdf = '/usr/bin/wkhtmltopdf'
+        # Si estamos en Windows, usar la ruta de Windows
+
+        #path_wkhtmltopdf = r"C:\Program Files\wkhtmltopdf\bin\wkhtmltopdf.exe"
+
+        path_wkhtmltopdf = '/usr/bin/wkhtmltopdf'
+
+        if not os.path.exists(path_wkhtmltopdf):
+            raise FileNotFoundError(
+                f"No se encontró wkhtmltopdf en {path_wkhtmltopdf}. "
+                "Instálalo con: sudo apt install wkhtmltopdf"
+            )
 
         config = pdfkit.configuration(wkhtmltopdf=path_wkhtmltopdf)
-
-        options = {
-            'enable-local-file-access': ''  # Necesario para que las imágenes locales funcionen
-        }
-
-        pdf_bytes = pdfkit.from_string(html, False, configuration=config, options=options)
-        return pdf_bytes
+        options = {'enable-local-file-access': ''}
+        return pdfkit.from_string(html, False, configuration=config, options=options)
