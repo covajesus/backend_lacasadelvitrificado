@@ -1,15 +1,19 @@
-from app.backend.schemas import ShoppingCreateInput
+import os
 import pdfkit
 from io import BytesIO
+from app.backend.schemas import ShoppingCreateInput
 from app.backend.db.models import SupplierModel, ProductModel, CategoryModel
+
 
 class TemplateClass:
     def __init__(self, db):
         self.db = db
 
     def generate_shopping_html(self, data: ShoppingCreateInput) -> str:
-        logo_url = "file:///C:/Users/jesus/OneDrive/Escritorio/backend-lacasadelvitrificado/public/assets/logo.png"
-        vitrificado_logo_url = "file:///C:/Users/jesus/OneDrive/Escritorio/backend-lacasadelvitrificado/public/assets/vitrificado-logo.png"
+        # Rutas locales en el servidor (ajusta según dónde estén tus imágenes)
+        logo_url = "file:///var/www/api.lacasadelvitrificado.com/public/assets/logo.png"
+        vitrificado_logo_url = "file:///var/www/api.lacasadelvitrificado.com/public/assets/vitrificado-logo.png"
+
         supplier_data = self.db.query(SupplierModel).filter(SupplierModel.id == data.supplier_id).first()
 
         html = f"""
@@ -34,13 +38,8 @@ class TemplateClass:
         </head>
         <body>
         <div class="header">
-            <img src="{vitrificado_logo_url}" class="vitrificado_logo float-left" />
-            &ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;
-            &ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;
-            &ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;
-            &ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;
-            &ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;
-            <img src="{logo_url}" class="logo float-right" />
+            <img src="{vitrificado_logo_url}" class="vitrificado_logo" />
+            <img src="{logo_url}" class="logo" />
         </div>
 
         <div class="title">
@@ -99,12 +98,16 @@ class TemplateClass:
         return html
 
     def html_to_pdf_bytes(self, html: str) -> bytes:
-        config = pdfkit.configuration(
-            wkhtmltopdf=r"C:\Program Files\wkhtmltopdf\bin\wkhtmltopdf.exe"
-        )
+        # Detectar si es Windows o Linux
+        if os.name == 'nt':  # Windows
+            path_wkhtmltopdf = r"C:\Program Files\wkhtmltopdf\bin\wkhtmltopdf.exe"
+        else:  # Linux
+            path_wkhtmltopdf = '/usr/bin/wkhtmltopdf'
+
+        config = pdfkit.configuration(wkhtmltopdf=path_wkhtmltopdf)
 
         options = {
-            'enable-local-file-access': ''
+            'enable-local-file-access': ''  # Necesario para que las imágenes locales funcionen
         }
 
         pdf_bytes = pdfkit.from_string(html, False, configuration=config, options=options)
