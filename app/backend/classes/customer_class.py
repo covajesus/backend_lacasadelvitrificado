@@ -5,6 +5,33 @@ class CustomerClass:
     def __init__(self, db):
         self.db = db
 
+    def discounts(self):
+        try:
+            data = (
+                self.db.query(
+                    CustomerProductDiscountModel.id, 
+                    CustomerProductDiscountModel.product_id,
+                    CustomerProductDiscountModel.customer_id,
+                    CustomerProductDiscountModel.discount_percentage
+                )
+                .order_by(CustomerProductDiscountModel.id)
+            )
+
+            serialized_data = [{
+                "id": customer_product_discount.id,
+                "product_id": customer_product_discount.product_id,
+                "customer_id": customer_product_discount.customer_id,
+                "discount_percentage": customer_product_discount.discount_percentage
+            } for customer_product_discount in data]
+
+            return {
+                "data": serialized_data
+            }
+
+        except Exception as e:
+            error_message = str(e)
+            return {"status": "error", "message": error_message}
+
     def get_all(self, page=0, items_per_page=10):
         try:
             query = (
