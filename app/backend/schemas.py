@@ -51,6 +51,7 @@ class StoreCustomer(BaseModel):
     email: str
     region_id: int
     commune_id: int
+    product_discounts: Optional[Dict[int, float]] = {}
 
 class LocationList(BaseModel):
     page: int

@@ -254,6 +254,14 @@ class CommuneModel(Base):
     added_date = Column(DateTime())
     updated_date = Column(DateTime())
 
+class CustomerProductDiscountModel(Base):
+    __tablename__ = 'customers_products_discounts'
+
+    id = Column(Integer, primary_key=True)
+    customer_id = Column(Integer)
+    product_id = Column(Integer)
+    discount_percentage = Column(Integer)
+
 class InventoryModel(Base):
     __tablename__ = 'inventories'  # Cambia el nombre si es otro
 
