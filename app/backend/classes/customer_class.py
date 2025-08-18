@@ -5,8 +5,10 @@ class CustomerClass:
     def __init__(self, db):
         self.db = db
 
-    def discounts(self, id):
+    def discounts(self, rut):
         try:
+            customer_id = self.db.query(CustomerModel.id).filter(CustomerModel.identification_number == rut).first()
+
             data = (
                 self.db.query(
                     CustomerProductDiscountModel.id, 
@@ -14,7 +16,7 @@ class CustomerClass:
                     CustomerProductDiscountModel.customer_id,
                     CustomerProductDiscountModel.discount_percentage
                 )
-                .filter(CustomerProductDiscountModel.customer_id == id)
+                .filter(CustomerProductDiscountModel.customer_id == customer_id)
                 .order_by(CustomerProductDiscountModel.id)
             )
 
