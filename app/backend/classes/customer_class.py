@@ -1,4 +1,4 @@
-from app.backend.db.models import CustomerModel, RegionModel, CommuneModel
+from app.backend.db.models import CustomerModel, RegionModel, CommuneModel, CustomerProductDiscountModel
 from datetime import datetime
 
 class CustomerClass:
@@ -107,6 +107,18 @@ class CustomerClass:
             self.db.add(new_customer)
             self.db.commit()
             self.db.refresh(new_customer)
+
+            if customer_inputs.product_discounts:
+                for product_id, discount_percentage in customer_inputs.product_discounts.items():
+                    if discount_percentage > 0:
+                        discount_record = CustomerProductDiscountModel(
+                            customer_id=new_customer.id,
+                            product_id=int(product_id),
+                            discount_percentage=float(discount_percentage)
+                        )
+                        self.db.add(discount_record)
+                
+                self.db.commit()
 
             return {
                 "status": "Cliente registrado exitosamente.",
