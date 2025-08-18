@@ -113,6 +113,29 @@ class CustomerClass:
 
             self.db.commit()
             self.db.refresh(existing_customer)
+
+            # Manejar actualización de descuentos de productos
+            if hasattr(form_data, 'product_discounts') and form_data.product_discounts:
+                # Eliminar descuentos existentes
+                existing_discounts = self.db.query(CustomerProductDiscountModel).filter(
+                    CustomerProductDiscountModel.customer_id == id
+                ).all()
+                
+                for discount in existing_discounts:
+                    self.db.delete(discount)
+                
+                # Agregar nuevos descuentos
+                for product_id, discount_percentage in form_data.product_discounts.items():
+                    if discount_percentage > 0:
+                        discount_record = CustomerProductDiscountModel(
+                            customer_id=id,
+                            product_id=int(product_id),
+                            discount_percentage=float(discount_percentage)
+                        )
+                        self.db.add(discount_record)
+                
+                self.db.commit()
+
             return "Customer updated successfully"
         except Exception as e:
             self.db.rollback()
