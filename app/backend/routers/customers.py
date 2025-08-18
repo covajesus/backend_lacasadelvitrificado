@@ -17,9 +17,9 @@ def index(customer_inputs: CustomerList, session_user: UserLogin = Depends(get_c
 
     return {"message": data}
 
-@customers.get("/discounts/{id}")
-def discounts(id:int, session_user: UserLogin = Depends(get_current_active_user), db: Session = Depends(get_db)):
-    data = CustomerClass(db).discounts(id)
+@customers.get("/discounts/{rut}")
+def discounts(rut:str, session_user: UserLogin = Depends(get_current_active_user), db: Session = Depends(get_db)):
+    data = CustomerClass(db).discounts(rut)
 
     return {"message": data}
 
