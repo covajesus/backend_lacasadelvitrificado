@@ -41,6 +41,7 @@ class UpdateCustomer(BaseModel):
     email: str
     region_id: int
     commune_id: int
+    product_discounts: Optional[Dict[int, float]] = {}
 
 class StoreCustomer(BaseModel):
     social_reason: str
