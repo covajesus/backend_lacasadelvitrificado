@@ -59,11 +59,6 @@ class ShoppingModel(Base):
 
     # Nuevos campos agregados sin modificar los anteriores
     prepaid_status_id = Column(Integer)
-    wire_transfer_amount = Column(Numeric(10, 2))
-    wire_transfer_date = Column(Date)
-    commission = Column(Numeric(10, 2))
-    exchange_rate = Column(Integer)
-    payment_support = Column(String(255))
 
 class ShoppingProductModel(Base):
     __tablename__ = 'shoppings_products'
