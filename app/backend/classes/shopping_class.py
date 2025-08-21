@@ -1,5 +1,5 @@
 from fastapi import HTTPException
-from app.backend.db.models import ShoppingModel, ShoppingProductModel, SupplierModel, LotModel, ProductModel, UnitMeasureModel, CategoryModel, PreInventoryStockModel
+from app.backend.db.models import ShoppingModel, ShoppingProductModel, SupplierModel, LotModel, ProductModel, UnitMeasureModel, CategoryModel, PreInventoryStockModel, UnitFeatureModel
 from app.backend.schemas import ShoppingCreateInput
 from app.backend.classes.product_class import ProductClass
 from datetime import datetime
@@ -380,9 +380,16 @@ class ShoppingClass:
             
             print("Customs company documents:", form_data)
 
+            # Convertir valores a float para cálculos
+            dollar_value = float(form_data.dollar_value)
+            merchandise_insurance = float(form_data.merchandise_insurance)
+            
+            # Multiplicar seguro internacional por valor del dólar
+            merchandise_insurance_in_pesos = merchandise_insurance * dollar_value
+
             shopping.maritime_freight = form_data.maritime_freight
             shopping.status_id = 4
-            shopping.merchandise_insurance = form_data.merchandise_insurance
+            shopping.merchandise_insurance = merchandise_insurance_in_pesos
             shopping.manifest_opening = form_data.manifest_opening
             shopping.deconsolidation = form_data.deconsolidation
             shopping.land_freight = form_data.land_freight
@@ -529,3 +536,186 @@ class ShoppingClass:
             self.db.rollback()
             print("Error:", e)
             return {"status": "error", "message": str(e)}
+
+    def calculate_unit_cost_for_product(self, shopping_id, product_id, quantity):
+        """
+        Calcula el unit_cost para un producto específico basado en:
+        1. final_unit_cost del producto convertido de euros a pesos
+        2. Costo de envío distribuido proporcionalmente por peso
+        3. Costo final por litro/peso/unidad según la unidad de medida
+        """
+        try:
+            # Obtener los datos del shopping con todos los costos de envío
+            shopping = self.db.query(ShoppingModel).filter(ShoppingModel.id == shopping_id).first()
+            if not shopping:
+                print(f"Shopping {shopping_id} no encontrado")
+                return 0
+
+            # Obtener el exchange_rate para convertir euros a pesos
+            exchange_rate = shopping.exchange_rate or 1
+            print(f"Exchange rate (pesos por euro): {exchange_rate}")
+
+            # Obtener el producto y su final_unit_cost del shopping
+            shopping_product = (
+                self.db.query(ShoppingProductModel)
+                .filter(
+                    ShoppingProductModel.shopping_id == shopping_id,
+                    ShoppingProductModel.product_id == product_id
+                )
+                .first()
+            )
+
+            if not shopping_product:
+                print(f"Producto {product_id} no encontrado en shopping {shopping_id}")
+                return 0
+
+            # Convertir final_unit_cost de euros a pesos
+            final_unit_cost_euros = shopping_product.final_unit_cost or 0
+            final_unit_cost_pesos = final_unit_cost_euros * exchange_rate
+
+            print(f"Final unit cost del producto:")
+            print(f"  - En euros: €{final_unit_cost_euros:.2f}")
+            print(f"  - En pesos: ${final_unit_cost_pesos:.2f}")
+
+            # Calcular el total de costos de envío
+            total_shipping_costs = (
+                (shopping.maritime_freight or 0) +
+                (shopping.merchandise_insurance or 0) +
+                (shopping.manifest_opening or 0) +
+                (shopping.deconsolidation or 0) +
+                (shopping.land_freight or 0) +
+                (shopping.port_charges or 0) +
+                (shopping.honoraries or 0) +
+                (shopping.physical_assessment_expenses or 0) +
+                (shopping.administrative_expenses or 0) +
+                (shopping.folder_processing or 0) +
+                (shopping.valija_expenses or 0) +
+                (shopping.extra_expenses or 0) +
+                (shopping.commission or 0)
+            )
+
+            print(f"Total de costos de envío (PESOS): ${total_shipping_costs:.2f}")
+
+            # Obtener todos los productos del pre-inventario para este shopping
+            pre_inventory_products = (
+                self.db.query(
+                    PreInventoryStockModel.product_id,
+                    PreInventoryStockModel.stock,
+                    UnitFeatureModel.weight_per_unit
+                )
+                .join(UnitFeatureModel, UnitFeatureModel.product_id == PreInventoryStockModel.product_id)
+                .filter(PreInventoryStockModel.shopping_id == shopping_id)
+                .all()
+            )
+
+            if not pre_inventory_products:
+                print(f"No se encontraron productos de pre-inventario para shopping {shopping_id}")
+                # Si no hay datos de envío, solo devolver el costo del producto convertido
+                return final_unit_cost_pesos
+
+            # Calcular el peso total de todos los productos
+            total_weight = 0
+            product_weights = {}
+            
+            for item in pre_inventory_products:
+                try:
+                    weight_per_unit = float(item.weight_per_unit) if item.weight_per_unit else 0
+                    product_total_weight = item.stock * weight_per_unit
+                    total_weight += product_total_weight
+                    product_weights[item.product_id] = product_total_weight
+                    print(f"Producto {item.product_id}: {item.stock} unidades x {weight_per_unit} kg = {product_total_weight} kg")
+                except (ValueError, TypeError):
+                    print(f"Warning: weight_per_unit inválido para producto {item.product_id}: {item.weight_per_unit}")
+                    product_weights[item.product_id] = 0
+
+            print(f"Peso total de todos los productos: {total_weight} kg")
+
+            # Calcular el costo de envío proporcional POR LITRO/KG/UNIDAD
+            shipping_cost_per_unit = 0
+            if total_weight > 0:
+                product_weight = product_weights.get(product_id, 0)
+                
+                if product_weight > 0:
+                    # Aplicar la fórmula: (peso_producto * 100) / peso_total * total_costos / 100
+                    percentage = (product_weight * 100) / total_weight
+                    shipping_cost_total = (percentage * total_shipping_costs) / 100
+                    
+                    # DIVIDIR entre la cantidad total (stock) para obtener el costo por litro/kg/unidad
+                    shipping_cost_per_unit = shipping_cost_total / quantity if quantity > 0 else 0
+                    
+                    print(f"Costo de envío proporcional:")
+                    print(f"  - Peso del producto: {product_weight} kg ({percentage:.2f}% del total)")
+                    print(f"  - Costo total de envío asignado: ${shipping_cost_total:.2f}")
+                    print(f"  - Cantidad total: {quantity} unidades")
+                    print(f"  - Costo de envío POR UNIDAD: ${shipping_cost_per_unit:.2f}")
+
+            # Calcular el costo total por unidad (producto + envío)
+            total_unit_cost = final_unit_cost_pesos + shipping_cost_per_unit
+
+            # Obtener información de la unidad de medida para mostrar costo por litro/kg/unidad
+            unit_measure = (
+                self.db.query(UnitMeasureModel.unit_measure)
+                .filter(UnitMeasureModel.id == shopping_product.unit_measure_id)
+                .first()
+            )
+            
+            unit_measure_name = unit_measure.unit_measure if unit_measure else "unidad"
+
+            print(f"\nRESUMEN FINAL:")
+            print(f"  - Costo del producto (pesos): ${final_unit_cost_pesos:.2f}")
+            print(f"  - Costo de envío por unidad: ${shipping_cost_per_unit:.2f}")
+            print(f"  - COSTO TOTAL por {unit_measure_name}: ${total_unit_cost:.2f}")
+
+            return total_unit_cost
+
+        except Exception as e:
+            print(f"Error calculando unit_cost para producto {product_id}: {e}")
+            return 0
+
+    def test_calculate_unit_costs(self, shopping_id):
+        """
+        Función de prueba para mostrar el cálculo de unit_cost para todos los productos de un shopping
+        """
+        print(f"\n=== CALCULANDO UNIT_COSTS PARA SHOPPING {shopping_id} ===\n")
+        
+        try:
+            # Obtener todos los productos del pre-inventario
+            pre_inventory_products = (
+                self.db.query(
+                    PreInventoryStockModel.product_id,
+                    PreInventoryStockModel.stock,
+                    ProductModel.product
+                )
+                .join(ProductModel, ProductModel.id == PreInventoryStockModel.product_id)
+                .filter(PreInventoryStockModel.shopping_id == shopping_id)
+                .all()
+            )
+
+            if not pre_inventory_products:
+                print("No se encontraron productos en el pre-inventario")
+                return
+
+            total_calculated_cost = 0
+            
+            for item in pre_inventory_products:
+                unit_cost = self.calculate_unit_cost_for_product(
+                    shopping_id, 
+                    item.product_id, 
+                    item.stock
+                )
+                
+                total_product_cost = unit_cost * item.stock
+                total_calculated_cost += total_product_cost
+                
+                print(f"\nRESUMEN - {item.product}:")
+                print(f"  - Product ID: {item.product_id}")
+                print(f"  - Cantidad: {item.stock}")
+                print(f"  - COSTO TOTAL (producto + envío): ${unit_cost:.2f}")
+                print(f"  - Costo total del producto: ${total_product_cost:.2f}")
+                print("-" * 50)
+
+            print(f"\nTOTAL DE COSTOS DISTRIBUIDOS (PESOS): ${total_calculated_cost:.2f}")
+            print(f"=== FIN DEL CÁLCULO ===\n")
+
+        except Exception as e:
+            print(f"Error en test_calculate_unit_costs: {e}")
