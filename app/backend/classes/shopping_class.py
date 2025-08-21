@@ -470,3 +470,62 @@ class ShoppingClass:
         except Exception as e:
             print("Error:", e)
             raise HTTPException(status_code=500, detail="Error to save pre-inventory quantities")
+
+    def update(self, id, data):
+        """
+        Actualiza una compra existente y sus productos asociados
+        """
+        try:
+            existing_shopping = self.db.query(ShoppingModel).filter(ShoppingModel.id == id).one_or_none()
+
+            if not existing_shopping:
+                return {"status": "error", "message": "Shopping not found"}
+
+            # Actualizar solo los datos que se guardan en la base de datos
+            existing_shopping.supplier_id = data.supplier_id
+            existing_shopping.email = data.email  # Solo el email principal
+            existing_shopping.total = data.total
+            existing_shopping.updated_date = datetime.utcnow()
+            
+            # Solo actualizar prepaid_status_id si está presente
+            if hasattr(data, 'prepaid_status_id') and data.prepaid_status_id:
+                existing_shopping.prepaid_status_id = data.prepaid_status_id
+
+            self.db.commit()
+            self.db.refresh(existing_shopping)
+
+            # Eliminar productos existentes
+            existing_products = self.db.query(ShoppingProductModel).filter(
+                ShoppingProductModel.shopping_id == id
+            ).all()
+            
+            for product in existing_products:
+                self.db.delete(product)
+            
+            self.db.commit()
+
+            # Agregar nuevos productos
+            for product in data.products:
+                new_shopping_product = ShoppingProductModel(
+                    shopping_id=id,
+                    product_id=product.product_id,
+                    unit_measure_id=product.unit_measure_id,
+                    quantity=product.quantity,
+                    quantity_per_package=product.quantity_per_package,
+                    original_unit_cost=product.original_unit_cost,
+                    discount_percentage=product.discount_percentage,
+                    final_unit_cost=product.final_unit_cost,
+                    amount=product.amount,
+                    added_date=datetime.utcnow(),
+                    updated_date=datetime.utcnow()
+                )
+                self.db.add(new_shopping_product)
+            
+            self.db.commit()
+
+            return {"status": "success", "message": "Shopping updated successfully", "shopping_id": id}
+
+        except Exception as e:
+            self.db.rollback()
+            print("Error:", e)
+            return {"status": "error", "message": str(e)}

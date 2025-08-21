@@ -326,6 +326,15 @@ class ShoppingCreateInput(BaseModel):
     second_email: Optional[str] = None
     third_email: Optional[str] = None
     supplier_id: int
+
+class UpdateShopping(BaseModel):
+    products: List[ShoppingProductInput]
+    total: float
+    email: str
+    prepaid_status_id: Optional[int] = None
+    second_email: Optional[str] = None
+    third_email: Optional[str] = None
+    supplier_id: int
     
 class SupplierList(BaseModel):
     page: int

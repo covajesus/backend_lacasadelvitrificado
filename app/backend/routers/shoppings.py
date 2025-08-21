@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends
 from app.backend.db.database import get_db
 from sqlalchemy.orm import Session
-from app.backend.schemas import UserLogin, PreInventoryStocks, ShoppingCreateInput, ShoppingList, StorePaymentDocuments, SendCustomsCompanyInput, StoreCustomsCompanyDocuments
+from app.backend.schemas import UserLogin, PreInventoryStocks, ShoppingCreateInput, UpdateShopping, ShoppingList, StorePaymentDocuments, SendCustomsCompanyInput, StoreCustomsCompanyDocuments
 from app.backend.classes.shopping_class import ShoppingClass
 from app.backend.classes.template_class import TemplateClass
 from app.backend.classes.file_class import FileClass
@@ -162,3 +162,47 @@ def store_shopping(data: ShoppingCreateInput, db: Session = Depends(get_db)):
     )
 
     return {"message": result}
+
+@shoppings.post("/update/{id}")
+def update_shopping(id: int, data: UpdateShopping, session_user: UserLogin = Depends(get_current_active_user), db: Session = Depends(get_db)):
+    # Actualizar la compra
+    result = ShoppingClass(db).update(id, data)
+    
+    if result.get("status") == "success":
+        # Envío de correos igual que en store
+        email_client = EmailClass("bergerseidle@vitrificadoschile.com", "VitrificadosChile", "uhwy oflr siuu faoo")
+
+        # Construir lista de destinatarios
+        to_email = data.email
+        cc_emails = [email for email in [data.second_email, data.third_email] if email]
+
+        # Generar contenido HTML y PDF
+        html_content_for_own_company = TemplateClass(db).generate_shopping_html_for_own_company(data, id)
+        html_content_for_supplier = TemplateClass(db).generate_shopping_html_for_supplier(data, id)
+        spanish_email_html_content = TemplateClass(db).spanish_generate_email_content_html(data)
+        english_email_html_content = TemplateClass(db).english_generate_email_content_html(data)
+        pdf_bytes_own = TemplateClass(db).html_to_pdf_bytes(html_content_for_own_company)
+        pdf_bytes_supplier = TemplateClass(db).html_to_pdf_bytes(html_content_for_supplier)
+
+        # Enviar correo a la empresa propia
+        email_result = email_client.send_email(
+            receiver_email='jesusrafaelcovahuerta@gmail.com',
+            subject="Orden de Compra Actualizada - N° " + str(id),
+            message=spanish_email_html_content,
+            pdf_bytes=pdf_bytes_own,
+            pdf_filename="purcharse_order.pdf",
+        )
+
+        # Enviar correo al proveedor
+        email_result = email_client.send_email(
+            receiver_email=to_email,
+            subject="Updated Purchase Order - N° " + str(id),
+            message=english_email_html_content,
+            pdf_bytes=pdf_bytes_supplier,
+            pdf_filename="purcharse_order.pdf",
+            cc=cc_emails
+        )
+
+        return {"message": {"update": result, "email": email_result}}
+    else:
+        return {"message": result}
