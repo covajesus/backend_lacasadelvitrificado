@@ -378,12 +378,27 @@ class InventoryClass:
                 self.db.commit()
                 self.db.refresh(new_lot)
                 
+                # Calcular unit_cost automáticamente si viene de un shopping
+                calculated_unit_cost = inventory_inputs.unit_cost
+                if hasattr(inventory_inputs, 'shopping_id') and inventory_inputs.shopping_id:
+                    # Importar ShoppingClass aquí para evitar importación circular
+                    from app.backend.classes.shopping_class import ShoppingClass
+                    shopping_class = ShoppingClass(self.db)
+                    
+                    # Calcular el unit_cost automáticamente
+                    calculated_unit_cost = shopping_class.calculate_unit_cost_for_product(
+                        inventory_inputs.shopping_id,
+                        inventory_inputs.product_id,
+                        inventory_inputs.stock
+                    )
+                    print(f"Unit cost calculado automáticamente: ${calculated_unit_cost:.2f}")
+                
                 # Crear lote asociado
                 new_lot_item = LotItemModel(
                     lot_id=new_lot.id,
                     product_id=inventory_inputs.product_id,
                     quantity=inventory_inputs.stock,
-                    unit_cost=inventory_inputs.unit_cost,
+                    unit_cost=int(calculated_unit_cost),  # Usar el unit_cost calculado también para LotItem
                     public_sale_price=inventory_inputs.public_sale_price,
                     private_sale_price=inventory_inputs.private_sale_price,
                     added_date=datetime.now(),
@@ -415,7 +430,7 @@ class InventoryClass:
                     lot_item_id=new_lot_item.id,
                     movement_type_id=1,
                     quantity=inventory_inputs.stock,
-                    unit_cost=inventory_inputs.unit_cost,
+                    unit_cost=int(calculated_unit_cost),  # Usar el unit_cost calculado
                     public_sale_price=inventory_inputs.public_sale_price,
                     private_sale_price=inventory_inputs.private_sale_price,
                     reason='Agregado producto al inventario.',
