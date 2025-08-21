@@ -34,7 +34,7 @@ def test_inventory_with_shopping():
             private_sale_price=9000,
             minimum_stock=5,
             maximum_stock=100,
-            lot_number="999",  # Número como string
+            lot_number="1000",  # Cambiar número para evitar duplicados
             arrival_date=date.today(),
             shopping_id=9  # Este activará el cálculo automático
         )

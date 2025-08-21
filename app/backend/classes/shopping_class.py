@@ -1,5 +1,5 @@
 from fastapi import HTTPException
-from app.backend.db.models import ShoppingModel, ShoppingProductModel, SupplierModel, LotModel, ProductModel, UnitMeasureModel, CategoryModel, PreInventoryStockModel, UnitFeatureModel
+from app.backend.db.models import ShoppingModel, ShoppingProductModel, SupplierModel, LotModel, ProductModel, UnitMeasureModel, CategoryModel, PreInventoryStockModel, UnitFeatureModel, InventoryModel, LotItemModel
 from app.backend.schemas import ShoppingCreateInput
 from app.backend.classes.product_class import ProductClass
 from datetime import datetime
@@ -719,3 +719,56 @@ class ShoppingClass:
 
         except Exception as e:
             print(f"Error en test_calculate_unit_costs: {e}")
+
+    def get_inventories_by_shopping_id(self, shopping_id):
+        try:
+            # Buscar productos que fueron creados desde este shopping usando pre_inventory_stock
+            inventories_data = (
+                self.db.query(
+                    InventoryModel.id.label("inventory_id"),
+                    InventoryModel.product_id,
+                    ProductModel.product.label("product_name"),
+                    ProductModel.code.label("product_code"),
+                    LotItemModel.public_sale_price,
+                    LotItemModel.private_sale_price,
+                    LotModel.arrival_date,
+                    LotItemModel.quantity,
+                    LotItemModel.unit_cost
+                )
+                .join(LotItemModel, LotItemModel.product_id == InventoryModel.product_id)
+                .join(LotModel, LotModel.id == LotItemModel.lot_id)
+                .join(ProductModel, ProductModel.id == InventoryModel.product_id)
+                .join(PreInventoryStockModel, PreInventoryStockModel.product_id == InventoryModel.product_id)
+                .filter(PreInventoryStockModel.shopping_id == shopping_id)
+                .distinct()
+                .order_by(InventoryModel.id.desc())
+                .all()
+            )
+            
+            if not inventories_data:
+                return {"status": "success", "message": "No se encontraron inventarios para este shopping", "data": []}
+            
+            # Formatear los datos para la respuesta
+            formatted_data = []
+            for item in inventories_data:
+                formatted_data.append({
+                    "inventory_id": item.inventory_id,
+                    "product_id": item.product_id,
+                    "product_name": item.product_name,
+                    "product_code": item.product_code,
+                    "quantity": item.quantity,
+                    "unit_cost": float(item.unit_cost) if item.unit_cost else 0,
+                    "public_sale_price": float(item.public_sale_price) if item.public_sale_price else 0,
+                    "private_sale_price": float(item.private_sale_price) if item.private_sale_price else 0,
+                    "arrival_date": item.arrival_date.strftime("%Y-%m-%d") if item.arrival_date else None
+                })
+            
+            return {
+                "status": "success",
+                "message": f"Se encontraron {len(formatted_data)} inventarios",
+                "shopping_id": shopping_id,
+                "data": formatted_data
+            }
+            
+        except Exception as e:
+            return {"status": "error", "message": f"Error al obtener inventarios: {str(e)}"}

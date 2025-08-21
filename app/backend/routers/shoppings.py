@@ -206,3 +206,13 @@ def update_shopping(id: int, data: UpdateShopping, session_user: UserLogin = Dep
         return {"message": {"update": result, "email": email_result}}
     else:
         return {"message": result}
+
+@shoppings.get("/get_inventories/{shopping_id}")
+def get_inventories_by_shopping_id(
+    shopping_id: int,
+    session_user: UserLogin = Depends(get_current_active_user), 
+    db: Session = Depends(get_db)
+):
+    data = ShoppingClass(db).get_inventories_by_shopping_id(shopping_id)
+
+    return {"message": data}
