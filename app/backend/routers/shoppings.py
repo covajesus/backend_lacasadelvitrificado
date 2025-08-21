@@ -145,7 +145,7 @@ def store_shopping(data: ShoppingCreateInput, db: Session = Depends(get_db)):
     pdf_bytes_supplier = TemplateClass(db).html_to_pdf_bytes(html_content_for_supplier)
 
     result = email_client.send_email(
-        receiver_email='jesusrafaelcovahuerta@gmail.com',
+        receiver_email=to_email,
         subject="Nueva Orden de Compra - N° " + str(shopping_data["shopping_id"]),
         message=spanish_email_html_content,
         pdf_bytes=pdf_bytes_own,
@@ -186,7 +186,7 @@ def update_shopping(id: int, data: UpdateShopping, session_user: UserLogin = Dep
 
         # Enviar correo a la empresa propia
         email_result = email_client.send_email(
-            receiver_email='jesusrafaelcovahuerta@gmail.com',
+            receiver_email=to_email,
             subject="Orden de Compra Actualizada - N° " + str(id),
             message=spanish_email_html_content,
             pdf_bytes=pdf_bytes_own,
