@@ -351,6 +351,7 @@ class StoreInventory(BaseModel):
     maximum_stock: int
     lot_number: str
     arrival_date: date
+    shopping_id: Optional[int] = None  # Para cálculo automático de unit_cost
 
 class UpdateSettings(BaseModel):
     tax_value: int
