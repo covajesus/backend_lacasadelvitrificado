@@ -24,6 +24,7 @@ class SettingModel(Base):
     delivery_cost = Column(Integer)
     simplefactura_token = Column(Text())
     shop_address = Column(String(255))
+    payment_card_url = Column(String(255))
     updated_date = Column(DateTime())
 
 class ShoppingModel(Base):

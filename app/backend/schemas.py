@@ -353,3 +353,4 @@ class UpdateSettings(BaseModel):
     bank: str
     delivery_cost: int
     shop_address: str
+    payment_card_url: str
