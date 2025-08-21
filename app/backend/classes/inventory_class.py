@@ -383,6 +383,7 @@ class InventoryClass:
                 if hasattr(inventory_inputs, 'shopping_id') and inventory_inputs.shopping_id:
                     # Importar ShoppingClass aquí para evitar importación circular
                     from app.backend.classes.shopping_class import ShoppingClass
+                    from app.backend.db.models import ShoppingModel
                     shopping_class = ShoppingClass(self.db)
                     
                     # Calcular el unit_cost automáticamente
@@ -392,6 +393,14 @@ class InventoryClass:
                         inventory_inputs.stock
                     )
                     print(f"Unit cost calculado automáticamente: ${calculated_unit_cost:.2f}")
+                    
+                    # Actualizar el status_id del shopping a 7
+                    shopping = self.db.query(ShoppingModel).filter(ShoppingModel.id == inventory_inputs.shopping_id).first()
+                    if shopping:
+                        shopping.status_id = 7
+                        shopping.updated_date = datetime.now()
+                        self.db.commit()
+                        print(f"Shopping {inventory_inputs.shopping_id} actualizado a status_id = 7")
                 
                 # Crear lote asociado
                 new_lot_item = LotItemModel(
@@ -455,7 +464,6 @@ class InventoryClass:
 
                 # Confirmar transacción
                 self.db.commit()
-                self.db.refresh(new_inventory_audit)
 
                 return {
                     "status": "success",
