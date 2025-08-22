@@ -94,12 +94,12 @@ def sales_report(
     - Márgenes de ganancia
     
     Filtros opcionales:
-    - start_date: Fecha inicio (YYYY-MM-DD)
-    - end_date: Fecha fin (YYYY-MM-DD)
+    - date_from: Fecha inicio (YYYY-MM-DD)
+    - date_to: Fecha fin (YYYY-MM-DD)
     """
     data = SaleClass(db).get_sales_report(
-        start_date=filter_data.start_date,
-        end_date=filter_data.end_date
+        start_date=filter_data.date_from,
+        end_date=filter_data.date_to
     )
 
     return {"message": data}
