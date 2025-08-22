@@ -130,3 +130,29 @@ class UnitMeasureClass:
         except Exception as e:
             error_message = str(e)
             return f"Error: {error_message}"
+    
+    def update(self, id, unit_measure_inputs):
+        try:
+            # Buscar la unidad de medida existente
+            existing_unit_measure = self.db.query(UnitMeasureModel).filter(UnitMeasureModel.id == id).first()
+            
+            if not existing_unit_measure:
+                return {"status": "error", "message": "Unidad de medida no encontrada."}
+            
+            # Actualizar los campos
+            existing_unit_measure.unit_measure = unit_measure_inputs.unit_measure
+            existing_unit_measure.updated_date = datetime.utcnow()
+            
+            # Guardar cambios
+            self.db.commit()
+            self.db.refresh(existing_unit_measure)
+            
+            return {
+                "status": "success", 
+                "message": "Unidad de medida actualizada exitosamente.",
+                "unit_measure_id": existing_unit_measure.id
+            }
+            
+        except Exception as e:
+            self.db.rollback()
+            return {"status": "error", "message": str(e)}

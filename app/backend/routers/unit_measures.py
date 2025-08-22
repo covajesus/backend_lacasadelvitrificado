@@ -39,3 +39,9 @@ def edit(id: int, session_user: UserLogin = Depends(get_current_active_user), db
     data = UnitMeasureClass(db).get(id)
 
     return {"message": data}
+
+@unit_measures.put("/update/{id}")
+def update(id: int, unit_measure_inputs: StoreUnitMeasure, session_user: UserLogin = Depends(get_current_active_user), db: Session = Depends(get_db)):
+    data = UnitMeasureClass(db).update(id, unit_measure_inputs)
+
+    return {"message": data}

@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends
 from app.backend.db.database import get_db
 from sqlalchemy.orm import Session
-from app.backend.schemas import UserLogin, StoreSale, SaleList
+from app.backend.schemas import UserLogin, StoreSale, SaleList, SalesReportFilter
 from app.backend.classes.sale_class import SaleClass
 from app.backend.auth.auth_user import get_current_active_user
 from app.backend.classes.file_class import FileClass
@@ -77,3 +77,30 @@ def store(
         return {"message": response}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error al procesar: {str(e)}")
+
+@sales.post("/report")
+def sales_report(
+    filter_data: SalesReportFilter,
+    session_user: UserLogin = Depends(get_current_active_user), 
+    db: Session = Depends(get_db)
+):
+    """
+    Endpoint para generar reporte de ventas por producto.
+    
+    Muestra por cada producto:
+    - Cantidad vendida
+    - Ingresos (actual, potencial público/privado)
+    - Costos (basado en unit_cost de inventory_movements)
+    - Ganancias (actual vs potencial)
+    - Márgenes de ganancia
+    
+    Filtros opcionales:
+    - start_date: Fecha inicio (YYYY-MM-DD)
+    - end_date: Fecha fin (YYYY-MM-DD)
+    """
+    data = SaleClass(db).get_sales_report(
+        start_date=filter_data.start_date,
+        end_date=filter_data.end_date
+    )
+
+    return {"message": data}
