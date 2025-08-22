@@ -722,7 +722,8 @@ class ShoppingClass:
 
     def get_inventories_by_shopping_id(self, shopping_id):
         try:
-            # Buscar productos que fueron creados desde este shopping usando pre_inventory_stock
+            # Buscar directamente productos del shopping sin depender del lot_number en PreInventoryStockModel
+            # porque el lot_number en PreInventoryStockModel puede no coincidir con el lot_number real del LotModel
             inventories_data = (
                 self.db.query(
                     InventoryModel.id.label("inventory_id"),
@@ -733,24 +734,33 @@ class ShoppingClass:
                     LotItemModel.private_sale_price,
                     LotModel.arrival_date,
                     LotItemModel.quantity,
-                    LotItemModel.unit_cost
+                    LotItemModel.unit_cost,
+                    LotModel.lot_number,
+                    LotItemModel.id.label("lot_item_id")
                 )
                 .join(LotItemModel, LotItemModel.product_id == InventoryModel.product_id)
                 .join(LotModel, LotModel.id == LotItemModel.lot_id)
                 .join(ProductModel, ProductModel.id == InventoryModel.product_id)
                 .join(PreInventoryStockModel, PreInventoryStockModel.product_id == InventoryModel.product_id)
                 .filter(PreInventoryStockModel.shopping_id == shopping_id)
-                .distinct()
-                .order_by(InventoryModel.id.desc())
+                .order_by(InventoryModel.product_id, LotItemModel.id.desc())
                 .all()
             )
             
             if not inventories_data:
                 return {"status": "success", "message": "No se encontraron inventarios para este shopping", "data": []}
             
-            # Formatear los datos para la respuesta
+            # Deduplicar por producto_id manualmente (tomar el primer lot_item por producto)
+            products_seen = set()
             formatted_data = []
+            
             for item in inventories_data:
+                # Si ya procesamos este producto, saltarlo
+                if item.product_id in products_seen:
+                    continue
+                    
+                products_seen.add(item.product_id)
+                
                 formatted_data.append({
                     "inventory_id": item.inventory_id,
                     "product_id": item.product_id,
@@ -760,7 +770,8 @@ class ShoppingClass:
                     "unit_cost": float(item.unit_cost) if item.unit_cost else 0,
                     "public_sale_price": float(item.public_sale_price) if item.public_sale_price else 0,
                     "private_sale_price": float(item.private_sale_price) if item.private_sale_price else 0,
-                    "arrival_date": item.arrival_date.strftime("%Y-%m-%d") if item.arrival_date else None
+                    "arrival_date": item.arrival_date.strftime("%Y-%m-%d") if item.arrival_date else None,
+                    "lot_number": item.lot_number
                 })
             
             return {
