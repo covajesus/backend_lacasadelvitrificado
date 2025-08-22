@@ -402,3 +402,180 @@ class SaleClass:
             self.db.rollback()
             error_message = str(e)
             return {"status": "error", "message": error_message}
+
+    def get_sales_report(self, start_date=None, end_date=None):
+        try:
+            from datetime import datetime
+            
+            # Consulta para obtener ventas individuales con clasificación de precio
+            individual_sales_query = (
+                self.db.query(
+                    ProductModel.id.label("product_id"),
+                    ProductModel.product.label("product_name"),
+                    ProductModel.code.label("product_code"),
+                    SaleProductModel.quantity,
+                    SaleProductModel.price.label("sale_price"),
+                    LotItemModel.public_sale_price,
+                    LotItemModel.private_sale_price,
+                    InventoryMovementModel.unit_cost,
+                    SaleModel.added_date
+                )
+                .join(SaleProductModel, SaleProductModel.product_id == ProductModel.id)
+                .join(SaleModel, SaleModel.id == SaleProductModel.sale_id)
+                .join(InventoryMovementModel, InventoryMovementModel.id == SaleProductModel.inventory_movement_id)
+                .join(LotItemModel, LotItemModel.id == SaleProductModel.lot_item_id)
+            )
+            
+            # Aplicar filtros de fecha
+            if start_date:
+                try:
+                    start_datetime = datetime.strptime(start_date, "%Y-%m-%d")
+                    individual_sales_query = individual_sales_query.filter(SaleModel.added_date >= start_datetime)
+                except ValueError:
+                    return {"status": "error", "message": "Formato de fecha inválido para start_date. Use YYYY-MM-DD"}
+            
+            if end_date:
+                try:
+                    end_datetime = datetime.strptime(end_date, "%Y-%m-%d")
+                    end_datetime = end_datetime.replace(hour=23, minute=59, second=59)
+                    individual_sales_query = individual_sales_query.filter(SaleModel.added_date <= end_datetime)
+                except ValueError:
+                    return {"status": "error", "message": "Formato de fecha inválido para end_date. Use YYYY-MM-DD"}
+            
+            individual_sales = individual_sales_query.all()
+            
+            if not individual_sales:
+                return {
+                    "status": "success",
+                    "message": "No se encontraron ventas en el período especificado",
+                    "period": {"start_date": start_date, "end_date": end_date},
+                    "data": []
+                }
+            
+            # Agrupar por producto y procesar
+            products_data = {}
+            
+            for sale in individual_sales:
+                product_id = sale.product_id
+                
+                if product_id not in products_data:
+                    products_data[product_id] = {
+                        "product_id": product_id,
+                        "product_name": sale.product_name,
+                        "product_code": sale.product_code,
+                        "total_quantity": 0,
+                        "public_sales": {"quantity": 0, "revenue": 0, "count": 0},
+                        "private_sales": {"quantity": 0, "revenue": 0, "count": 0},
+                        "total_revenue": 0,
+                        "total_cost": 0,
+                        "prices": {
+                            "public_price": float(sale.public_sale_price) if sale.public_sale_price else 0,
+                            "private_price": float(sale.private_sale_price) if sale.private_sale_price else 0,
+                            "average_unit_cost": 0
+                        }
+                    }
+                
+                # Calcular valores
+                quantity = sale.quantity
+                revenue = quantity * sale.sale_price
+                cost = quantity * sale.unit_cost
+                
+                # Actualizar totales
+                products_data[product_id]["total_quantity"] += quantity
+                products_data[product_id]["total_revenue"] += revenue
+                products_data[product_id]["total_cost"] += cost
+                
+                # Determinar tipo de precio comparando con los precios del lote
+                if sale.sale_price == sale.public_sale_price:
+                    price_type = 'public'
+                elif sale.sale_price == sale.private_sale_price:
+                    price_type = 'private'
+                else:
+                    price_type = 'private'  # Por defecto
+                
+                # Clasificar por tipo de precio
+                if price_type == 'public':
+                    products_data[product_id]["public_sales"]["quantity"] += quantity
+                    products_data[product_id]["public_sales"]["revenue"] += revenue
+                    products_data[product_id]["public_sales"]["count"] += 1
+                else:  # private o otros
+                    products_data[product_id]["private_sales"]["quantity"] += quantity
+                    products_data[product_id]["private_sales"]["revenue"] += revenue
+                    products_data[product_id]["private_sales"]["count"] += 1
+            
+            # Formatear datos para respuesta
+            formatted_data = []
+            total_revenue = 0
+            total_cost = 0
+            total_profit = 0
+            
+            for product_data in products_data.values():
+                # Calcular costo unitario promedio
+                avg_unit_cost = product_data["total_cost"] / product_data["total_quantity"] if product_data["total_quantity"] > 0 else 0
+                product_data["prices"]["average_unit_cost"] = round(avg_unit_cost, 2)
+                
+                # Calcular ganancias
+                actual_profit = product_data["total_revenue"] - product_data["total_cost"]
+                
+                # Calcular porcentajes de ventas por tipo
+                total_qty = product_data["total_quantity"]
+                public_percent = (product_data["public_sales"]["quantity"] / total_qty * 100) if total_qty > 0 else 0
+                private_percent = (product_data["private_sales"]["quantity"] / total_qty * 100) if total_qty > 0 else 0
+                
+                product_summary = {
+                    "product_id": product_data["product_id"],
+                    "product_name": product_data["product_name"],
+                    "product_code": product_data["product_code"],
+                    "quantity_sold": product_data["total_quantity"],
+                    "prices": product_data["prices"],
+                    "sales_breakdown": {
+                        "public_sales": {
+                            "quantity": product_data["public_sales"]["quantity"],
+                            "percentage": round(public_percent, 1),
+                            "revenue": round(product_data["public_sales"]["revenue"], 2),
+                            "transactions": product_data["public_sales"]["count"]
+                        },
+                        "private_sales": {
+                            "quantity": product_data["private_sales"]["quantity"],
+                            "percentage": round(private_percent, 1),
+                            "revenue": round(product_data["private_sales"]["revenue"], 2),
+                            "transactions": product_data["private_sales"]["count"]
+                        }
+                    },
+                    "totals": {
+                        "total_revenue": round(product_data["total_revenue"], 2),
+                        "total_cost": round(product_data["total_cost"], 2),
+                        "total_profit": round(actual_profit, 2),
+                        "profit_margin_percent": round((actual_profit / product_data["total_revenue"] * 100), 2) if product_data["total_revenue"] > 0 else 0
+                    }
+                }
+                
+                formatted_data.append(product_summary)
+                
+                # Sumar totales generales
+                total_revenue += product_data["total_revenue"]
+                total_cost += product_data["total_cost"]
+                total_profit += actual_profit
+            
+            # Ordenar por cantidad vendida
+            formatted_data.sort(key=lambda x: x["quantity_sold"], reverse=True)
+            
+            # Resumen general
+            summary = {
+                "total_products": len(formatted_data),
+                "total_revenue": round(total_revenue, 2),
+                "total_cost": round(total_cost, 2),
+                "total_profit": round(total_profit, 2),
+                "overall_margin_percent": round((total_profit / total_revenue * 100), 2) if total_revenue > 0 else 0
+            }
+            
+            return {
+                "status": "success",
+                "message": f"Reporte generado para {len(formatted_data)} productos",
+                "period": {"start_date": start_date, "end_date": end_date},
+                "summary": summary,
+                "data": formatted_data
+            }
+            
+        except Exception as e:
+            return {"status": "error", "message": f"Error al generar reporte: {str(e)}"}
