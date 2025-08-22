@@ -1,4 +1,4 @@
-from app.backend.db.models import SaleModel, CustomerModel, SaleProductModel, ProductModel, InventoryModel, UnitMeasureModel, SupplierModel, CategoryModel, LotItemModel, LotModel, InventoryMovementModel, InventoryLotItemModel
+from app.backend.db.models import SaleModel, CustomerModel, SaleProductModel, ProductModel, InventoryModel, UnitMeasureModel, SupplierModel, CategoryModel, LotItemModel, LotModel, InventoryMovementModel, InventoryLotItemModel, UnitFeatureModel
 from datetime import datetime
 from sqlalchemy import func
 
@@ -23,7 +23,6 @@ class SaleClass:
                     .order_by(SaleModel.added_date.desc())
                 )
             else:
-                print(rol_id)
                 query = (
                     self.db.query(
                         SaleModel.id,
@@ -33,7 +32,7 @@ class SaleClass:
                         SaleModel.status_id,
                         SaleModel.added_date,                
                     )
-                    .filter(SaleModel.customer_id == customer.id)
+                    .filter(SaleModel.customer_id == customer.id if customer else None)
                     .order_by(SaleModel.added_date.desc())
                 )
 
@@ -407,23 +406,32 @@ class SaleClass:
         try:
             from datetime import datetime
             
-            # Consulta para obtener ventas individuales con clasificación de precio
+            # Consulta para obtener ventas individuales con información de lotes
             individual_sales_query = (
                 self.db.query(
                     ProductModel.id.label("product_id"),
                     ProductModel.product.label("product_name"),
                     ProductModel.code.label("product_code"),
+                    ProductModel.unit_measure_id,
+                    UnitMeasureModel.unit_measure,
+                    UnitFeatureModel.quantity_per_package,
                     SaleProductModel.quantity,
                     SaleProductModel.price.label("sale_price"),
                     LotItemModel.public_sale_price,
                     LotItemModel.private_sale_price,
                     InventoryMovementModel.unit_cost,
+                    LotItemModel.id.label("lot_item_id"),
+                    LotModel.lot_number,
+                    LotModel.arrival_date,
                     SaleModel.added_date
                 )
                 .join(SaleProductModel, SaleProductModel.product_id == ProductModel.id)
                 .join(SaleModel, SaleModel.id == SaleProductModel.sale_id)
                 .join(InventoryMovementModel, InventoryMovementModel.id == SaleProductModel.inventory_movement_id)
                 .join(LotItemModel, LotItemModel.id == SaleProductModel.lot_item_id)
+                .join(LotModel, LotModel.id == LotItemModel.lot_id)
+                .join(UnitMeasureModel, UnitMeasureModel.id == ProductModel.unit_measure_id, isouter=True)
+                .join(UnitFeatureModel, UnitFeatureModel.product_id == ProductModel.id, isouter=True)
             )
             
             # Aplicar filtros de fecha
@@ -452,40 +460,95 @@ class SaleClass:
                     "data": []
                 }
             
-            # Agrupar por producto y procesar
+            # Agrupar por producto y lote
             products_data = {}
             
             for sale in individual_sales:
                 product_id = sale.product_id
+                lot_item_id = sale.lot_item_id
                 
                 if product_id not in products_data:
+                    # Calcular la cantidad total representada en la unidad de medida
+                    quantity_per_package = float(sale.quantity_per_package) if sale.quantity_per_package else 1.0
+                    unit_measure_name = sale.unit_measure if sale.unit_measure else "unidades"
+                    
+                    # Calcular precios por unidad de medida (no por paquete)
+                    # Los precios en BD están por paquete, los convertimos a por unidad de medida
+                    public_price_per_unit = float(sale.public_sale_price) / quantity_per_package if sale.public_sale_price and quantity_per_package > 0 else 0
+                    private_price_per_unit = float(sale.private_sale_price) / quantity_per_package if sale.private_sale_price and quantity_per_package > 0 else 0
+                    
                     products_data[product_id] = {
                         "product_id": product_id,
                         "product_name": sale.product_name,
                         "product_code": sale.product_code,
+                        "unit_measure": unit_measure_name,
+                        "quantity_per_package": quantity_per_package,
                         "total_quantity": 0,
-                        "public_sales": {"quantity": 0, "revenue": 0, "count": 0},
-                        "private_sales": {"quantity": 0, "revenue": 0, "count": 0},
+                        "total_unit_measure_quantity": 0,  # Nueva: cantidad total en unidad de medida
+                        "public_sales": {"quantity": 0, "revenue": 0, "count": 0, "unit_measure_quantity": 0},
+                        "private_sales": {"quantity": 0, "revenue": 0, "count": 0, "unit_measure_quantity": 0},
                         "total_revenue": 0,
                         "total_cost": 0,
+                        "lots_breakdown": {},  # Nuevo: desglose por lotes
                         "prices": {
-                            "public_price": float(sale.public_sale_price) if sale.public_sale_price else 0,
-                            "private_price": float(sale.private_sale_price) if sale.private_sale_price else 0,
-                            "average_unit_cost": 0
+                            "public_price_per_package": float(sale.public_sale_price) if sale.public_sale_price else 0,
+                            "private_price_per_package": float(sale.private_sale_price) if sale.private_sale_price else 0,
+                            "public_price_per_unit": public_price_per_unit,
+                            "private_price_per_unit": private_price_per_unit,
+                            "average_unit_cost_per_unit": 0
                         }
+                    }
+                
+                # Inicializar datos del lote si no existe
+                if lot_item_id not in products_data[product_id]["lots_breakdown"]:
+                    quantity_per_package = products_data[product_id]["quantity_per_package"]
+                    # El unit_cost en BD está por UNIDAD (litro), lo convertimos a por paquete
+                    cost_per_unit = float(sale.unit_cost)  # Costo por unidad (litro)
+                    cost_per_package = cost_per_unit * quantity_per_package  # Costo por paquete
+                    
+                    products_data[product_id]["lots_breakdown"][lot_item_id] = {
+                        "lot_number": sale.lot_number,
+                        "arrival_date": sale.arrival_date.strftime("%Y-%m-%d") if sale.arrival_date else None,
+                        "cost_per_package": cost_per_package,
+                        "cost_per_unit": cost_per_unit,
+                        "quantity_sold": 0,
+                        "unit_measure_quantity_sold": 0,  # Nueva: cantidad en unidad de medida
+                        "revenue": 0,
+                        "cost": 0,
+                        "public_sales": {"quantity": 0, "revenue": 0, "unit_measure_quantity": 0},
+                        "private_sales": {"quantity": 0, "revenue": 0, "unit_measure_quantity": 0}
                     }
                 
                 # Calcular valores
                 quantity = sale.quantity
-                revenue = quantity * sale.sale_price
-                cost = quantity * sale.unit_cost
+                quantity_per_package = products_data[product_id]["quantity_per_package"]
+                unit_measure_quantity = quantity * quantity_per_package  # Cantidad en unidad de medida
                 
-                # Actualizar totales
+                # IMPORTANTE: El unit_cost en BD está por UNIDAD (litro), lo convertimos a por paquete
+                cost_per_unit = sale.unit_cost  # Costo por unidad (litro)
+                cost_per_package = cost_per_unit * quantity_per_package  # Costo por paquete
+                
+                # Los precios de venta están por paquete, los convertimos a por unidad de medida
+                unit_measure_sale_price = sale.sale_price / quantity_per_package if quantity_per_package > 0 else sale.sale_price
+                
+                # Calcular revenue y cost basado en la cantidad real en unidad de medida
+                revenue = unit_measure_quantity * unit_measure_sale_price  # Revenue por cantidad real
+                cost = unit_measure_quantity * cost_per_unit         # Cost por cantidad real
+                
+                # Actualizar totales del producto
                 products_data[product_id]["total_quantity"] += quantity
+                products_data[product_id]["total_unit_measure_quantity"] += unit_measure_quantity
                 products_data[product_id]["total_revenue"] += revenue
                 products_data[product_id]["total_cost"] += cost
                 
-                # Determinar tipo de precio comparando con los precios del lote
+                # Actualizar datos del lote específico
+                lot_data = products_data[product_id]["lots_breakdown"][lot_item_id]
+                lot_data["quantity_sold"] += quantity
+                lot_data["unit_measure_quantity_sold"] += unit_measure_quantity
+                lot_data["revenue"] += revenue
+                lot_data["cost"] += cost
+                
+                # Determinar tipo de precio
                 if sale.sale_price == sale.public_sale_price:
                     price_type = 'public'
                 elif sale.sale_price == sale.private_sale_price:
@@ -493,15 +556,25 @@ class SaleClass:
                 else:
                     price_type = 'private'  # Por defecto
                 
-                # Clasificar por tipo de precio
+                # Clasificar por tipo de precio (producto)
                 if price_type == 'public':
                     products_data[product_id]["public_sales"]["quantity"] += quantity
+                    products_data[product_id]["public_sales"]["unit_measure_quantity"] += unit_measure_quantity
                     products_data[product_id]["public_sales"]["revenue"] += revenue
                     products_data[product_id]["public_sales"]["count"] += 1
+                    # También para el lote
+                    lot_data["public_sales"]["quantity"] += quantity
+                    lot_data["public_sales"]["unit_measure_quantity"] += unit_measure_quantity
+                    lot_data["public_sales"]["revenue"] += revenue
                 else:  # private o otros
                     products_data[product_id]["private_sales"]["quantity"] += quantity
+                    products_data[product_id]["private_sales"]["unit_measure_quantity"] += unit_measure_quantity
                     products_data[product_id]["private_sales"]["revenue"] += revenue
                     products_data[product_id]["private_sales"]["count"] += 1
+                    # También para el lote
+                    lot_data["private_sales"]["quantity"] += quantity
+                    lot_data["private_sales"]["unit_measure_quantity"] += unit_measure_quantity
+                    lot_data["private_sales"]["revenue"] += revenue
             
             # Formatear datos para respuesta
             formatted_data = []
@@ -510,9 +583,9 @@ class SaleClass:
             total_profit = 0
             
             for product_data in products_data.values():
-                # Calcular costo unitario promedio
-                avg_unit_cost = product_data["total_cost"] / product_data["total_quantity"] if product_data["total_quantity"] > 0 else 0
-                product_data["prices"]["average_unit_cost"] = round(avg_unit_cost, 2)
+                # Calcular costo unitario promedio POR UNIDAD DE MEDIDA
+                avg_unit_cost_per_unit = product_data["total_cost"] / product_data["total_unit_measure_quantity"] if product_data["total_unit_measure_quantity"] > 0 else 0
+                product_data["prices"]["average_unit_cost_per_unit"] = round(avg_unit_cost_per_unit, 2)
                 
                 # Calcular ganancias
                 actual_profit = product_data["total_revenue"] - product_data["total_cost"]
@@ -522,26 +595,67 @@ class SaleClass:
                 public_percent = (product_data["public_sales"]["quantity"] / total_qty * 100) if total_qty > 0 else 0
                 private_percent = (product_data["private_sales"]["quantity"] / total_qty * 100) if total_qty > 0 else 0
                 
+                # Formatear desglose por lotes
+                lots_breakdown_formatted = []
+                for lot_item_id, lot_data in product_data["lots_breakdown"].items():
+                    lot_profit = lot_data["revenue"] - lot_data["cost"]
+                    lot_margin = (lot_profit / lot_data["revenue"] * 100) if lot_data["revenue"] > 0 else 0
+                    
+                    lots_breakdown_formatted.append({
+                        "lot_number": lot_data["lot_number"],
+                        "arrival_date": lot_data["arrival_date"],
+                        "cost_per_package": round(lot_data["cost_per_package"], 2),
+                        "cost_per_unit": round(lot_data["cost_per_unit"], 2),
+                        "quantity_sold": lot_data["quantity_sold"],
+                        "unit_measure_quantity_sold": round(lot_data["unit_measure_quantity_sold"], 2),
+                        "unit_measure": product_data["unit_measure"],
+                        "revenue": round(lot_data["revenue"], 2),
+                        "cost": round(lot_data["cost"], 2),
+                        "profit": round(lot_profit, 2),
+                        "profit_margin_percent": round(lot_margin, 2),
+                        "sales_by_type": {
+                            "public_sales": {
+                                "quantity": lot_data["public_sales"]["quantity"],
+                                "unit_measure_quantity": round(lot_data["public_sales"]["unit_measure_quantity"], 2),
+                                "revenue": round(lot_data["public_sales"]["revenue"], 2)
+                            },
+                            "private_sales": {
+                                "quantity": lot_data["private_sales"]["quantity"],
+                                "unit_measure_quantity": round(lot_data["private_sales"]["unit_measure_quantity"], 2),
+                                "revenue": round(lot_data["private_sales"]["revenue"], 2)
+                            }
+                        }
+                    })
+                
+                # Ordenar lotes por fecha de llegada
+                lots_breakdown_formatted.sort(key=lambda x: x["arrival_date"] or "1900-01-01")
+                
                 product_summary = {
                     "product_id": product_data["product_id"],
                     "product_name": product_data["product_name"],
                     "product_code": product_data["product_code"],
+                    "unit_measure": product_data["unit_measure"],
+                    "quantity_per_package": product_data["quantity_per_package"],
                     "quantity_sold": product_data["total_quantity"],
+                    "unit_measure_quantity_sold": round(product_data["total_unit_measure_quantity"], 2),
                     "prices": product_data["prices"],
                     "sales_breakdown": {
                         "public_sales": {
                             "quantity": product_data["public_sales"]["quantity"],
+                            "unit_measure_quantity": round(product_data["public_sales"]["unit_measure_quantity"], 2),
                             "percentage": round(public_percent, 1),
                             "revenue": round(product_data["public_sales"]["revenue"], 2),
                             "transactions": product_data["public_sales"]["count"]
                         },
                         "private_sales": {
                             "quantity": product_data["private_sales"]["quantity"],
+                            "unit_measure_quantity": round(product_data["private_sales"]["unit_measure_quantity"], 2),
                             "percentage": round(private_percent, 1),
                             "revenue": round(product_data["private_sales"]["revenue"], 2),
                             "transactions": product_data["private_sales"]["count"]
                         }
                     },
+                    "lots_breakdown": lots_breakdown_formatted,  # Nuevo: desglose por lotes
                     "totals": {
                         "total_revenue": round(product_data["total_revenue"], 2),
                         "total_cost": round(product_data["total_cost"], 2),

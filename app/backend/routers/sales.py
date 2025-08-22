@@ -81,7 +81,6 @@ def store(
 @sales.post("/report")
 def sales_report(
     filter_data: SalesReportFilter,
-    session_user: UserLogin = Depends(get_current_active_user), 
     db: Session = Depends(get_db)
 ):
     """
