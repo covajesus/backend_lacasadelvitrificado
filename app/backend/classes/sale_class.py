@@ -434,15 +434,15 @@ class SaleClass:
                 .join(UnitFeatureModel, UnitFeatureModel.product_id == ProductModel.id, isouter=True)
             )
             
-            # Aplicar filtros de fecha
-            if start_date:
+            # Aplicar filtros de fecha si se proporcionan
+            if start_date and start_date.strip():
                 try:
                     start_datetime = datetime.strptime(start_date, "%Y-%m-%d")
                     individual_sales_query = individual_sales_query.filter(SaleModel.added_date >= start_datetime)
                 except ValueError:
                     return {"status": "error", "message": "Formato de fecha inválido para start_date. Use YYYY-MM-DD"}
             
-            if end_date:
+            if end_date and end_date.strip():
                 try:
                     end_datetime = datetime.strptime(end_date, "%Y-%m-%d")
                     end_datetime = end_datetime.replace(hour=23, minute=59, second=59)
@@ -452,10 +452,19 @@ class SaleClass:
             
             individual_sales = individual_sales_query.all()
             
+            # Incluir información de filtro en el mensaje de respuesta
+            filter_info = ""
+            if start_date and end_date:
+                filter_info = f" (período: {start_date} a {end_date})"
+            elif start_date:
+                filter_info = f" (desde: {start_date})"
+            elif end_date:
+                filter_info = f" (hasta: {end_date})"
+            
             if not individual_sales:
                 return {
                     "status": "success",
-                    "message": "No se encontraron ventas en el período especificado",
+                    "message": f"No se encontraron ventas{filter_info}",
                     "period": {"start_date": start_date, "end_date": end_date},
                     "data": []
                 }

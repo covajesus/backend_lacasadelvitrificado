@@ -366,5 +366,5 @@ class UpdateSettings(BaseModel):
     payment_card_url: str
 
 class SalesReportFilter(BaseModel):
-    start_date: Optional[str] = None
-    end_date: Optional[str] = None
+    date_from: Optional[str] = None
+    date_to: Optional[str] = None
