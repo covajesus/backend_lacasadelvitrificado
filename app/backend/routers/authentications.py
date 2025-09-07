@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Form
 from fastapi.security import OAuth2PasswordRequestForm
 from app.backend.db.database import get_db
 from sqlalchemy.orm import Session
@@ -56,12 +56,13 @@ def logout(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depen
     }
 
 @authentications.post("/shopping_login")
-def shopping_login(login_data: ShoppingLoginRequest, db: Session = Depends(get_db)):
+def shopping_login(rut: str = Form(...), db: Session = Depends(get_db)):
     """
     Endpoint para login de shopping que solo requiere RUT.
     Si el RUT existe en el sistema, automáticamente permite el acceso.
+    Acepta datos como form-data.
     """
-    user = AuthenticationClass(db).authenticate_shopping_login(login_data.rut)
+    user = AuthenticationClass(db).authenticate_shopping_login(rut)
     rol = RolClass(db).get('id', user["user_data"]["rol_id"])
     token_expires = timedelta(minutes=120)
     token = AuthenticationClass(db).create_token({'sub': str(user["user_data"]["rut"])}, token_expires)
