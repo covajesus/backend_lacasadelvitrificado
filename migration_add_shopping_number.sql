@@ -1,7 +1,6 @@
--- Migración para agregar el campo shopping_number a la tabla shoppings
+-- Migración para agregar el campo shopping_number a la tabla shopping
 -- Ejecutar este script en la base de datos
 
-ALTER TABLE shoppings ADD COLUMN shopping_number VARCHAR(100);
+ALTER TABLE shopping ADD COLUMN shopping_number VARCHAR(100) DEFAULT NULL;
 
--- Opcional: Agregar comentario a la columna
-COMMENT ON COLUMN shoppings.shopping_number IS 'Número de referencia de la compra';
+-- Comentario: Este campo almacena el número personalizado de la orden de compra
