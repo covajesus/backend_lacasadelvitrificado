@@ -29,15 +29,8 @@ class TemplateClass:
         shopping = self.db.query(ShoppingModel).filter(ShoppingModel.id == shopping_id).first()
         has_prepaid = shopping and shopping.prepaid_status_id is not None
 
-        # Obtener el descuento de settings si hay prepago
-        prepaid_discount_percentage = 0.0
-        if has_prepaid:
-            settings = self.db.query(SettingModel).first()
-            if settings and hasattr(settings, 'prepaid_discount') and settings.prepaid_discount:
-                try:
-                    prepaid_discount_percentage = float(settings.prepaid_discount)
-                except (ValueError, TypeError):
-                    prepaid_discount_percentage = 0.0
+        # Usar un descuento fijo del 5% para prepagos (puedes ajustar este valor)
+        prepaid_discount_percentage = 5.0 if has_prepaid else 0.0
 
         for item in data.products:
             # Obtener datos del producto
