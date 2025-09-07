@@ -224,10 +224,6 @@ class TemplateClass:
         html += f"""
             </tbody>
         </table>
-
-        <div style="text-align: right; margin-top: 20px;">
-            <h2>Total: €. {self.format_number(data.total)}</h2>
-        </div>
         """
 
         # Calcular todos los totales adicionales
