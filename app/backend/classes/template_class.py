@@ -44,13 +44,15 @@ class TemplateClass:
             if not shopping_product:
                 continue
 
-            # Calcular totales por unidad de medida
+            # Calcular totales por unidad de medida (usando quantity * quantity_per_package)
+            total_quantity_per_package = float(shopping_product.quantity) * float(shopping_product.quantity_per_package)
+            
             if item.unit_measure_id == 1:  # Kilogramos
-                total_kg += float(shopping_product.quantity_per_package)
+                total_kg += total_quantity_per_package
             elif item.unit_measure_id == 2:  # Litros
-                total_lts += float(shopping_product.quantity_per_package)
+                total_lts += total_quantity_per_package
             elif item.unit_measure_id == 3:  # Unidades
-                total_und += float(shopping_product.quantity_per_package)
+                total_und += total_quantity_per_package
 
             # Calcular peso total para envío
             if unit_feature:
@@ -66,9 +68,9 @@ class TemplateClass:
                     'weight_per_pallet': weight_per_pallet
                 })
 
-            # Calcular total sin descuento
-            if shopping_product.original_unit_cost and shopping_product.quantity:
-                total_without_discount += float(shopping_product.original_unit_cost) * float(shopping_product.quantity)
+            # Calcular total sin descuento usando el campo amount que ya tiene el cálculo correcto
+            if shopping_product.amount:
+                total_without_discount += float(shopping_product.amount)
 
         # Calcular pallets usando el algoritmo correcto
         calculated_pallets = self.calculate_real_mixed_pallets(products_info)
