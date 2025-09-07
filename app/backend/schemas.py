@@ -71,6 +71,8 @@ class StoreLocation(BaseModel):
 
 class ProductList(BaseModel):
     page: int
+    supplier_id: Optional[int] = None
+    product_id: Optional[int] = None
 
 class SaleList(BaseModel):
     page: int
@@ -319,6 +321,7 @@ class StorePaymentDocuments(BaseModel):
         )
     
 class ShoppingCreateInput(BaseModel):
+    shopping_number: Optional[str] = None
     products: List[ShoppingProductInput]
     total: float
     email: str
@@ -328,6 +331,7 @@ class ShoppingCreateInput(BaseModel):
     supplier_id: int
 
 class UpdateShopping(BaseModel):
+    shopping_number: Optional[str] = None
     products: List[ShoppingProductInput]
     total: float
     email: str

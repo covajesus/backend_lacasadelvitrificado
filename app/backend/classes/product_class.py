@@ -7,7 +7,7 @@ class ProductClass:
     def __init__(self, db):
         self.db = db
 
-    def get_all(self, page=0, items_per_page=10):
+    def get_all(self, page=0, items_per_page=10, supplier_id=None, product_id=None):
         try:
             query = (
                 self.db.query(
@@ -15,11 +15,21 @@ class ProductClass:
                     SupplierModel.supplier.label("supplier"),
                     CategoryModel.category.label("category"),
                     ProductModel.code,
-                    ProductModel.product                )
+                    ProductModel.product
+                )
                 .join(SupplierModel, SupplierModel.id == ProductModel.supplier_id, isouter=True)
                 .join(CategoryModel, CategoryModel.id == ProductModel.category_id, isouter=True)
-                .order_by(ProductModel.product)
             )
+            
+            # Aplicar filtros si se proporcionan
+            if supplier_id:
+                query = query.filter(ProductModel.supplier_id == supplier_id)
+            
+            if product_id:
+                query = query.filter(ProductModel.id == product_id)
+            
+            # Ordenar por nombre del producto
+            query = query.order_by(ProductModel.product)
 
             if page > 0:
                 total_items = query.count()
@@ -611,3 +621,84 @@ class ProductClass:
         except Exception as e:
             self.db.rollback()
             return {"status": "error", "message": str(e)}
+
+    def get_products_by_supplier(self, supplier_identifier):
+        """
+        Obtiene productos filtrados por proveedor usando RUT o ID del proveedor.
+        
+        Args:
+            supplier_identifier: RUT del proveedor (ej: "12345678-9") o ID del proveedor (ej: "123")
+        
+        Returns:
+            Lista de productos del proveedor especificado
+        """
+        try:
+            # Determinar si el identificador es un ID numérico o un RUT
+            is_numeric_id = supplier_identifier.isdigit()
+            
+            query = (
+                self.db.query(
+                    ProductModel.id,
+                    ProductModel.code,
+                    ProductModel.product,
+                    ProductModel.description,
+                    ProductModel.photo,
+                    ProductModel.catalog,
+                    SupplierModel.supplier.label("supplier_name"),
+                    SupplierModel.identification_number.label("supplier_rut"),
+                    CategoryModel.category.label("category_name"),
+                    UnitMeasureModel.unit_measure.label("unit_measure"),
+                    ProductModel.added_date
+                )
+                .join(SupplierModel, SupplierModel.id == ProductModel.supplier_id)
+                .join(CategoryModel, CategoryModel.id == ProductModel.category_id, isouter=True)
+                .join(UnitMeasureModel, UnitMeasureModel.id == ProductModel.unit_measure_id, isouter=True)
+            )
+            
+            # Filtrar por ID del proveedor o RUT
+            if is_numeric_id:
+                query = query.filter(SupplierModel.id == int(supplier_identifier))
+            else:
+                query = query.filter(SupplierModel.identification_number == supplier_identifier)
+            
+            # Ordenar por nombre del producto
+            query = query.order_by(ProductModel.product)
+            
+            results = query.all()
+            
+            if not results:
+                return {
+                    "status": "success", 
+                    "message": f"No se encontraron productos para el proveedor: {supplier_identifier}",
+                    "data": []
+                }
+            
+            # Formatear los resultados
+            formatted_data = []
+            for result in results:
+                formatted_data.append({
+                    "id": result.id,
+                    "code": result.code,
+                    "product": result.product,
+                    "description": result.description,
+                    "photo": result.photo,
+                    "catalog": result.catalog,
+                    "supplier_name": result.supplier_name,
+                    "supplier_rut": result.supplier_rut,
+                    "category_name": result.category_name,
+                    "unit_measure": result.unit_measure,
+                    "added_date": result.added_date.strftime("%Y-%m-%d %H:%M:%S") if result.added_date else None
+                })
+            
+            return {
+                "status": "success",
+                "message": f"Se encontraron {len(formatted_data)} productos del proveedor: {results[0].supplier_name}",
+                "data": formatted_data,
+                "supplier_info": {
+                    "supplier_name": results[0].supplier_name,
+                    "supplier_rut": results[0].supplier_rut
+                }
+            }
+            
+        except Exception as e:
+            return {"status": "error", "message": f"Error al obtener productos por proveedor: {str(e)}"}

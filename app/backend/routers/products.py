@@ -16,7 +16,11 @@ products = APIRouter(
 
 @products.post("/")
 def index(product_input: ProductList, session_user: UserLogin = Depends(get_current_active_user), db: Session = Depends(get_db)):
-    data = ProductClass(db).get_all(product_input.page)
+    data = ProductClass(db).get_all(
+        page=product_input.page,
+        supplier_id=product_input.supplier_id,
+        product_id=product_input.product_id
+    )
 
     return {"message": data}
 
@@ -89,6 +93,21 @@ def sale_list(category_id: int, session_user: UserLogin = Depends(get_current_ac
 @products.get("/list")
 def list(session_user: UserLogin = Depends(get_current_active_user), db: Session = Depends(get_db)):
     data = ProductClass(db).get_list()
+
+    return {"message": data}
+
+@products.get("/supplier/{supplier_identifier}")
+def products_by_supplier(supplier_identifier: str, session_user: UserLogin = Depends(get_current_active_user), db: Session = Depends(get_db)):
+    """
+    Endpoint para obtener productos filtrados por proveedor.
+    
+    Args:
+        supplier_identifier: RUT del proveedor (ej: "12345678-9") o ID del proveedor (ej: "123")
+    
+    Returns:
+        Lista de productos del proveedor especificado
+    """
+    data = ProductClass(db).get_products_by_supplier(supplier_identifier)
 
     return {"message": data}
 
