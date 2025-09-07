@@ -7,12 +7,17 @@ from app.backend.classes.rol_class import RolClass
 from datetime import timedelta
 from app.backend.auth.auth_user import get_current_active_user
 from app.backend.schemas import UserLogin
+from pydantic import BaseModel
 import json
 
 authentications = APIRouter(
     prefix="/authentications",
     tags=["Authentications"]
 )
+
+# Esquema para shopping login que solo requiere RUT
+class ShoppingLoginRequest(BaseModel):
+    rut: str
 
 @authentications.post("/login")
 def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
@@ -51,8 +56,12 @@ def logout(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depen
     }
 
 @authentications.post("/shopping_login")
-def shopping_login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
-    user = AuthenticationClass(db).authenticate_shopping_login(form_data.username)
+def shopping_login(login_data: ShoppingLoginRequest, db: Session = Depends(get_db)):
+    """
+    Endpoint para login de shopping que solo requiere RUT.
+    Si el RUT existe en el sistema, automáticamente permite el acceso.
+    """
+    user = AuthenticationClass(db).authenticate_shopping_login(login_data.rut)
     rol = RolClass(db).get('id', user["user_data"]["rol_id"])
     token_expires = timedelta(minutes=120)
     token = AuthenticationClass(db).create_token({'sub': str(user["user_data"]["rut"])}, token_expires)
@@ -60,6 +69,7 @@ def shopping_login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session
 
     return {
         "access_token": token,
+        "user_id": user["user_data"]["id"],
         "rut": user["user_data"]["rut"],
         "rol_id": user["user_data"]["rol_id"],
         "rol": rol.rol,
