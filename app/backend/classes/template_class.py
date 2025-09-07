@@ -138,6 +138,8 @@ class TemplateClass:
         logo_url = "file:/var/www/api.lacasadelvitrificado.com/public/assets/logo.png"
         vitrificado_logo_url = "file:/var/www/api.lacasadelvitrificado.com/public/assets/vitrificado-logo.png"
         supplier_data = self.db.query(SupplierModel).filter(SupplierModel.id == data.supplier_id).first()
+        shopping_data = self.db.query(ShoppingModel).filter(ShoppingModel.id == id).first()
+        shopping_number = shopping_data.shopping_number if shopping_data and shopping_data.shopping_number else str(id)
         date = datetime.utcnow().strftime("%Y-%m-%d")
 
         html = f"""
@@ -172,7 +174,7 @@ class TemplateClass:
         </div>
 
         <div class="title">
-            <h2>Purchase Order #{id}</h2>
+            <h2>Purchase Order #{shopping_number}</h2>
         </div>
 
         <div>
@@ -276,6 +278,8 @@ class TemplateClass:
     def generate_shopping_html_for_customs_company(self, data: ShoppingCreateInput, id) -> str:
         logo_url = "file:/var/www/api.lacasadelvitrificado.com/public/assets/logo.png"
         vitrificado_logo_url = "file:/var/www/api.lacasadelvitrificado.com/public/assets/vitrificado-logo.png"
+        shopping_data = self.db.query(ShoppingModel).filter(ShoppingModel.id == id).first()
+        shopping_number = shopping_data.shopping_number if shopping_data and shopping_data.shopping_number else str(id)
         date = datetime.utcnow().strftime("%Y-%m-%d")
 
         html = f"""
@@ -314,7 +318,7 @@ class TemplateClass:
             </div>
 
             <div class="title">
-                <h2>Purchase Order #{id}</h2>
+                <h2>Purchase Order #{shopping_number}</h2>
             </div>
 
             <div>
@@ -440,7 +444,7 @@ class TemplateClass:
                 <img src="{logo_url}" class="logo float-right" />
             </div>
             <div class="title">
-                <h2>Purchase Order #{id}</h2>
+                <h2>Purchase Order #{shopping_number}</h2>
             </div>
 
             <div>
@@ -524,6 +528,8 @@ class TemplateClass:
         logo_url = "file:/var/www/api.lacasadelvitrificado.com/public/assets/logo.png"
         vitrificado_logo_url = "file:/var/www/api.lacasadelvitrificado.com/public/assets/vitrificado-logo.png"
         supplier_data = self.db.query(SupplierModel).filter(SupplierModel.id == data.supplier_id).first()
+        shopping_data = self.db.query(ShoppingModel).filter(ShoppingModel.id == id).first()
+        shopping_number = shopping_data.shopping_number if shopping_data and shopping_data.shopping_number else str(id)
         date = datetime.utcnow().strftime("%Y-%m-%d")
 
         html = f"""
@@ -558,7 +564,7 @@ class TemplateClass:
         </div>
 
         <div class="title">
-            <h2>Purchase Order #{id}</h2>
+            <h2>Purchase Order #{shopping_number}</h2>
         </div>
 
         <div>
