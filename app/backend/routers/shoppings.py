@@ -140,7 +140,7 @@ def store_shopping(data: ShoppingCreateInput, db: Session = Depends(get_db)):
     
     # Obtener shopping_number para el subject del correo
     shopping_record = db.query(ShoppingModel).filter(ShoppingModel.id == shopping_data["shopping_id"]).first()
-    shopping_number = shopping_record.shopping_number if shopping_record and shopping_record.shopping_number else str(shopping_data["shopping_id"])
+    shopping_number = str(shopping_record.shopping_number) if shopping_record and shopping_record.shopping_number else str(shopping_data["shopping_id"])
 
     html_content_for_own_company = TemplateClass(db).generate_shopping_html_for_own_company(data, shopping_data["shopping_id"])
     html_content_for_supplier = TemplateClass(db).generate_shopping_html_for_supplier(data, shopping_data["shopping_id"])
@@ -184,7 +184,7 @@ def update_shopping(id: int, data: UpdateShopping, session_user: UserLogin = Dep
         # Generar contenido HTML y PDF
         # Obtener shopping_number para el subject del correo
         shopping_record = db.query(ShoppingModel).filter(ShoppingModel.id == id).first()
-        shopping_number = shopping_record.shopping_number if shopping_record and shopping_record.shopping_number else str(id)
+        shopping_number = str(shopping_record.shopping_number) if shopping_record and shopping_record.shopping_number else str(id)
         
         html_content_for_own_company = TemplateClass(db).generate_shopping_html_for_own_company(data, id)
         html_content_for_supplier = TemplateClass(db).generate_shopping_html_for_supplier(data, id)
