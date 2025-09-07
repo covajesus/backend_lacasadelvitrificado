@@ -264,7 +264,7 @@ class TemplateClass:
         if totals['has_prepaid'] and totals['total_with_discount'] is not None:
             html += f"""
             <div style="margin-bottom: 10px;">
-                <strong>Total con Descuento ({self.format_number(totals['prepaid_discount_percentage'])}%):</strong><br>
+                <strong>Total con Descuento2 ({self.format_number(totals['prepaid_discount_percentage'])}%):</strong><br>
                 €. {self.format_number(totals['total_with_discount'])}
             </div>"""
 
