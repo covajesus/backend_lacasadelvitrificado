@@ -25,12 +25,14 @@ class SettingModel(Base):
     simplefactura_token = Column(Text())
     shop_address = Column(String(255))
     payment_card_url = Column(String(255))
+    prepaid_discount = Column(Numeric(5, 2))
     updated_date = Column(DateTime())
 
 class ShoppingModel(Base):
     __tablename__ = 'shoppings'
 
     id = Column(Integer, primary_key=True)
+    shopping_number = Column(String(100))
     supplier_id = Column(Integer)
     status_id = Column(Integer)
     email = Column(String(255))

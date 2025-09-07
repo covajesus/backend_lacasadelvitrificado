@@ -76,6 +76,7 @@ class ShoppingClass:
             })
 
         return ShoppingCreateInput(
+            shopping_number=shopping.shopping_number,
             supplier_id=shopping.supplier_id,
             email=shopping.email,
             total=float(shopping.total),
@@ -87,6 +88,7 @@ class ShoppingClass:
             query = (
                 self.db.query(
                     ShoppingModel.id,
+                    ShoppingModel.shopping_number,
                     ShoppingModel.supplier_id,
                     ShoppingModel.status_id,
                     ShoppingModel.email,
@@ -112,6 +114,7 @@ class ShoppingClass:
 
                 serialized_data = [{
                     "id": shopping.id,
+                    "shopping_number": shopping.shopping_number,
                     "supplier_id": shopping.supplier_id,
                     "status_id": shopping.status_id,
                     "email": shopping.email,
@@ -133,6 +136,7 @@ class ShoppingClass:
 
                 serialized_data = [{
                     "id": shopping.id,
+                    "shopping_number": shopping.shopping_number,
                     "supplier_id": shopping.supplier_id,
                     "status_id": shopping.status_id,
                     "email": shopping.email,
@@ -325,6 +329,7 @@ class ShoppingClass:
         try:
             data_query = self.db.query(
                 ShoppingModel.id,
+                ShoppingModel.shopping_number,
                 ShoppingModel.supplier_id,
                 ShoppingModel.status_id,
                 ShoppingModel.email,
@@ -338,6 +343,7 @@ class ShoppingClass:
 
             shopping_data = {
                 "id": data_query.id,
+                "shopping_number": data_query.shopping_number,
                 "supplier_id": data_query.supplier_id,
                 "status_id": data_query.status_id,
                 "email": data_query.email,
@@ -410,6 +416,7 @@ class ShoppingClass:
     def store(self, data):
         try:
             new_shopping = ShoppingModel(
+                    shopping_number=data.shopping_number,
                     supplier_id=data.supplier_id,
                     email=data.email,
                     prepaid_status_id=data.prepaid_status_id,
@@ -489,6 +496,7 @@ class ShoppingClass:
                 return {"status": "error", "message": "Shopping not found"}
 
             # Actualizar solo los datos que se guardan en la base de datos
+            existing_shopping.shopping_number = data.shopping_number
             existing_shopping.supplier_id = data.supplier_id
             existing_shopping.email = data.email  # Solo el email principal
             existing_shopping.total = data.total
