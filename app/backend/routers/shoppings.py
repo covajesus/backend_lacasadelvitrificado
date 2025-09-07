@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends
 from app.backend.db.database import get_db
 from sqlalchemy.orm import Session
 from app.backend.schemas import UserLogin, PreInventoryStocks, ShoppingCreateInput, UpdateShopping, ShoppingList, StorePaymentDocuments, SendCustomsCompanyInput, StoreCustomsCompanyDocuments
+from app.backend.db.models import ShoppingModel
 from app.backend.classes.shopping_class import ShoppingClass
 from app.backend.classes.template_class import TemplateClass
 from app.backend.classes.file_class import FileClass
@@ -136,6 +137,10 @@ def store_shopping(data: ShoppingCreateInput, db: Session = Depends(get_db)):
     cc_emails = [email for email in [data.second_email, data.third_email] if email]
 
     shopping_data = ShoppingClass(db).store(data)
+    
+    # Obtener shopping_number para el subject del correo
+    shopping_record = db.query(ShoppingModel).filter(ShoppingModel.id == shopping_data["shopping_id"]).first()
+    shopping_number = shopping_record.shopping_number if shopping_record and shopping_record.shopping_number else str(shopping_data["shopping_id"])
 
     html_content_for_own_company = TemplateClass(db).generate_shopping_html_for_own_company(data, shopping_data["shopping_id"])
     html_content_for_supplier = TemplateClass(db).generate_shopping_html_for_supplier(data, shopping_data["shopping_id"])
@@ -146,7 +151,7 @@ def store_shopping(data: ShoppingCreateInput, db: Session = Depends(get_db)):
 
     result = email_client.send_email(
         receiver_email=to_email,
-        subject="Nueva Orden de Compra - N° " + str(shopping_data["shopping_id"]),
+        subject="Nueva Orden de Compra - N° " + shopping_number,
         message=spanish_email_html_content,
         pdf_bytes=pdf_bytes_own,
         pdf_filename="purcharse_order.pdf",
@@ -154,7 +159,7 @@ def store_shopping(data: ShoppingCreateInput, db: Session = Depends(get_db)):
 
     result = email_client.send_email(
         receiver_email=to_email,
-        subject="Purchase Order - N° " + str(shopping_data["shopping_id"]),
+        subject="Purchase Order - N° " + shopping_number,
         message=english_email_html_content,
         pdf_bytes=pdf_bytes_supplier,
         pdf_filename="purcharse_order.pdf",
@@ -177,6 +182,10 @@ def update_shopping(id: int, data: UpdateShopping, session_user: UserLogin = Dep
         cc_emails = [email for email in [data.second_email, data.third_email] if email]
 
         # Generar contenido HTML y PDF
+        # Obtener shopping_number para el subject del correo
+        shopping_record = db.query(ShoppingModel).filter(ShoppingModel.id == id).first()
+        shopping_number = shopping_record.shopping_number if shopping_record and shopping_record.shopping_number else str(id)
+        
         html_content_for_own_company = TemplateClass(db).generate_shopping_html_for_own_company(data, id)
         html_content_for_supplier = TemplateClass(db).generate_shopping_html_for_supplier(data, id)
         spanish_email_html_content = TemplateClass(db).spanish_generate_email_content_html(data)
@@ -187,7 +196,7 @@ def update_shopping(id: int, data: UpdateShopping, session_user: UserLogin = Dep
         # Enviar correo a la empresa propia
         email_result = email_client.send_email(
             receiver_email=to_email,
-            subject="Orden de Compra Actualizada - N° " + str(id),
+            subject="Orden de Compra Actualizada - N° " + shopping_number,
             message=spanish_email_html_content,
             pdf_bytes=pdf_bytes_own,
             pdf_filename="purcharse_order.pdf",
@@ -196,7 +205,7 @@ def update_shopping(id: int, data: UpdateShopping, session_user: UserLogin = Dep
         # Enviar correo al proveedor
         email_result = email_client.send_email(
             receiver_email=to_email,
-            subject="Updated Purchase Order - N° " + str(id),
+            subject="Updated Purchase Order - N° " + shopping_number,
             message=english_email_html_content,
             pdf_bytes=pdf_bytes_supplier,
             pdf_filename="purcharse_order.pdf",
