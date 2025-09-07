@@ -232,7 +232,7 @@ class TemplateClass:
         totals = self.calculate_shopping_totals(data, id)
 
         html += f"""
-        <div style="margin-top: 30px; font-size: 14px;">
+        <div style="margin-top: 30px; font-size: 14px; text-align: right;">
             <div style="margin-bottom: 10px;">
                 <strong>Total por Kilogramos:</strong><br>
                 {self.format_number(totals['total_kg'])} Kg
@@ -392,7 +392,7 @@ class TemplateClass:
         totals = self.calculate_shopping_totals(data, id)
 
         html += f"""
-        <div style="margin-top: 30px; font-size: 14px;">
+        <div style="margin-top: 30px; font-size: 14px; text-align: right;">
             <div style="margin-bottom: 10px;">
                 <strong>Total por Kilogramos:</strong><br>
                 {self.format_number(totals['total_kg'])} Kg
