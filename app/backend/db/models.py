@@ -25,7 +25,7 @@ class SettingModel(Base):
     simplefactura_token = Column(Text())
     shop_address = Column(String(255))
     payment_card_url = Column(String(255))
-    prepaid_discount = Column(Numeric(5, 2))
+    prepaid_discount = Column(Integer)
     updated_date = Column(DateTime())
 
 class ShoppingModel(Base):
