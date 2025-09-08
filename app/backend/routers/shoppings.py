@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends
 from app.backend.db.database import get_db
 from sqlalchemy.orm import Session
 from app.backend.schemas import UserLogin, PreInventoryStocks, ShoppingCreateInput, UpdateShopping, ShoppingList, StorePaymentDocuments, SendCustomsCompanyInput, StoreCustomsCompanyDocuments
-from app.backend.db.models import ShoppingModel
+from app.backend.db.models import ShoppingModel, SettingModel
 from app.backend.classes.shopping_class import ShoppingClass
 from app.backend.classes.template_class import TemplateClass
 from app.backend.classes.file_class import FileClass
@@ -132,7 +132,11 @@ def send_customs_company_email(id:int, send_customs_company_inputs:SendCustomsCo
 def store_shopping(data: ShoppingCreateInput, db: Session = Depends(get_db)):
     email_client = EmailClass("bergerseidle@vitrificadoschile.com", "VitrificadosChile", "uhwy oflr siuu faoo")
 
-    # Construir lista de destinatarios
+    # Obtener el email de configuración para correos internos
+    settings = db.query(SettingModel).first()
+    internal_email = settings.account_email if settings and settings.account_email else data.email
+
+    # Construir lista de destinatarios para proveedor
     to_email = data.email
     cc_emails = [email for email in [data.second_email, data.third_email] if email]
 
@@ -149,14 +153,16 @@ def store_shopping(data: ShoppingCreateInput, db: Session = Depends(get_db)):
     pdf_bytes_own = TemplateClass(db).html_to_pdf_bytes(html_content_for_own_company)
     pdf_bytes_supplier = TemplateClass(db).html_to_pdf_bytes(html_content_for_supplier)
 
+    # Enviar correo interno a account_email
     result = email_client.send_email(
-        receiver_email=to_email,
+        receiver_email=internal_email,
         subject="Nueva Orden de Compra - N° " + shopping_number,
         message=spanish_email_html_content,
         pdf_bytes=pdf_bytes_own,
         pdf_filename="purcharse_order.pdf",
     )
 
+    # Enviar correo al proveedor
     result = email_client.send_email(
         receiver_email=to_email,
         subject="Purchase Order - N° " + shopping_number,
@@ -177,7 +183,11 @@ def update_shopping(id: int, data: UpdateShopping, session_user: UserLogin = Dep
         # Envío de correos igual que en store
         email_client = EmailClass("bergerseidle@vitrificadoschile.com", "VitrificadosChile", "uhwy oflr siuu faoo")
 
-        # Construir lista de destinatarios
+        # Obtener el email de configuración para correos internos
+        settings = db.query(SettingModel).first()
+        internal_email = settings.account_email if settings and settings.account_email else data.email
+
+        # Construir lista de destinatarios para proveedor
         to_email = data.email
         cc_emails = [email for email in [data.second_email, data.third_email] if email]
 
@@ -193,9 +203,9 @@ def update_shopping(id: int, data: UpdateShopping, session_user: UserLogin = Dep
         pdf_bytes_own = TemplateClass(db).html_to_pdf_bytes(html_content_for_own_company)
         pdf_bytes_supplier = TemplateClass(db).html_to_pdf_bytes(html_content_for_supplier)
 
-        # Enviar correo a la empresa propia
+        # Enviar correo interno a account_email
         email_result = email_client.send_email(
-            receiver_email=to_email,
+            receiver_email=internal_email,
             subject="Orden de Compra Actualizada - N° " + shopping_number,
             message=spanish_email_html_content,
             pdf_bytes=pdf_bytes_own,
