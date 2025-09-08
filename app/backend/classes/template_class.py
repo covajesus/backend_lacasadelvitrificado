@@ -1,4 +1,4 @@
-from app.backend.schemas import ShoppingCreateInput
+﻿from app.backend.schemas import ShoppingCreateInput
 import pdfkit
 from io import BytesIO
 from app.backend.db.models import SupplierModel, ProductModel, CategoryModel, UnitFeatureModel, ShoppingProductModel, SettingModel, ShoppingModel
@@ -217,7 +217,7 @@ class TemplateClass:
                 <td>{item.quantity}</td>
                 <td>{self.format_number(item.quantity_per_package)} {unit}</td>
                 <td>€. {self.format_number(item.final_unit_cost)}</td>
-                <td>€. {self.format_number(item.amount)}</td>
+                <td>€. {self.format_number(item.quantity_per_package * item.final_unit_cost)}</td>
             </tr>
             """
 
@@ -377,7 +377,7 @@ class TemplateClass:
                 <td>{item.quantity}</td>
                 <td>{self.format_number(item.quantity_per_package)} {unit}</td>
                 <td>€. {self.format_number(item.final_unit_cost)}</td>
-                <td>€. {self.format_number(item.amount)}</td>
+                <td>€. {self.format_number(item.quantity_per_package * item.final_unit_cost)}</td>
             </tr>
             """
 
