@@ -43,6 +43,19 @@ def store(id: int, customer_inputs: UpdateCustomer, session_user: UserLogin = De
 
     return {"message": data}
 
+@customers.post("/discount/apply-settings/{customer_id}/{product_id}")
+def apply_settings_discount(
+    customer_id: int, 
+    product_id: int, 
+    session_user: UserLogin = Depends(get_current_active_user), 
+    db: Session = Depends(get_db)
+):
+    """
+    Aplica el descuento de settings a un producto específico para un cliente
+    """
+    data = CustomerClass(db).apply_settings_discount(customer_id, product_id)
+    return {"message": data}
+
 @customers.delete("/discount/{customer_id}/{product_id}")
 def delete_product_discount(
     customer_id: int, 

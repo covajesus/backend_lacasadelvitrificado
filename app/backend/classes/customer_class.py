@@ -1,4 +1,4 @@
-from app.backend.db.models import CustomerModel, RegionModel, CommuneModel, CustomerProductDiscountModel
+from app.backend.db.models import CustomerModel, RegionModel, CommuneModel, CustomerProductDiscountModel, SettingModel
 from datetime import datetime
 
 class CustomerClass:
@@ -219,6 +219,51 @@ class CustomerClass:
         except Exception as e:
             return {"error": str(e)}
         
+    def apply_settings_discount(self, customer_id, product_id):
+        """
+        Aplica el descuento de settings a un producto específico para un cliente
+        """
+        try:
+            # Obtener el descuento de settings
+            setting = self.db.query(SettingModel).filter(SettingModel.id == 1).first()
+            
+            if not setting or not setting.prepaid_discount:
+                return {"status": "error", "message": "No se encontró descuento en configuración"}
+            
+            discount_percentage = setting.prepaid_discount
+            
+            # Verificar si ya existe un descuento para este producto/cliente
+            existing_discount = self.db.query(CustomerProductDiscountModel).filter(
+                CustomerProductDiscountModel.customer_id == customer_id,
+                CustomerProductDiscountModel.product_id == product_id
+            ).first()
+            
+            if existing_discount:
+                # Actualizar el descuento existente
+                existing_discount.discount_percentage = discount_percentage
+                message = f"Descuento actualizado a {discount_percentage}% desde configuración"
+            else:
+                # Crear nuevo descuento
+                new_discount = CustomerProductDiscountModel(
+                    customer_id=customer_id,
+                    product_id=product_id,
+                    discount_percentage=discount_percentage
+                )
+                self.db.add(new_discount)
+                message = f"Descuento de {discount_percentage}% aplicado desde configuración"
+            
+            self.db.commit()
+            
+            return {
+                "status": "success", 
+                "message": message,
+                "discount_percentage": discount_percentage
+            }
+            
+        except Exception as e:
+            self.db.rollback()
+            return {"status": "error", "message": str(e)}
+
     def delete_product_discount(self, customer_id, product_id):
         """
         Elimina un descuento específico de producto para un cliente
