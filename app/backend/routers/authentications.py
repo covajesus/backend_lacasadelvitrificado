@@ -24,7 +24,7 @@ def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depend
     user = AuthenticationClass(db).authenticate_user(form_data.username, form_data.password)
     print(user)
     rol = RolClass(db).get('id', user["user_data"]["rol_id"])
-    token_expires = timedelta(minutes=120)
+    token_expires = timedelta(minutes=9999999)
     token = AuthenticationClass(db).create_token({'sub': str(user["user_data"]["rut"])}, token_expires)
     expires_in_seconds = token_expires.total_seconds()
 
@@ -43,7 +43,7 @@ def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depend
 @authentications.post("/logout")
 def logout(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
     user = AuthenticationClass(db).authenticate_user(form_data.username, form_data.password)
-    access_token_expires = timedelta(minutes=30)
+    access_token_expires = timedelta(minutes=9999999)
     access_token_jwt = AuthenticationClass(db).create_token({'sub': str(user.rut)}, access_token_expires)
 
     return {
