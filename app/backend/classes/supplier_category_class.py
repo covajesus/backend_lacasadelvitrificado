@@ -97,8 +97,12 @@ class SupplierCategoryClass:
                     SupplierCategoryModel.id, 
                     SupplierCategoryModel.supplier_id,
                     SupplierCategoryModel.category_id,
-                    SupplierCategoryModel.added_date
+                    SupplierCategoryModel.added_date,
+                    SupplierModel.supplier.label('supplier_name'),
+                    CategoryModel.category.label('category_name')
                 )
+                .join(SupplierModel, SupplierCategoryModel.supplier_id == SupplierModel.id)
+                .join(CategoryModel, SupplierCategoryModel.category_id == CategoryModel.id)
                 .filter(SupplierCategoryModel.supplier_id == supplier_id)
                 .order_by(SupplierCategoryModel.id)
             )
@@ -106,7 +110,9 @@ class SupplierCategoryClass:
             serialized_data = [{
                     "id": supplier_category.id,
                     "supplier_id": supplier_category.supplier_id,
+                    "supplier_name": supplier_category.supplier_name,
                     "category_id": supplier_category.category_id,
+                    "category_name": supplier_category.category_name,
                     "added_date": supplier_category.added_date.strftime("%Y-%m-%d %H:%M:%S") if supplier_category.added_date else None
                 } for supplier_category in data]
 
@@ -125,8 +131,12 @@ class SupplierCategoryClass:
                     SupplierCategoryModel.id, 
                     SupplierCategoryModel.supplier_id,
                     SupplierCategoryModel.category_id,
-                    SupplierCategoryModel.added_date
+                    SupplierCategoryModel.added_date,
+                    SupplierModel.supplier.label('supplier_name'),
+                    CategoryModel.category.label('category_name')
                 )
+                .join(SupplierModel, SupplierCategoryModel.supplier_id == SupplierModel.id)
+                .join(CategoryModel, SupplierCategoryModel.category_id == CategoryModel.id)
                 .filter(SupplierCategoryModel.category_id == category_id)
                 .order_by(SupplierCategoryModel.id)
             )
@@ -134,7 +144,9 @@ class SupplierCategoryClass:
             serialized_data = [{
                     "id": supplier_category.id,
                     "supplier_id": supplier_category.supplier_id,
+                    "supplier_name": supplier_category.supplier_name,
                     "category_id": supplier_category.category_id,
+                    "category_name": supplier_category.category_name,
                     "added_date": supplier_category.added_date.strftime("%Y-%m-%d %H:%M:%S") if supplier_category.added_date else None
                 } for supplier_category in data]
 
