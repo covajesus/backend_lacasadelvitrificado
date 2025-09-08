@@ -44,15 +44,15 @@ class TemplateClass:
             if not shopping_product:
                 continue
 
-            # Calcular totales por unidad de medida (usando quantity * quantity_per_package)
-            total_quantity_per_package = float(shopping_product.quantity) * float(shopping_product.quantity_per_package)
-            
+            # Calcular totales por unidad de medida
+            # El frontend muestra quantity_per_package como la cantidad total por contenedor
+            # No debemos multiplicar quantity * quantity_per_package para los totales de medida
             if item.unit_measure_id == 1:  # Kilogramos
-                total_kg += total_quantity_per_package
+                total_kg += float(shopping_product.quantity_per_package)
             elif item.unit_measure_id == 2:  # Litros
-                total_lts += total_quantity_per_package
+                total_lts += float(shopping_product.quantity_per_package)
             elif item.unit_measure_id == 3:  # Unidades
-                total_und += total_quantity_per_package
+                total_und += float(shopping_product.quantity_per_package)
 
             # Calcular peso total para envío
             if unit_feature:
@@ -68,9 +68,12 @@ class TemplateClass:
                     'weight_per_pallet': weight_per_pallet
                 })
 
-            # Calcular total sin descuento usando el campo amount que ya tiene el cálculo correcto
-            if shopping_product.amount:
-                total_without_discount += float(shopping_product.amount)
+            # Calcular total sin descuento usando: cantidad × precio final por unidad
+            # Para litros: quantity_per_package × final_unit_cost
+            # Para kg/unidades: quantity_per_package × final_unit_cost
+            if shopping_product.final_unit_cost and shopping_product.quantity_per_package:
+                product_amount = float(shopping_product.quantity_per_package) * float(shopping_product.final_unit_cost)
+                total_without_discount += product_amount
 
         # Calcular pallets usando el algoritmo correcto
         calculated_pallets = self.calculate_real_mixed_pallets(products_info)
@@ -257,7 +260,7 @@ class TemplateClass:
         if totals['has_prepaid'] and totals['total_with_discount'] is not None:
             html += f"""
             <div style="margin-bottom: 10px;">
-                <strong>Total con Descuento2 ({self.format_number(totals['prepaid_discount_percentage'])}%):</strong><br>
+                <strong>Total con Descuento ({self.format_number(totals['prepaid_discount_percentage'])}%):</strong><br>
                 €. {self.format_number(totals['total_with_discount'])}
             </div>"""
 
