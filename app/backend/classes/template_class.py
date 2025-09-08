@@ -182,9 +182,9 @@ class TemplateClass:
         <div style="margin-bottom: 20px;">
         <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 20px;">
             <div>
-                <strong>Vitrificadoschile Compa��a Limitada</strong><br>
+                <strong>Vitrificadoschile Compañia Limitada</strong><br>
                 Av. Pres. Kennedy 7440 of.901<br>
-                7650618 Santiago � Chile
+                7650618 Santiago - Chile
             </div>
             <div style="text-align: right;">
                 Date: {date}
@@ -343,9 +343,9 @@ class TemplateClass:
 
         <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 20px;">
             <div>
-                <strong>Vitrificadoschile Compa��a Limitada</strong><br>
+                <strong>Vitrificadoschile Compañia Limitada</strong><br>
                 Av. Pres. Kennedy 7440 of.901<br>
-                7650618 Santiago � Chile
+                7650618 Santiago - Chile
             </div>
             <div style="text-align: right;">
                 Date: {date}
@@ -490,9 +490,9 @@ class TemplateClass:
 
         <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 20px;">
             <div>
-                <strong>Vitrificadoschile Compa��a Limitada</strong><br>
+                <strong>Vitrificadoschile Compañia Limitada</strong><br>
                 Av. Pres. Kennedy 7440 of.901<br>
-                7650618 Santiago � Chile
+                7650618 Santiago - Chile
             </div>
             <div style="text-align: right;">
                 Date: {date}
@@ -616,9 +616,9 @@ class TemplateClass:
 
         <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 20px;">
             <div>
-                <strong>Vitrificadoschile Compa��a Limitada</strong><br>
+                <strong>Vitrificadoschile Compañia Limitada</strong><br>
                 Av. Pres. Kennedy 7440 of.901<br>
-                7650618 Santiago � Chile
+                7650618 Santiago - Chile
             </div>
             <div style="text-align: right;">
                 Date: {date}
@@ -722,9 +722,9 @@ class TemplateClass:
         <div style="text-align: justify; font-size: 12px;">
             Estimados,
 
-            Junto con saludarles cordialmente, les informamos que adjunto a este correo encontrar�n un nuevo pedido generado desde nuestra plataforma de gesti�n interna.
+            Junto con saludarles cordialmente, les informamos que adjunto a este correo encontrarán un nuevo pedido generado desde nuestra plataforma de gestión interna.
 
-            El archivo PDF incluye el detalle completo de los productos requeridos. Agradecemos su confirmaci�n de recepci�n y quedamos atentos a cualquier comentario o requerimiento adicional.
+            El archivo PDF incluye el detalle completo de los productos requeridos. Agradecemos su confirmación de recepci�n y quedamos atentos a cualquier comentario o requerimiento adicional.
             <br><br>
             Saludos cordiales,
             <br>
