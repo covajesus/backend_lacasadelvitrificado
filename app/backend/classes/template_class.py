@@ -173,6 +173,8 @@ class TemplateClass:
             &ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;
             &ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;            <img src="{logo_url}" class="logo float-right" />
             <div style="text-align: right; margin-top: 10px;">
+                Date: {date}
+            </div>
         </div>
 
         <div class="title">
@@ -724,7 +726,7 @@ class TemplateClass:
 
             Junto con saludarles cordialmente, les informamos que adjunto a este correo encontrarán un nuevo pedido generado desde nuestra plataforma de gestión interna.
 
-            El archivo PDF incluye el detalle completo de los productos requeridos. Agradecemos su confirmación de recepci�n y quedamos atentos a cualquier comentario o requerimiento adicional.
+            El archivo PDF incluye el detalle completo de los productos requeridos. Agradecemos su confirmación de recepción y quedamos atentos a cualquier comentario o requerimiento adicional.
             <br><br>
             Saludos cordiales,
             <br>
