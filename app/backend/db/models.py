@@ -338,7 +338,7 @@ class InventoryAuditModel(Base):
     added_date = Column(DateTime(), default=datetime.now)
 
 class SupplierCategoryModel(Base):
-    __tablename__ = 'supplier_categories'
+    __tablename__ = 'suppliers_categories'
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     supplier_id = Column(Integer, ForeignKey('suppliers.id'))
