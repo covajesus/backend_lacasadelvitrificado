@@ -372,3 +372,24 @@ class UpdateSettings(BaseModel):
 class SalesReportFilter(BaseModel):
     date_from: Optional[str] = None
     date_to: Optional[str] = None
+
+class SupplierCategoryCreate(BaseModel):
+    supplier_id: int
+    category_id: int
+
+class SupplierCategoryUpdate(BaseModel):
+    supplier_id: Optional[int] = None
+    category_id: Optional[int] = None
+
+class SupplierCategoryList(BaseModel):
+    page: int = 1
+
+class SupplierCategoryResponse(BaseModel):
+    id: int
+    supplier_id: int
+    category_id: int
+    added_date: Optional[datetime] = None
+    updated_date: Optional[datetime] = None
+    
+    class Config:
+        from_attributes = True

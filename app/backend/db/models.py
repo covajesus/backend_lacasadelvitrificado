@@ -336,3 +336,12 @@ class InventoryAuditModel(Base):
     new_stock = Column(Integer)
     reason = Column(Text())
     added_date = Column(DateTime(), default=datetime.now)
+
+class SupplierCategoryModel(Base):
+    __tablename__ = 'supplier_categories'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    supplier_id = Column(Integer, ForeignKey('suppliers.id'))
+    category_id = Column(Integer, ForeignKey('categories.id'))
+    added_date = Column(DateTime(), default=datetime.now)
+    updated_date = Column(DateTime())

@@ -18,6 +18,7 @@ from app.backend.routers.settings import settings
 from app.backend.routers.customers import customers
 from app.backend.routers.sales import sales
 from app.backend.routers.shoppings import shoppings
+from app.backend.routers.supplier_categories import supplier_categories
 
 app = FastAPI(root_path="/api")
 application = app
@@ -59,6 +60,7 @@ app.include_router(settings)
 app.include_router(customers)
 app.include_router(sales)
 app.include_router(shoppings)
+app.include_router(supplier_categories)
 
 if __name__ == "__main__":
     uvicorn.run("main:app", port=8000, reload=True)
