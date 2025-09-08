@@ -230,8 +230,8 @@ class TemplateClass:
                 <td>{product_data.product}</td>
                 <td>{item.quantity}</td>
                 <td>{self.format_number(item.quantity_per_package)} {unit}</td>
-                <td>�. {self.format_number(item.final_unit_cost)}</td>
-                <td>�. {self.format_number(item.quantity_per_package * item.final_unit_cost)}</td>
+                <td>€. {self.format_number(item.final_unit_cost)}</td>
+                <td>€. {self.format_number(item.quantity_per_package * item.final_unit_cost)}</td>
             </tr>
             """
 
@@ -272,13 +272,13 @@ class TemplateClass:
             html += f"""
             <div style="margin-bottom: 10px;">
                 <strong>Discount:</strong><br>
-                �. {self.format_number(discount_amount)}
+                €. {self.format_number(discount_amount)}
             </div>"""
 
         html += f"""
             <div style="margin-bottom: 10px;">
                 <strong>Total without Discount:</strong><br>
-                �. {self.format_number(totals['total_without_discount'])}
+                €. {self.format_number(totals['total_without_discount'])}
             </div>"""
 
         # Mostrar total con descuento solo si hay prepago
@@ -286,7 +286,7 @@ class TemplateClass:
             html += f"""
             <div style="margin-bottom: 10px;">
                 <strong>Total with Discount ({self.format_number(totals['prepaid_discount_percentage'])}%):</strong><br>
-                �. {self.format_number(totals['total_with_discount'])}
+                €. {self.format_number(totals['total_with_discount'])}
             </div>"""
 
         html += f"""
@@ -407,8 +407,8 @@ class TemplateClass:
                 <td>{product_data.product}</td>
                 <td>{item.quantity}</td>
                 <td>{self.format_number(item.quantity_per_package)} {unit}</td>
-                <td>�. {self.format_number(item.final_unit_cost)}</td>
-                <td>�. {self.format_number(item.quantity_per_package * item.final_unit_cost)}</td>
+                <td>€. {self.format_number(item.final_unit_cost)}</td>
+                <td>€. {self.format_number(item.quantity_per_package * item.final_unit_cost)}</td>
             </tr>
             """
 
@@ -449,13 +449,13 @@ class TemplateClass:
             html += f"""
             <div style="margin-bottom: 10px;">
                 <strong>Discount:</strong><br>
-                �. {self.format_number(discount_amount)}
+                €. {self.format_number(discount_amount)}
             </div>"""
 
         html += f"""
             <div style="margin-bottom: 10px;">
                 <strong>Total without Discount:</strong><br>
-                �. {self.format_number(totals['total_without_discount'])}
+                €. {self.format_number(totals['total_without_discount'])}
             </div>"""
 
         # Mostrar total con descuento solo si hay prepago
@@ -463,7 +463,7 @@ class TemplateClass:
             html += f"""
             <div style="margin-bottom: 10px;">
                 <strong>Total with Discount ({self.format_number(totals['prepaid_discount_percentage'])}%):</strong><br>
-                �. {self.format_number(totals['total_with_discount'])}
+                €. {self.format_number(totals['total_with_discount'])}
             </div>"""
 
         html += f"""
@@ -481,9 +481,7 @@ class TemplateClass:
                 &ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;
                 &ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;
                 &ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;            <img src="{logo_url}" class="logo float-right" />
-            <div style="text-align: right; margin-top: 10px;">
-                Date: {date}
-            </div>
+
         </div>
 
         <div class="title">
