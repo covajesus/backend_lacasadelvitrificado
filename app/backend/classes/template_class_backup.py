@@ -1,4 +1,4 @@
-from app.backend.schemas import ShoppingCreateInput
+﻿from app.backend.schemas import ShoppingCreateInput
 import pdfkit
 from io import BytesIO
 from app.backend.db.models import SupplierModel, ProductModel, CategoryModel, UnitFeatureModel, ShoppingProductModel, SettingModel, ShoppingModel
@@ -10,11 +10,7 @@ class TemplateClass:
         self.db = db
     
     def format_number(self, value):
-        """Formatea n�meros para mostrar enteros sin decimales y        <!-- Page break -->
-        <div class="page-break"></div>
-
-        <!-- Second page -->
-        <div class="page-break">males cuando es necesario"""
+        """Formatea números para mostrar enteros sin decimales y decimales cuando es necesario"""
         if value == int(value):
             return str(int(value))
         else:
@@ -29,7 +25,7 @@ class TemplateClass:
         total_without_discount = 0.0
         products_info = []
 
-        # Obtener informaci�n del shopping para verificar si hay prepago
+        # Obtener información del shopping para verificar si hay prepago
         shopping = self.db.query(ShoppingModel).filter(ShoppingModel.id == shopping_id).first()
         has_prepaid = shopping and shopping.prepaid_status_id is not None
 
@@ -58,13 +54,13 @@ class TemplateClass:
             elif item.unit_measure_id == 3:  # Unidades
                 total_und += float(shopping_product.quantity_per_package)
 
-            # Calcular peso total para env�o
+            # Calcular peso total para envío
             if unit_feature:
                 weight_per_unit = float(unit_feature.weight_per_unit) if unit_feature.weight_per_unit else 0.0
                 product_total_weight = weight_per_unit * float(shopping_product.quantity)
                 total_shipping_kg += product_total_weight
                 
-                # Para c�lculo de pallets
+                # Para cálculo de pallets
                 weight_per_pallet = float(unit_feature.weight_per_pallet) if unit_feature.weight_per_pallet else 1000.0
                 products_info.append({
                     'name': product_data.product if product_data else 'Unknown',
@@ -72,9 +68,9 @@ class TemplateClass:
                     'weight_per_pallet': weight_per_pallet
                 })
 
-            # Calcular total sin descuento usando: cantidad � precio final por unidad
-            # Para litros: quantity_per_package � final_unit_cost
-            # Para kg/unidades: quantity_per_package � final_unit_cost
+            # Calcular total sin descuento usando: cantidad × precio final por unidad
+            # Para litros: quantity_per_package × final_unit_cost
+            # Para kg/unidades: quantity_per_package × final_unit_cost
             if shopping_product.final_unit_cost and shopping_product.quantity_per_package:
                 product_amount = float(shopping_product.quantity_per_package) * float(shopping_product.final_unit_cost)
                 total_without_discount += product_amount
@@ -111,7 +107,7 @@ class TemplateClass:
             if not active:
                 break
             
-            # Capacidad del pallet = M�XIMA de productos activos (sincronizado con frontend)
+            # Capacidad del pallet = MÁXIMA de productos activos (sincronizado con frontend)
             pallet_capacity = max(p["capacity"] for p in active)
             pallet_weight = 0
             pallet_contents = []
@@ -119,7 +115,7 @@ class TemplateClass:
             # Llenar pallet con productos disponibles
             for product in remaining:
                 if product["weight"] > 0 and pallet_weight < pallet_capacity:
-                    # Cu�nto puede agregar de este producto
+                    # Cuánto puede agregar de este producto
                     space_available = pallet_capacity - pallet_weight
                     can_add = min(product["weight"], space_available)
                     
@@ -173,6 +169,8 @@ class TemplateClass:
             &ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;
             &ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;            <img src="{logo_url}" class="logo float-right" />
             <div style="text-align: right; margin-top: 10px;">
+                Date: {date}
+            </div>
         </div>
 
         <div class="title">
@@ -180,15 +178,9 @@ class TemplateClass:
         </div>
 
         <div style="margin-bottom: 20px;">
-        <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 20px;">
-            <div>
-                <strong>Vitrificadoschile Compa��a Limitada</strong><br>
-                Av. Pres. Kennedy 7440 of.901<br>
-                7650618 Santiago � Chile
-            </div>
-            <div style="text-align: right;">
-                Date: {date}
-            </div>
+            <strong>Vitrificadoschile Compañía Limitada</strong><br>
+            Av. Pres. Kennedy 7440 of.901<br>
+            7650618 Santiago  Chile
         </div>
 
         <table>
@@ -211,7 +203,7 @@ class TemplateClass:
 
         for item in sorted_products:
             product_data = self.db.query(ProductModel).filter(ProductModel.id == item.product_id).first()
-            unit = {1: "Kg", 2: "Lts", 3: "Units"}.get(item.unit_measure_id, "")
+            unit = {1: "Kg", 2: "Lts", 3: "Und"}.get(item.unit_measure_id, "")
 
             if item.category_id != current_category_id:
                 category_data = self.db.query(CategoryModel).filter(CategoryModel.id == item.category_id).first()
@@ -228,8 +220,8 @@ class TemplateClass:
                 <td>{product_data.product}</td>
                 <td>{item.quantity}</td>
                 <td>{self.format_number(item.quantity_per_package)} {unit}</td>
-                <td>�. {self.format_number(item.final_unit_cost)}</td>
-                <td>�. {self.format_number(item.quantity_per_package * item.final_unit_cost)}</td>
+                <td>€. {self.format_number(item.final_unit_cost)}</td>
+                <td>€. {self.format_number(item.quantity_per_package * item.final_unit_cost)}</td>
             </tr>
             """
 
@@ -244,47 +236,36 @@ class TemplateClass:
         html += f"""
         <div style="margin-top: 30px; font-size: 14px; text-align: right;">
             <div style="margin-bottom: 10px;">
-                <strong>Total Kilograms:</strong><br>
+                <strong>Total por Kilogramos:</strong><br>
                 {self.format_number(totals['total_kg'])} Kg
             </div>
             <div style="margin-bottom: 10px;">
-                <strong>Total Liters:</strong><br>
+                <strong>Total por Litros:</strong><br>
                 {self.format_number(totals['total_lts'])} Lts
             </div>
             <div style="margin-bottom: 10px;">
-                <strong>Total Units:</strong><br>
-                {self.format_number(totals['total_und'])} Units
+                <strong>Total por Unidad:</strong><br>
+                {self.format_number(totals['total_und'])} Und
             </div>
             <div style="margin-bottom: 10px;">
-                <strong>Total Shipping (Kg):</strong><br>
+                <strong>Total Envío (Kg):</strong><br>
                 {self.format_number(totals['total_shipping_kg'])} Kg
             </div>
             <div style="margin-bottom: 10px;">
-                <strong>Total Pallets (Units):</strong><br>
-                {self.format_number(totals['total_pallets'])} Units
-            </div>"""
-
-        # Mostrar descuento si hay prepago
-        if totals['has_prepaid'] and totals['total_with_discount'] is not None:
-            discount_amount = totals['total_without_discount'] - totals['total_with_discount']
-            html += f"""
+                <strong>Total Pallets (Und):</strong><br>
+                {self.format_number(totals['total_pallets'])} Und
+            </div>
             <div style="margin-bottom: 10px;">
-                <strong>Discount:</strong><br>
-                �. {self.format_number(discount_amount)}
-            </div>"""
-
-        html += f"""
-            <div style="margin-bottom: 10px;">
-                <strong>Total without Discount:</strong><br>
-                �. {self.format_number(totals['total_without_discount'])}
+                <strong>Total sin Descuento:</strong><br>
+                €. {self.format_number(totals['total_without_discount'])}
             </div>"""
 
         # Mostrar total con descuento solo si hay prepago
         if totals['has_prepaid'] and totals['total_with_discount'] is not None:
             html += f"""
             <div style="margin-bottom: 10px;">
-                <strong>Total with Discount ({self.format_number(totals['prepaid_discount_percentage'])}%):</strong><br>
-                �. {self.format_number(totals['total_with_discount'])}
+                <strong>Total con Descuento ({self.format_number(totals['prepaid_discount_percentage'])}%):</strong><br>
+                €. {self.format_number(totals['total_with_discount'])}
             </div>"""
 
         html += f"""
@@ -335,21 +316,19 @@ class TemplateClass:
                 &ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;
                 &ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;
                 &ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;            <img src="{logo_url}" class="logo float-right" />
+            <div style="text-align: right; margin-top: 10px;">
+                Date: {date}
+            </div>
         </div>
 
         <div class="title">
             <h2>Purchase Order #{shopping_number}</h2>
         </div>
 
-        <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 20px;">
-            <div>
-                <strong>Vitrificadoschile Compa��a Limitada</strong><br>
-                Av. Pres. Kennedy 7440 of.901<br>
-                7650618 Santiago � Chile
-            </div>
-            <div style="text-align: right;">
-                Date: {date}
-            </div>
+        <div style="margin-bottom: 20px;">
+            <strong>Vitrificadoschile Compañía Limitada</strong><br>
+            Av. Pres. Kennedy 7440 of.901<br>
+            7650618 Santiago  Chile
         </div>
 
             <table>
@@ -380,7 +359,7 @@ class TemplateClass:
                 )
 
                 if not unit_features:
-                    raise ValueError(f"Producto con ID {item.product_id} no tiene configuraci�n en UnitFeatureModel")
+                    raise ValueError(f"Producto con ID {item.product_id} no tiene configuración en UnitFeatureModel")
                 try:
                     quantity_per_package = float(unit_features.quantity_per_package)
                     quantity_per_pallet = float(unit_features.quantity_per_pallet)
@@ -388,7 +367,7 @@ class TemplateClass:
                 except ValueError:
                     raise ValueError(f"Error al convertir valores de UnitFeatureModel a float (product_id={item.product_id})")
 
-            unit = {1: "Kg", 2: "Lts", 3: "Units"}.get(item.unit_measure_id, "")
+            unit = {1: "Kg", 2: "Lts", 3: "Und"}.get(item.unit_measure_id, "")
 
             if item.category_id != current_category_id:
                 category_data = self.db.query(CategoryModel).filter(CategoryModel.id == item.category_id).first()
@@ -405,8 +384,8 @@ class TemplateClass:
                 <td>{product_data.product}</td>
                 <td>{item.quantity}</td>
                 <td>{self.format_number(item.quantity_per_package)} {unit}</td>
-                <td>�. {self.format_number(item.final_unit_cost)}</td>
-                <td>�. {self.format_number(item.quantity_per_package * item.final_unit_cost)}</td>
+                <td>€. {self.format_number(item.final_unit_cost)}</td>
+                <td>€. {self.format_number(item.quantity_per_package * item.final_unit_cost)}</td>
             </tr>
             """
 
@@ -421,56 +400,45 @@ class TemplateClass:
         html += f"""
         <div style="margin-top: 30px; font-size: 14px; text-align: right;">
             <div style="margin-bottom: 10px;">
-                <strong>Total Kilograms:</strong><br>
+                <strong>Total por Kilogramos:</strong><br>
                 {self.format_number(totals['total_kg'])} Kg
             </div>
             <div style="margin-bottom: 10px;">
-                <strong>Total Liters:</strong><br>
+                <strong>Total por Litros:</strong><br>
                 {self.format_number(totals['total_lts'])} Lts
             </div>
             <div style="margin-bottom: 10px;">
-                <strong>Total Units:</strong><br>
-                {self.format_number(totals['total_und'])} Units
+                <strong>Total por Unidad:</strong><br>
+                {self.format_number(totals['total_und'])} Und
             </div>
             <div style="margin-bottom: 10px;">
-                <strong>Total Shipping (Kg):</strong><br>
+                <strong>Total Envío (Kg):</strong><br>
                 {self.format_number(totals['total_shipping_kg'])} Kg
             </div>
             <div style="margin-bottom: 10px;">
-                <strong>Total Pallets (Units):</strong><br>
-                {self.format_number(totals['total_pallets'])} Units
-            </div>"""
-
-        # Mostrar descuento si hay prepago
-        if totals['has_prepaid'] and totals['total_with_discount'] is not None:
-            discount_amount = totals['total_without_discount'] - totals['total_with_discount']
-            html += f"""
+                <strong>Total Pallets (Und):</strong><br>
+                {self.format_number(totals['total_pallets'])} Und
+            </div>
             <div style="margin-bottom: 10px;">
-                <strong>Discount:</strong><br>
-                �. {self.format_number(discount_amount)}
-            </div>"""
-
-        html += f"""
-            <div style="margin-bottom: 10px;">
-                <strong>Total without Discount:</strong><br>
-                �. {self.format_number(totals['total_without_discount'])}
+                <strong>Total sin Descuento:</strong><br>
+                €. {self.format_number(totals['total_without_discount'])}
             </div>"""
 
         # Mostrar total con descuento solo si hay prepago
         if totals['has_prepaid'] and totals['total_with_discount'] is not None:
             html += f"""
             <div style="margin-bottom: 10px;">
-                <strong>Total with Discount ({self.format_number(totals['prepaid_discount_percentage'])}%):</strong><br>
-                �. {self.format_number(totals['total_with_discount'])}
+                <strong>Total con Descuento ({self.format_number(totals['prepaid_discount_percentage'])}%):</strong><br>
+                €. {self.format_number(totals['total_with_discount'])}
             </div>"""
 
         html += f"""
         </div>
 
-        <!-- Salto de p�gina -->
+        <!-- Salto de página -->
         <div class="page-break"></div>
 
-        <!-- Segunda p�gina -->
+        <!-- Segunda página -->
         <div class="page-break">
             <div class="header">
                 <img src="{vitrificado_logo_url}" class="vitrificado_logo float-left" />
@@ -488,15 +456,10 @@ class TemplateClass:
             <h2>Purchase Order #{shopping_number}</h2>
         </div>
 
-        <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 20px;">
-            <div>
-                <strong>Vitrificadoschile Compa��a Limitada</strong><br>
-                Av. Pres. Kennedy 7440 of.901<br>
-                7650618 Santiago � Chile
-            </div>
-            <div style="text-align: right;">
-                Date: {date}
-            </div>
+        <div style="margin-bottom: 20px;">
+            <strong>Vitrificadoschile Compañía Limitada</strong><br>
+            Av. Pres. Kennedy 7440 of.901<br>
+            7650618 Santiago  Chile
         </div>
 
             <table>
@@ -535,7 +498,7 @@ class TemplateClass:
 
                 total_weight_per_shopping += product_total_weight
                 
-                # Acumular informaci�n de productos para c�lculo correcto de pallets
+                # Acumular información de productos para cálculo correcto de pallets
                 products_info.append({
                     'name': product_data.product if product_data else 'Unknown',
                     'total_weight': product_total_weight,
@@ -608,21 +571,19 @@ class TemplateClass:
             &ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;
             &ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;
             &ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;            <img src="{logo_url}" class="logo float-right" />
+            <div style="text-align: right; margin-top: 10px;">
+                Date: {date}
+            </div>
         </div>
 
         <div class="title">
             <h2>Purchase Order #{shopping_number}</h2>
         </div>
 
-        <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 20px;">
-            <div>
-                <strong>Vitrificadoschile Compa��a Limitada</strong><br>
-                Av. Pres. Kennedy 7440 of.901<br>
-                7650618 Santiago � Chile
-            </div>
-            <div style="text-align: right;">
-                Date: {date}
-            </div>
+        <div style="margin-bottom: 20px;">
+            <strong>Vitrificadoschile Compañía Limitada</strong><br>
+            Av. Pres. Kennedy 7440 of.901<br>
+            7650618 Santiago  Chile
         </div>
 
         <table>
@@ -643,7 +604,7 @@ class TemplateClass:
 
         for item in sorted_products:
             product_data = self.db.query(ProductModel).filter(ProductModel.id == item.product_id).first()
-            unit = {1: "Kg", 2: "Lts", 3: "Units"}.get(item.unit_measure_id, "")
+            unit = {1: "Kg", 2: "Lts", 3: "Und"}.get(item.unit_measure_id, "")
 
             if item.category_id != current_category_id:
                 category_data = self.db.query(CategoryModel).filter(CategoryModel.id == item.category_id).first()
@@ -722,9 +683,9 @@ class TemplateClass:
         <div style="text-align: justify; font-size: 12px;">
             Estimados,
 
-            Junto con saludarles cordialmente, les informamos que adjunto a este correo encontrar�n un nuevo pedido generado desde nuestra plataforma de gesti�n interna.
+            Junto con saludarles cordialmente, les informamos que adjunto a este correo encontrarán un nuevo pedido generado desde nuestra plataforma de gestión interna.
 
-            El archivo PDF incluye el detalle completo de los productos requeridos. Agradecemos su confirmaci�n de recepci�n y quedamos atentos a cualquier comentario o requerimiento adicional.
+            El archivo PDF incluye el detalle completo de los productos requeridos. Agradecemos su confirmación de recepción y quedamos atentos a cualquier comentario o requerimiento adicional.
             <br><br>
             Saludos cordiales,
             <br>
