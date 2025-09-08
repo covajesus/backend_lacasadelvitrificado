@@ -219,6 +219,30 @@ class CustomerClass:
         except Exception as e:
             return {"error": str(e)}
         
+    def delete_product_discount(self, customer_id, product_id):
+        """
+        Elimina un descuento específico de producto para un cliente
+        """
+        try:
+            # Buscar el descuento específico
+            discount = self.db.query(CustomerProductDiscountModel).filter(
+                CustomerProductDiscountModel.customer_id == customer_id,
+                CustomerProductDiscountModel.product_id == product_id
+            ).first()
+            
+            if not discount:
+                return {"status": "error", "message": "Descuento no encontrado"}
+            
+            # Eliminar el descuento
+            self.db.delete(discount)
+            self.db.commit()
+            
+            return {"status": "success", "message": "Descuento eliminado exitosamente"}
+            
+        except Exception as e:
+            self.db.rollback()
+            return {"status": "error", "message": str(e)}
+
     def delete(self, id):
         try:
             data = self.db.query(CustomerModel).filter(CustomerModel.id == id).first()
