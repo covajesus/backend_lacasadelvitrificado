@@ -167,16 +167,20 @@ class TemplateClass:
             &ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;
             &ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;
             &ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;
-            &ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;
-            <img src="{logo_url}" class="logo float-right" />
+            &ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;            <img src="{logo_url}" class="logo float-right" />
+            <div style="text-align: right; margin-top: 10px;">
+                Date: {date}
+            </div>
         </div>
 
         <div class="title">
             <h2>Purchase Order #{shopping_number}</h2>
         </div>
 
-        <div>
-            Date: {date}
+        <div style="margin-bottom: 20px;">
+            <strong>Vitrificadoschile Compañía Limitada</strong><br>
+            Av. Pres. Kennedy 7440 of.901<br>
+            7650618 Santiago  Chile
         </div>
 
         <table>
@@ -311,17 +315,21 @@ class TemplateClass:
                 &ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;
                 &ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;
                 &ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;
-                &ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;
-                <img src="{logo_url}" class="logo float-right" />
-            </div>
-
-            <div class="title">
-                <h2>Purchase Order #{shopping_number}</h2>
-            </div>
-
-            <div>
+                &ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;            <img src="{logo_url}" class="logo float-right" />
+            <div style="text-align: right; margin-top: 10px;">
                 Date: {date}
             </div>
+        </div>
+
+        <div class="title">
+            <h2>Purchase Order #{shopping_number}</h2>
+        </div>
+
+        <div style="margin-bottom: 20px;">
+            <strong>Vitrificadoschile Compañía Limitada</strong><br>
+            Av. Pres. Kennedy 7440 of.901<br>
+            7650618 Santiago  Chile
+        </div>
 
             <table>
                 <thead>
@@ -438,16 +446,21 @@ class TemplateClass:
                 &ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;
                 &ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;
                 &ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;
-                &ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;
-                <img src="{logo_url}" class="logo float-right" />
-            </div>
-            <div class="title">
-                <h2>Purchase Order #{shopping_number}</h2>
-            </div>
-
-            <div>
+                &ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;            <img src="{logo_url}" class="logo float-right" />
+            <div style="text-align: right; margin-top: 10px;">
                 Date: {date}
             </div>
+        </div>
+
+        <div class="title">
+            <h2>Purchase Order #{shopping_number}</h2>
+        </div>
+
+        <div style="margin-bottom: 20px;">
+            <strong>Vitrificadoschile Compañía Limitada</strong><br>
+            Av. Pres. Kennedy 7440 of.901<br>
+            7650618 Santiago  Chile
+        </div>
 
             <table>
                 <thead>
@@ -557,16 +570,20 @@ class TemplateClass:
             &ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;
             &ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;
             &ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;
-            &ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;
-            <img src="{logo_url}" class="logo float-right" />
+            &ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;            <img src="{logo_url}" class="logo float-right" />
+            <div style="text-align: right; margin-top: 10px;">
+                Date: {date}
+            </div>
         </div>
 
         <div class="title">
             <h2>Purchase Order #{shopping_number}</h2>
         </div>
 
-        <div>
-            Date: {date}
+        <div style="margin-bottom: 20px;">
+            <strong>Vitrificadoschile Compañía Limitada</strong><br>
+            Av. Pres. Kennedy 7440 of.901<br>
+            7650618 Santiago  Chile
         </div>
 
         <table>
@@ -728,3 +745,4 @@ class TemplateClass:
         """
 
         return html
+
