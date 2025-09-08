@@ -172,13 +172,10 @@ class TemplateClass:
             &ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;
             &ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;
             &ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;            <img src="{logo_url}" class="logo float-right" />
-            <div style="text-align: right; margin-top: 10px;">
-                Date: {date}
-            </div>
         </div>
 
         <div class="title">
-            <h2>Purchase Order4 #{shopping_number}</h2>
+            <h2>Purchase Order #{shopping_number}</h2>
         </div>
 
         <div style="margin-bottom: 20px;">
@@ -340,7 +337,7 @@ class TemplateClass:
         </div>
 
         <div class="title">
-            <h2>Purchase Order3 #{shopping_number}</h2>
+            <h2>Purchase Order #{shopping_number}</h2>
         </div>
 
         <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 20px;">
@@ -485,7 +482,7 @@ class TemplateClass:
         </div>
 
         <div class="title">
-            <h2>Purchase Order2 #{shopping_number}</h2>
+            <h2>Purchase Order #{shopping_number}</h2>
         </div>
 
         <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 20px;">
@@ -611,7 +608,7 @@ class TemplateClass:
         </div>
 
         <div class="title">
-            <h2>Purchase Order1 #{shopping_number}</h2>
+            <h2>Purchase Order #{shopping_number}</h2>
         </div>
 
         <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 20px;">
