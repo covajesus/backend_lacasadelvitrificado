@@ -52,9 +52,9 @@ class CustomerClass:
             # Aplicar filtros de búsqueda si se proporcionan
             if name and name.strip():
                 query = query.filter(CustomerModel.social_reason.ilike(f"%{name.strip()}%"))
-            
+            print(rut)
             if rut and rut.strip():
-                query = query.filter(CustomerModel.identification_number.ilike(f"%{rut.strip()}%"))
+                query = query.filter(CustomerModel.identification_number == rut.strip())
 
             if page > 0:
                 total_items = query.count()
