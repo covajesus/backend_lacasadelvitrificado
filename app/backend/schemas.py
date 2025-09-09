@@ -59,6 +59,8 @@ class LocationList(BaseModel):
 
 class CustomerList(BaseModel):
     page: int
+    name: Optional[str] = None
+    rut: Optional[str] = None
 
 class CategoryList(BaseModel):
     page: int

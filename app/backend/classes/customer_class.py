@@ -35,7 +35,7 @@ class CustomerClass:
             error_message = str(e)
             return {"status": "error", "message": error_message}
 
-    def get_all(self, page=0, items_per_page=10):
+    def get_all(self, page=0, items_per_page=10, name=None, rut=None):
         try:
             query = (
                 self.db.query(
@@ -48,6 +48,13 @@ class CustomerClass:
                 )
                 .order_by(CustomerModel.id)
             )
+
+            # Aplicar filtros de búsqueda si se proporcionan
+            if name and name.strip():
+                query = query.filter(CustomerModel.social_reason.ilike(f"%{name.strip()}%"))
+            
+            if rut and rut.strip():
+                query = query.filter(CustomerModel.identification_number.ilike(f"%{rut.strip()}%"))
 
             if page > 0:
                 total_items = query.count()
