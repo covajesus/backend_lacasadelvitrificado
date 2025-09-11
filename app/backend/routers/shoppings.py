@@ -114,7 +114,7 @@ def send_customs_company_email(id:int, send_customs_company_inputs:SendCustomsCo
     email_html_content = TemplateClass(db).spanish_generate_email_content_html(data)
     pdf_bytes = TemplateClass(db).html_to_pdf_bytes(html_content)
 
-    email_client = EmailClass("bergerseidle@vitrificadoschile.com", "VitrificadosChile", "uhwy oflr siuu faoo")
+    email_client = EmailClass("bergerseidle@vitrificadoschile.com", "VitrificadosChile", "bhva zicx wfub duxg")
 
     result = email_client.send_email(
         receiver_email=send_customs_company_inputs.customs_company_email,
@@ -130,7 +130,7 @@ def send_customs_company_email(id:int, send_customs_company_inputs:SendCustomsCo
 
 @shoppings.post("/store")
 def store_shopping(data: ShoppingCreateInput, db: Session = Depends(get_db)):
-    email_client = EmailClass("bergerseidle@vitrificadoschile.com", "VitrificadosChile", "uhwy oflr siuu faoo")
+    email_client = EmailClass("bergerseidle@vitrificadoschile.com", "VitrificadosChile", "bhva zicx wfub duxg")
 
     # Obtener el email de configuración para correos internos
     settings = db.query(SettingModel).first()
@@ -181,7 +181,7 @@ def update_shopping(id: int, data: UpdateShopping, session_user: UserLogin = Dep
     
     if result.get("status") == "success":
         # Envío de correos igual que en store
-        email_client = EmailClass("bergerseidle@vitrificadoschile.com", "VitrificadosChile", "uhwy oflr siuu faoo")
+        email_client = EmailClass("bergerseidle@vitrificadoschile.com", "VitrificadosChile", "bhva zicx wfub duxg")
 
         # Obtener el email de configuración para correos internos
         settings = db.query(SettingModel).first()
