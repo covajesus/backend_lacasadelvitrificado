@@ -234,7 +234,7 @@ class StoreProduct(BaseModel):
 class ShoppingProductInput(BaseModel):
     category_id: int
     product_id: int
-    quantity: int
+    quantity: float
     quantity_per_package: float
     discount_percentage: int
     original_unit_cost: float
