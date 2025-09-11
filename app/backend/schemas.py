@@ -234,12 +234,12 @@ class StoreProduct(BaseModel):
 class ShoppingProductInput(BaseModel):
     category_id: int
     product_id: int
-    quantity: float
-    quantity_per_package: float
-    discount_percentage: int
-    original_unit_cost: float
-    final_unit_cost: float
-    amount: float
+    quantity: Union[int, float]
+    quantity_per_package: Union[int, float]
+    discount_percentage: Union[int, float]
+    original_unit_cost: Union[int, float]
+    final_unit_cost: Union[int, float]
+    amount: Union[int, float]
     unit_measure_id: int
 
 class ShoppingList(BaseModel):
@@ -323,7 +323,7 @@ class StorePaymentDocuments(BaseModel):
         )
     
 class ShoppingCreateInput(BaseModel):
-    shopping_number: Optional[str] = None
+    shopping_number: Optional[Union[str, int]] = None
     products: List[ShoppingProductInput]
     total: float
     email: str
@@ -333,7 +333,7 @@ class ShoppingCreateInput(BaseModel):
     supplier_id: int
 
 class UpdateShopping(BaseModel):
-    shopping_number: Optional[str] = None
+    shopping_number: Optional[Union[str, int]] = None
     products: List[ShoppingProductInput]
     total: float
     email: str
