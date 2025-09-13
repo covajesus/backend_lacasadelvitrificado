@@ -1,4 +1,4 @@
-from app.backend.schemas import ShoppingCreateInput
+﻿from app.backend.schemas import ShoppingCreateInput
 import pdfkit
 from io import BytesIO
 from app.backend.db.models import SupplierModel, ProductModel, CategoryModel, UnitFeatureModel, ShoppingProductModel, SettingModel, ShoppingModel
@@ -10,19 +10,31 @@ class TemplateClass:
         self.db = db
     
     def truncate_text(self, text, max_length=20):
-        """Trunca el texto a la longitud máxima especificada y agrega '...'"""
+        """Trunca el texto a la longitud mÃ¡xima especificada y agrega '...'"""
         if len(text) <= max_length:
             return text
         return text[:max_length] + "..."
     
     def format_number(self, value):
-        """Formatea n�meros para mostrar enteros sin decimales y        <!-- Page break -->
-        <div class="page-break"></div>
-
-        <!-- Second page -->
-        <div class="page-break">males cuando es necesario"""
+        """Formatea nÃºmeros para mostrar enteros sin decimales cuando es necesario"""
         if value == int(value):
             return str(int(value))
+        else:
+            return f"{value:.2f}"
+    
+    def format_currency(self, value):
+        """Formatea nÃºmeros como moneda con separador de miles (punto)"""
+        try:
+            # Convertir a float si no lo es
+            num = float(value)
+            # Si es entero, mostrar sin decimales
+            if num == int(num):
+                return f"{int(num):,}".replace(',', '.')
+            else:
+                # Si tiene decimales, mostrar con 2 decimales
+                return f"{num:,.2f}".replace(',', 'X').replace('.', ',').replace('X', '.')
+        except (ValueError, TypeError):
+            return str(value)
         else:
             return f"{value:.2f}"
 
@@ -35,7 +47,7 @@ class TemplateClass:
         total_without_discount = 0.0
         products_info = []
 
-        # Obtener informaci�n del shopping para verificar si hay prepago
+        # Obtener informaciï¿½n del shopping para verificar si hay prepago
         shopping = self.db.query(ShoppingModel).filter(ShoppingModel.id == shopping_id).first()
         has_prepaid = shopping and shopping.prepaid_status_id is not None
 
@@ -64,13 +76,13 @@ class TemplateClass:
             elif item.unit_measure_id == 3:  # Unidades
                 total_und += float(shopping_product.quantity_per_package)
 
-            # Calcular peso total para env�o
+            # Calcular peso total para envï¿½o
             if unit_feature:
                 weight_per_unit = float(unit_feature.weight_per_unit) if unit_feature.weight_per_unit else 0.0
                 product_total_weight = weight_per_unit * float(shopping_product.quantity)
                 total_shipping_kg += product_total_weight
                 
-                # Para c�lculo de pallets
+                # Para cï¿½lculo de pallets
                 weight_per_pallet = float(unit_feature.weight_per_pallet) if unit_feature.weight_per_pallet else 1000.0
                 products_info.append({
                     'name': product_data.product if product_data else 'Unknown',
@@ -78,9 +90,9 @@ class TemplateClass:
                     'weight_per_pallet': weight_per_pallet
                 })
 
-            # Calcular total sin descuento usando: cantidad � precio final por unidad
-            # Para litros: quantity_per_package � final_unit_cost
-            # Para kg/unidades: quantity_per_package � final_unit_cost
+            # Calcular total sin descuento usando: cantidad ï¿½ precio final por unidad
+            # Para litros: quantity_per_package ï¿½ final_unit_cost
+            # Para kg/unidades: quantity_per_package ï¿½ final_unit_cost
             if shopping_product.final_unit_cost and shopping_product.quantity_per_package:
                 product_amount = float(shopping_product.quantity_per_package) * float(shopping_product.final_unit_cost)
                 total_without_discount += product_amount
@@ -117,7 +129,7 @@ class TemplateClass:
             if not active:
                 break
             
-            # Capacidad del pallet = M�XIMA de productos activos (sincronizado con frontend)
+            # Capacidad del pallet = Mï¿½XIMA de productos activos (sincronizado con frontend)
             pallet_capacity = max(p["capacity"] for p in active)
             pallet_weight = 0
             pallet_contents = []
@@ -125,7 +137,7 @@ class TemplateClass:
             # Llenar pallet con productos disponibles
             for product in remaining:
                 if product["weight"] > 0 and pallet_weight < pallet_capacity:
-                    # Cu�nto puede agregar de este producto
+                    # Cuï¿½nto puede agregar de este producto
                     space_available = pallet_capacity - pallet_weight
                     can_add = min(product["weight"], space_available)
                     
@@ -187,7 +199,7 @@ class TemplateClass:
         <div style="margin-bottom: 20px;">
         <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 20px;">
             <div>
-                <strong>Vitrificadoschile Compañia Limitada</strong><br>
+                <strong>Vitrificadoschile CompaÃ±ia Limitada</strong><br>
                 Av. Pres. Kennedy 7440 of.901<br>
                 7650618 Santiago - Chile
             </div>
@@ -231,10 +243,10 @@ class TemplateClass:
             <tr>
                 <td>{product_data.code}</td>
                 <td>{self.truncate_text(product_data.product)}</td>
-                <td>{self.format_number(item.quantity)}</td>
                 <td>{self.format_number(item.quantity_per_package)} {unit}</td>
-                <td>€. {self.format_number(item.final_unit_cost)}</td>
-                <td>€. {self.format_number(item.quantity_per_package * item.final_unit_cost)}</td>
+                <td>{self.format_number(item.quantity)}</td>
+                <td>â‚¬. {self.format_number(item.final_unit_cost)}</td>
+                <td>â‚¬. {self.format_currency(item.quantity_per_package * item.final_unit_cost)}</td>
             </tr>
             """
 
@@ -275,13 +287,13 @@ class TemplateClass:
             html += f"""
             <div style="margin-bottom: 10px;">
                 <strong>Discount:</strong><br>
-                €. {self.format_number(discount_amount)}
+                â‚¬. {self.format_currency(discount_amount)}
             </div>"""
 
         html += f"""
             <div style="margin-bottom: 10px;">
                 <strong>Total without Discount:</strong><br>
-                €. {self.format_number(totals['total_without_discount'])}
+                â‚¬. {self.format_currency(totals['total_with_discount'])}
             </div>"""
 
         # Mostrar total con descuento solo si hay prepago
@@ -289,7 +301,7 @@ class TemplateClass:
             html += f"""
             <div style="margin-bottom: 10px;">
                 <strong>Total with Discount ({self.format_number(totals['prepaid_discount_percentage'])}%):</strong><br>
-                €. {self.format_number(totals['total_with_discount'])}
+                â‚¬. {self.format_currency(totals['total_with_discount'])}
             </div>"""
 
         html += f"""
@@ -348,7 +360,7 @@ class TemplateClass:
 
         <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 20px;">
             <div>
-                <strong>Vitrificadoschile Compañia Limitada</strong><br>
+                <strong>Vitrificadoschile CompaÃ±ia Limitada</strong><br>
                 Av. Pres. Kennedy 7440 of.901<br>
                 7650618 Santiago - Chile
             </div>
@@ -385,7 +397,7 @@ class TemplateClass:
                 )
 
                 if not unit_features:
-                    raise ValueError(f"Producto con ID {item.product_id} no tiene configuraci�n en UnitFeatureModel")
+                    raise ValueError(f"Producto con ID {item.product_id} no tiene configuraciï¿½n en UnitFeatureModel")
                 try:
                     quantity_per_package = float(unit_features.quantity_per_package)
                     quantity_per_pallet = float(unit_features.quantity_per_pallet)
@@ -408,10 +420,10 @@ class TemplateClass:
             <tr>
                 <td>{product_data.code}</td>
                 <td>{self.truncate_text(product_data.product)}</td>
-                <td>{self.format_number(item.quantity)}</td>
                 <td>{self.format_number(item.quantity_per_package)} {unit}</td>
-                <td>€. {self.format_number(item.final_unit_cost)}</td>
-                <td>€. {self.format_number(item.quantity_per_package * item.final_unit_cost)}</td>
+                <td>{self.format_number(item.quantity)}</td>
+                <td>â‚¬. {self.format_number(item.final_unit_cost)}</td>
+                <td>â‚¬. {self.format_currency(item.quantity_per_package * item.final_unit_cost)}</td>
             </tr>
             """
 
@@ -452,13 +464,13 @@ class TemplateClass:
             html += f"""
             <div style="margin-bottom: 10px;">
                 <strong>Discount:</strong><br>
-                €. {self.format_number(discount_amount)}
+                â‚¬. {self.format_currency(discount_amount)}
             </div>"""
 
         html += f"""
             <div style="margin-bottom: 10px;">
                 <strong>Total without Discount:</strong><br>
-                €. {self.format_number(totals['total_without_discount'])}
+                â‚¬. {self.format_currency(totals['total_with_discount'])}
             </div>"""
 
         # Mostrar total con descuento solo si hay prepago
@@ -466,16 +478,16 @@ class TemplateClass:
             html += f"""
             <div style="margin-bottom: 10px;">
                 <strong>Total with Discount ({self.format_number(totals['prepaid_discount_percentage'])}%):</strong><br>
-                €. {self.format_number(totals['total_with_discount'])}
+                â‚¬. {self.format_currency(totals['total_with_discount'])}
             </div>"""
 
         html += f"""
         </div>
 
-        <!-- Salto de p�gina -->
+        <!-- Salto de pï¿½gina -->
         <div class="page-break"></div>
 
-        <!-- Segunda p�gina -->
+        <!-- Segunda pï¿½gina -->
         <div class="page-break">
             <div class="header">
                 <img src="{vitrificado_logo_url}" class="vitrificado_logo float-left" />
@@ -493,7 +505,7 @@ class TemplateClass:
 
         <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 20px;">
             <div>
-                <strong>Vitrificadoschile Compañia Limitada</strong><br>
+                <strong>Vitrificadoschile CompaÃ±ia Limitada</strong><br>
                 Av. Pres. Kennedy 7440 of.901<br>
                 7650618 Santiago - Chile
             </div>
@@ -538,7 +550,7 @@ class TemplateClass:
 
                 total_weight_per_shopping += product_total_weight
                 
-                # Acumular informaci�n de productos para c�lculo correcto de pallets
+                # Acumular informaciï¿½n de productos para cï¿½lculo correcto de pallets
                 products_info.append({
                     'name': product_data.product if product_data else 'Unknown',
                     'total_weight': product_total_weight,
@@ -619,7 +631,7 @@ class TemplateClass:
 
         <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 20px;">
             <div>
-                <strong>Vitrificadoschile Compañia Limitada</strong><br>
+                <strong>Vitrificadoschile CompaÃ±ia Limitada</strong><br>
                 Av. Pres. Kennedy 7440 of.901<br>
                 7650618 Santiago - Chile
             </div>
@@ -661,8 +673,8 @@ class TemplateClass:
             <tr>
                 <td>{product_data.code}</td>
                 <td>{self.truncate_text(product_data.product)}</td>
-                <td>{self.format_number(item.quantity)}</td>
                 <td>{self.format_number(item.quantity_per_package)} {unit}</td>
+                <td>{self.format_number(item.quantity)}</td>
             </tr>
             """
 
@@ -725,9 +737,9 @@ class TemplateClass:
         <div style="text-align: justify; font-size: 12px;">
             Estimados,
 
-            Junto con saludarles cordialmente, les informamos que adjunto a este correo encontrarán un nuevo pedido generado desde nuestra plataforma de gestión interna.
+            Junto con saludarles cordialmente, les informamos que adjunto a este correo encontrarÃ¡n un nuevo pedido generado desde nuestra plataforma de gestiÃ³n interna.
 
-            El archivo PDF incluye el detalle completo de los productos requeridos. Agradecemos su confirmación de recepción y quedamos atentos a cualquier comentario o requerimiento adicional.
+            El archivo PDF incluye el detalle completo de los productos requeridos. Agradecemos su confirmaciÃ³n de recepciÃ³n y quedamos atentos a cualquier comentario o requerimiento adicional.
             <br><br>
             Saludos cordiales,
             <br>
@@ -787,5 +799,6 @@ class TemplateClass:
         """
 
         return html
+
 
 
