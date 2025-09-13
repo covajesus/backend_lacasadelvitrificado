@@ -9,6 +9,12 @@ class TemplateClass:
     def __init__(self, db):
         self.db = db
     
+    def truncate_text(self, text, max_length=20):
+        """Trunca el texto a la longitud máxima especificada y agrega '...'"""
+        if len(text) <= max_length:
+            return text
+        return text[:max_length] + "..."
+    
     def format_number(self, value):
         """Formatea n�meros para mostrar enteros sin decimales y        <!-- Page break -->
         <div class="page-break"></div>
@@ -148,11 +154,11 @@ class TemplateClass:
         <html>
         <head>
         <meta charset="utf-8">
-        <style>
-            body {{ font-family: Arial, sans-serif; font-size: 14px; }}
-            table {{ border-collapse: collapse; width: 100%; margin-top: 20px; }}
-            th, td {{ border: 1px solid #ddd; padding: 8px; text-align: left; }}
-            th {{ background-color: #f2f2f2; }}
+        <style>@page {{ margin: 2cm 1.5cm; size: A4 portrait; }}
+            body {{ font-family: Arial, sans-serif; font-size: 14px; line-height: 1.4; margin: 0; padding: 0; }}
+            table {{ border-collapse: collapse; width: 100%; margin-top: 20px; page-break-inside: auto; }}
+            th, td {{ border: 1px solid #ddd; padding: 8px; text-align: left; word-wrap: break-word; max-width: 150px; }}
+            th {{ background-color: #f2f2f2; }} tr {{ page-break-inside: avoid; page-break-after: auto; }}
             .logo {{ width: 200px; }}
             .vitrificado_logo {{ width: 120px; }}
             .header {{
@@ -195,8 +201,8 @@ class TemplateClass:
             <tr>
                 <th>Pos Item no.</th>
                 <th>Description</th>
-                <th>Cont</th>
                 <th>Kg/Lts/Un</th>
+                <th>Cont</th>
                 <th>Price</th>
                 <th>Amount</th>
             </tr>
@@ -224,8 +230,8 @@ class TemplateClass:
             html += f"""
             <tr>
                 <td>{product_data.code}</td>
-                <td>{product_data.product}</td>
-                <td>{item.quantity}</td>
+                <td>{self.truncate_text(product_data.product)}</td>
+                <td>{self.format_number(item.quantity)}</td>
                 <td>{self.format_number(item.quantity_per_package)} {unit}</td>
                 <td>€. {self.format_number(item.final_unit_cost)}</td>
                 <td>€. {self.format_number(item.quantity_per_package * item.final_unit_cost)}</td>
@@ -306,11 +312,11 @@ class TemplateClass:
         <html>
             <head>
             <meta charset="utf-8">
-            <style>
-                body {{ font-family: Arial, sans-serif; font-size: 14px; }}
-                table {{ border-collapse: collapse; width: 100%; margin-top: 20px; }}
-                th, td {{ border: 1px solid #ddd; padding: 8px; text-align: left; }}
-                th {{ background-color: #f2f2f2; }}
+            <style>@page {{ margin: 2cm 1.5cm; size: A4 portrait; }}
+                body {{ font-family: Arial, sans-serif; font-size: 14px; line-height: 1.4; margin: 0; padding: 0; }}
+                table {{ border-collapse: collapse; width: 100%; margin-top: 20px; page-break-inside: auto; }}
+                th, td {{ border: 1px solid #ddd; padding: 8px; text-align: left; word-wrap: break-word; max-width: 150px; }}
+                th {{ background-color: #f2f2f2; }} tr {{ page-break-inside: avoid; page-break-after: auto; }}
                 .logo {{ width: 200px; }}
                 .vitrificado_logo {{ width: 120px; }}
                 .header {{
@@ -401,8 +407,8 @@ class TemplateClass:
             html += f"""
             <tr>
                 <td>{product_data.code}</td>
-                <td>{product_data.product}</td>
-                <td>{item.quantity}</td>
+                <td>{self.truncate_text(product_data.product)}</td>
+                <td>{self.format_number(item.quantity)}</td>
                 <td>{self.format_number(item.quantity_per_package)} {unit}</td>
                 <td>€. {self.format_number(item.final_unit_cost)}</td>
                 <td>€. {self.format_number(item.quantity_per_package * item.final_unit_cost)}</td>
@@ -581,11 +587,11 @@ class TemplateClass:
         <html>
         <head>
         <meta charset="utf-8">
-        <style>
-            body {{ font-family: Arial, sans-serif; font-size: 14px; }}
-            table {{ border-collapse: collapse; width: 100%; margin-top: 20px; }}
-            th, td {{ border: 1px solid #ddd; padding: 8px; text-align: left; }}
-            th {{ background-color: #f2f2f2; }}
+        <style>@page {{ margin: 2cm 1.5cm; size: A4 portrait; }}
+            body {{ font-family: Arial, sans-serif; font-size: 14px; line-height: 1.4; margin: 0; padding: 0; }}
+            table {{ border-collapse: collapse; width: 100%; margin-top: 20px; page-break-inside: auto; }}
+            th, td {{ border: 1px solid #ddd; padding: 8px; text-align: left; word-wrap: break-word; max-width: 150px; }}
+            th {{ background-color: #f2f2f2; }} tr {{ page-break-inside: avoid; page-break-after: auto; }}
             .logo {{ width: 200px; }}
             .vitrificado_logo {{ width: 120px; }}
             .header {{
@@ -654,8 +660,8 @@ class TemplateClass:
             html += f"""
             <tr>
                 <td>{product_data.code}</td>
-                <td>{product_data.product}</td>
-                <td>{item.quantity}</td>
+                <td>{self.truncate_text(product_data.product)}</td>
+                <td>{self.format_number(item.quantity)}</td>
                 <td>{self.format_number(item.quantity_per_package)} {unit}</td>
             </tr>
             """
@@ -695,11 +701,11 @@ class TemplateClass:
         <html>
         <head>
         <meta charset="utf-8">
-        <style>
-            body {{ font-family: Arial, sans-serif; font-size: 14px; }}
-            table {{ border-collapse: collapse; width: 100%; margin-top: 20px; }}
-            th, td {{ border: 1px solid #ddd; padding: 8px; text-align: left; }}
-            th {{ background-color: #f2f2f2; }}
+        <style>@page {{ margin: 2cm 1.5cm; size: A4 portrait; }}
+            body {{ font-family: Arial, sans-serif; font-size: 14px; line-height: 1.4; margin: 0; padding: 0; }}
+            table {{ border-collapse: collapse; width: 100%; margin-top: 20px; page-break-inside: auto; }}
+            th, td {{ border: 1px solid #ddd; padding: 8px; text-align: left; word-wrap: break-word; max-width: 150px; }}
+            th {{ background-color: #f2f2f2; }} tr {{ page-break-inside: avoid; page-break-after: auto; }}
             .logo {{ width: 200px; }}
             .vitrificado_logo {{ width: 120px; }}
             .header {{
@@ -743,11 +749,11 @@ class TemplateClass:
         <html>
         <head>
         <meta charset="utf-8">
-        <style>
-            body {{ font-family: Arial, sans-serif; font-size: 14px; }}
-            table {{ border-collapse: collapse; width: 100%; margin-top: 20px; }}
-            th, td {{ border: 1px solid #ddd; padding: 8px; text-align: left; }}
-            th {{ background-color: #f2f2f2; }}
+        <style>@page {{ margin: 2cm 1.5cm; size: A4 portrait; }}
+            body {{ font-family: Arial, sans-serif; font-size: 14px; line-height: 1.4; margin: 0; padding: 0; }}
+            table {{ border-collapse: collapse; width: 100%; margin-top: 20px; page-break-inside: auto; }}
+            th, td {{ border: 1px solid #ddd; padding: 8px; text-align: left; word-wrap: break-word; max-width: 150px; }}
+            th {{ background-color: #f2f2f2; }} tr {{ page-break-inside: avoid; page-break-after: auto; }}
             .logo {{ width: 200px; }}
             .vitrificado_logo {{ width: 120px; }}
             .header {{
