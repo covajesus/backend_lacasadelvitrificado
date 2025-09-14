@@ -198,7 +198,7 @@ class TemplateClass:
         <div style="margin-bottom: 20px;">
         <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 20px;">
             <div>
-                <strong>Vitrificadoschile CompaÃ±ia Limitada</strong><br>
+                <strong>Vitrificadoschile Compañia Limitada</strong><br>
                 Av. Pres. Kennedy 7440 of.901<br>
                 7650618 Santiago - Chile
             </div>
@@ -359,7 +359,7 @@ class TemplateClass:
 
         <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 20px;">
             <div>
-                <strong>Vitrificadoschile CompaÃ±ia Limitada</strong><br>
+                <strong>Vitrificadoschile Compañia Limitada</strong><br>
                 Av. Pres. Kennedy 7440 of.901<br>
                 7650618 Santiago - Chile
             </div>
@@ -504,7 +504,7 @@ class TemplateClass:
 
         <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 20px;">
             <div>
-                <strong>Vitrificadoschile CompaÃ±ia Limitada</strong><br>
+                <strong>Vitrificadoschile Compañia Limitada</strong><br>
                 Av. Pres. Kennedy 7440 of.901<br>
                 7650618 Santiago - Chile
             </div>
@@ -630,7 +630,7 @@ class TemplateClass:
 
         <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 20px;">
             <div>
-                <strong>Vitrificadoschile CompaÃ±ia Limitada</strong><br>
+                <strong>Vitrificadoschile Compañia Limitada</strong><br>
                 Av. Pres. Kennedy 7440 of.901<br>
                 7650618 Santiago - Chile
             </div>
@@ -736,9 +736,9 @@ class TemplateClass:
         <div style="text-align: justify; font-size: 12px;">
             Estimados,
 
-            Junto con saludarles cordialmente, les informamos que adjunto a este correo encontrarÃ¡n un nuevo pedido generado desde nuestra plataforma de gestiÃ³n interna.
+            Junto con saludarles cordialmente, les informamos que adjunto a este correo encontrarán un nuevo pedido generado desde nuestra plataforma de gestión interna.
 
-            El archivo PDF incluye el detalle completo de los productos requeridos. Agradecemos su confirmaciÃ³n de recepciÃ³n y quedamos atentos a cualquier comentario o requerimiento adicional.
+            El archivo PDF incluye el detalle completo de los productos requeridos. Agradecemos su confirmación de recepción y quedamos atentos a cualquier comentario o requerimiento adicional.
             <br><br>
             Saludos cordiales,
             <br>
