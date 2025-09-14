@@ -45,12 +45,13 @@ class TemplateClass:
         total_without_discount = 0.0
         products_info = []
 
-        # Obtener informaciï¿½n del shopping para verificar si hay prepago
+        # Obtener información del shopping para verificar si hay prepago
         shopping = self.db.query(ShoppingModel).filter(ShoppingModel.id == shopping_id).first()
         has_prepaid = shopping and shopping.prepaid_status_id is not None
 
-        # Usar un descuento fijo del 5% para prepagos (puedes ajustar este valor)
-        prepaid_discount_percentage = 5.0 if has_prepaid else 0.0
+        # Obtener porcentaje de descuento desde settings
+        settings = self.db.query(SettingModel).first()
+        prepaid_discount_percentage = float(settings.prepaid_discount) if settings and settings.prepaid_discount and has_prepaid else 0.0
 
         for item in data.products:
             # Obtener datos del producto
