@@ -23,7 +23,7 @@ class TemplateClass:
             return f"{value:.2f}"
     
     def format_currency(self, value):
-        """Formatea nÃºmeros como moneda con separador de miles (punto)"""
+        """Formatea números como moneda con separador de miles (punto)"""
         try:
             # Convertir a float si no lo es
             num = float(value)
@@ -34,9 +34,7 @@ class TemplateClass:
                 # Si tiene decimales, mostrar con 2 decimales
                 return f"{num:,.2f}".replace(',', 'X').replace('.', ',').replace('X', '.')
         except (ValueError, TypeError):
-            return str(value)
-        else:
-            return f"{value:.2f}"
+            return "0"
 
     def calculate_shopping_totals(self, data: ShoppingCreateInput, shopping_id: int):
         """Calcula todos los totales necesarios para el template"""
@@ -66,20 +64,19 @@ class TemplateClass:
             if not shopping_product:
                 continue
 
-            # Calcular totales por unidad de medida
-            # El frontend muestra quantity_per_package como la cantidad total por contenedor
-            # No debemos multiplicar quantity * quantity_per_package para los totales de medida
+            # Calcular totales por unidad de medida usando los mismos datos que el template
+            # Usar item.quantity_per_package del request
             if item.unit_measure_id == 1:  # Kilogramos
-                total_kg += float(shopping_product.quantity_per_package)
+                total_kg += float(item.quantity_per_package)
             elif item.unit_measure_id == 2:  # Litros
-                total_lts += float(shopping_product.quantity_per_package)
+                total_lts += float(item.quantity_per_package)
             elif item.unit_measure_id == 3:  # Unidades
-                total_und += float(shopping_product.quantity_per_package)
+                total_und += float(item.quantity_per_package)
 
-            # Calcular peso total para envï¿½o
+            # Calcular peso total para envío usando los datos del request
             if unit_feature:
                 weight_per_unit = float(unit_feature.weight_per_unit) if unit_feature.weight_per_unit else 0.0
-                product_total_weight = weight_per_unit * float(shopping_product.quantity)
+                product_total_weight = weight_per_unit * float(item.quantity)
                 total_shipping_kg += product_total_weight
                 
                 # Para cï¿½lculo de pallets
@@ -90,12 +87,14 @@ class TemplateClass:
                     'weight_per_pallet': weight_per_pallet
                 })
 
-            # Calcular total sin descuento usando: cantidad ï¿½ precio final por unidad
-            # Para litros: quantity_per_package ï¿½ final_unit_cost
-            # Para kg/unidades: quantity_per_package ï¿½ final_unit_cost
-            if shopping_product.final_unit_cost and shopping_product.quantity_per_package:
-                product_amount = float(shopping_product.quantity_per_package) * float(shopping_product.final_unit_cost)
+            # Calcular total sin descuento usando los mismos datos que el template
+            # Usar item.final_unit_cost e item.quantity_per_package del request
+            if item.final_unit_cost and item.quantity_per_package:
+                product_amount = float(item.quantity_per_package) * float(item.final_unit_cost)
                 total_without_discount += product_amount
+                print(f"Product {product_data.product if product_data else 'Unknown'}: {item.quantity_per_package} x {item.final_unit_cost} = {product_amount}")
+
+        print(f"Total calculated: {total_without_discount}")
 
         # Calcular pallets usando el algoritmo correcto
         calculated_pallets = self.calculate_real_mixed_pallets(products_info)
@@ -245,8 +244,8 @@ class TemplateClass:
                 <td>{self.truncate_text(product_data.product)}</td>
                 <td>{self.format_number(item.quantity_per_package)} {unit}</td>
                 <td>{self.format_number(item.quantity)}</td>
-                <td>â‚¬. {self.format_number(item.final_unit_cost)}</td>
-                <td>â‚¬. {self.format_currency(item.quantity_per_package * item.final_unit_cost)}</td>
+                <td>€. {self.format_number(item.final_unit_cost)}</td>
+                <td>€. {self.format_currency(item.quantity_per_package * item.final_unit_cost)}</td>
             </tr>
             """
 
@@ -287,13 +286,13 @@ class TemplateClass:
             html += f"""
             <div style="margin-bottom: 10px;">
                 <strong>Discount:</strong><br>
-                â‚¬. {self.format_currency(discount_amount)}
+                €. {self.format_currency(discount_amount)}
             </div>"""
 
         html += f"""
             <div style="margin-bottom: 10px;">
                 <strong>Total without Discount:</strong><br>
-                â‚¬. {self.format_currency(totals['total_with_discount'])}
+                €. {self.format_currency(totals['total_without_discount'])}
             </div>"""
 
         # Mostrar total con descuento solo si hay prepago
@@ -301,7 +300,7 @@ class TemplateClass:
             html += f"""
             <div style="margin-bottom: 10px;">
                 <strong>Total with Discount ({self.format_number(totals['prepaid_discount_percentage'])}%):</strong><br>
-                â‚¬. {self.format_currency(totals['total_with_discount'])}
+                €. {self.format_currency(totals['total_with_discount'])}
             </div>"""
 
         html += f"""
@@ -422,8 +421,8 @@ class TemplateClass:
                 <td>{self.truncate_text(product_data.product)}</td>
                 <td>{self.format_number(item.quantity_per_package)} {unit}</td>
                 <td>{self.format_number(item.quantity)}</td>
-                <td>â‚¬. {self.format_number(item.final_unit_cost)}</td>
-                <td>â‚¬. {self.format_currency(item.quantity_per_package * item.final_unit_cost)}</td>
+                <td>€. {self.format_number(item.final_unit_cost)}</td>
+                <td>€. {self.format_currency(item.quantity_per_package * item.final_unit_cost)}</td>
             </tr>
             """
 
@@ -464,13 +463,13 @@ class TemplateClass:
             html += f"""
             <div style="margin-bottom: 10px;">
                 <strong>Discount:</strong><br>
-                â‚¬. {self.format_currency(discount_amount)}
+                €. {self.format_currency(discount_amount)}
             </div>"""
 
         html += f"""
             <div style="margin-bottom: 10px;">
                 <strong>Total without Discount:</strong><br>
-                â‚¬. {self.format_currency(totals['total_with_discount'])}
+                €. {self.format_currency(totals['total_without_discount'])}
             </div>"""
 
         # Mostrar total con descuento solo si hay prepago
@@ -478,13 +477,13 @@ class TemplateClass:
             html += f"""
             <div style="margin-bottom: 10px;">
                 <strong>Total with Discount ({self.format_number(totals['prepaid_discount_percentage'])}%):</strong><br>
-                â‚¬. {self.format_currency(totals['total_with_discount'])}
+                €. {self.format_currency(totals['total_with_discount'])}
             </div>"""
 
         html += f"""
         </div>
 
-        <!-- Salto de pï¿½gina -->
+        <!-- Salto de página -->
         <div class="page-break"></div>
 
         <!-- Segunda pï¿½gina -->
