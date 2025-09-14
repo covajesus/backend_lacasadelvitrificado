@@ -221,7 +221,13 @@ class TemplateClass:
         # Ordenar productos por category_id
         sorted_products = sorted(data.products, key=lambda p: p.category_id)
         
-        # Paginación: máximo 16 filas por página
+        # Calcular total de filas (productos + headers de categoría)
+        total_rows = len(sorted_products)
+        categories = set(item.category_id for item in sorted_products)
+        total_rows += len(categories)  # Agregar filas de categorías
+        
+        # Decidir si usar paginación
+        use_pagination = total_rows > 16
         items_per_page = 16
         current_category_id = None
         row_count = 0
@@ -235,8 +241,8 @@ class TemplateClass:
             # Si es el primer elemento o cambiamos de categoría, agregamos header de categoría
             category_changed = item.category_id != current_category_id
             
-            # Si llegamos al límite de filas, cerrar tabla actual y abrir nueva página
-            if row_count >= items_per_page:
+            # Si usamos paginación y llegamos al límite de filas, cerrar tabla actual y abrir nueva página
+            if use_pagination and row_count >= items_per_page:
                 html += """
             </tbody>
         </table>
@@ -291,10 +297,16 @@ class TemplateClass:
         # Calcular todos los totales adicionales
         totals = self.calculate_shopping_totals(data, id)
 
-        # Nueva página para totales
-        html += f"""
+        # Solo nueva página para totales si usamos paginación
+        if use_pagination:
+            html += f"""
         <div style="page-break-before: always;"></div>
-        <div style="margin-top: 30px; font-size: 14px; text-align: right;">
+        <div style="margin-top: 30px; font-size: 14px; text-align: right;">"""
+        else:
+            html += f"""
+        <div style="margin-top: 30px; font-size: 14px; text-align: right;">"""
+        
+        html += f"""
             <div style="margin-bottom: 10px;">
                 <strong>Total Kilograms:</strong><br>
                 {self.format_number(totals['total_kg'])} Kg
@@ -419,10 +431,15 @@ class TemplateClass:
                 """
 
         # Ordenar productos por category_id
-        # Ordenar productos por category_id
         sorted_products = sorted(data.products, key=lambda p: p.category_id)
         
-        # Paginación: máximo 16 filas por página
+        # Calcular total de filas (productos + headers de categoría)
+        total_rows = len(sorted_products)
+        categories = set(item.category_id for item in sorted_products)
+        total_rows += len(categories)  # Agregar filas de categorías
+        
+        # Decidir si usar paginación
+        use_pagination = total_rows > 16
         items_per_page = 16
         current_category_id = None
         row_count = 0
@@ -452,8 +469,8 @@ class TemplateClass:
             # Si es el primer elemento o cambiamos de categoría, agregamos header de categoría
             category_changed = item.category_id != current_category_id
             
-            # Si llegamos al límite de filas, cerrar tabla actual y abrir nueva página
-            if row_count >= items_per_page:
+            # Si usamos paginación y llegamos al límite de filas, cerrar tabla actual y abrir nueva página
+            if use_pagination and row_count >= items_per_page:
                 html += """
             </tbody>
         </table>
@@ -508,10 +525,16 @@ class TemplateClass:
         # Calcular todos los totales adicionales
         totals = self.calculate_shopping_totals(data, id)
 
-        # Nueva página para totales
-        html += f"""
+        # Solo nueva página para totales si usamos paginación
+        if use_pagination:
+            html += f"""
         <div style="page-break-before: always;"></div>
-        <div style="margin-top: 30px; font-size: 14px; text-align: right;">
+        <div style="margin-top: 30px; font-size: 14px; text-align: right;">"""
+        else:
+            html += f"""
+        <div style="margin-top: 30px; font-size: 14px; text-align: right;">"""
+        
+        html += f"""
             <div style="margin-bottom: 10px;">
                 <strong>Total Kilograms:</strong><br>
                 {self.format_number(totals['total_kg'])} Kg
@@ -730,7 +753,13 @@ class TemplateClass:
         # Ordenar productos por category_id
         sorted_products = sorted(data.products, key=lambda p: p.category_id)
         
-        # Paginación: máximo 16 filas por página
+        # Calcular total de filas (productos + headers de categoría)
+        total_rows = len(sorted_products)
+        categories = set(item.category_id for item in sorted_products)
+        total_rows += len(categories)  # Agregar filas de categorías
+        
+        # Decidir si usar paginación
+        use_pagination = total_rows > 16
         items_per_page = 16
         current_category_id = None
         row_count = 0
@@ -744,8 +773,8 @@ class TemplateClass:
             # Si es el primer elemento o cambiamos de categoría, agregamos header de categoría
             category_changed = item.category_id != current_category_id
             
-            # Si llegamos al límite de filas, cerrar tabla actual y abrir nueva página
-            if row_count >= items_per_page:
+            # Si usamos paginación y llegamos al límite de filas, cerrar tabla actual y abrir nueva página
+            if use_pagination and row_count >= items_per_page:
                 html += """
             </tbody>
         </table>
