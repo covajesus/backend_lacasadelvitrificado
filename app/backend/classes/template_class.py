@@ -784,8 +784,8 @@ class TemplateClass:
                 <tr>
                     <th>Code</th>
                     <th>Product</th>
-                    <th>Cont</th>
                     <th>Kg/Lts/Un</th>
+                    <th>Cont</th>
                 </tr>
             </thead>
             <tbody>
@@ -811,8 +811,8 @@ class TemplateClass:
             <tr>
                 <td>{product_data.code}</td>
                 <td>{self.truncate_text(product_data.product)}</td>
-                <td>{self.format_number(item.quantity)}</td>
                 <td>{self.format_number(item.quantity_per_package)} {unit}</td>
+                <td>{self.format_number(item.quantity)}</td>
             </tr>
             """
             row_count += 1
