@@ -337,11 +337,11 @@ class TemplateClass:
             """
             row_count += 1
 
-        # Cerrar tabla final
+        # Cerrar tabla final y agregar totales
         html += f"""
             </tbody>
         </table>
-        """
+        """ + get_totals_html()
 
         html += """
         </body>
@@ -356,6 +356,52 @@ class TemplateClass:
         shopping_data = self.db.query(ShoppingModel).filter(ShoppingModel.id == id).first()
         shopping_number = str(shopping_data.shopping_number) if shopping_data and shopping_data.shopping_number else str(id)
         date = datetime.utcnow().strftime("%Y-%m-%d")
+
+        # Calcular todos los totales adicionales AL PRINCIPIO
+        totals = self.calculate_shopping_totals(data, id)
+        
+        # Crear función para generar HTML de totales
+        def get_totals_html():
+            totals_html = f"""
+        <div style="margin-top: 20px; font-size: 12px; text-align: right; border-top: 1px solid #ddd; padding-top: 15px;">
+            <div style="margin-bottom: 8px;">
+                <strong>Total Kilograms:</strong> {self.format_number(totals['total_kg'])} Kg
+            </div>
+            <div style="margin-bottom: 8px;">
+                <strong>Total Liters:</strong> {self.format_number(totals['total_lts'])} Lts
+            </div>
+            <div style="margin-bottom: 8px;">
+                <strong>Total Units:</strong> {self.format_number(totals['total_und'])} Units
+            </div>
+            <div style="margin-bottom: 8px;">
+                <strong>Total Shipping (Kg):</strong> {self.format_number(totals['total_shipping_kg'])} Kg
+            </div>
+            <div style="margin-bottom: 8px;">
+                <strong>Total Pallets (Units):</strong> {self.format_number(totals['total_pallets'])} Units
+            </div>"""
+            
+            # Mostrar descuento si hay prepago
+            if totals['has_prepaid'] and totals['total_with_discount'] is not None:
+                discount_amount = totals['total_without_discount'] - totals['total_with_discount']
+                totals_html += f"""
+            <div style="margin-bottom: 8px;">
+                <strong>Discount:</strong> €. {self.format_currency(discount_amount)}
+            </div>"""
+
+            totals_html += f"""
+            <div style="margin-bottom: 8px;">
+                <strong>Total without Discount:</strong> €. {self.format_currency(totals['total_without_discount'])}
+            </div>"""
+
+            # Mostrar total con descuento solo si hay prepago
+            if totals['has_prepaid'] and totals['total_with_discount'] is not None:
+                totals_html += f"""
+            <div style="margin-bottom: 8px;">
+                <strong>Total with Discount ({self.format_number(totals['prepaid_discount_percentage'])}%):</strong> €. {self.format_currency(totals['total_with_discount'])}
+            </div>"""
+
+            totals_html += "</div>"
+            return totals_html
 
         html = f"""
         <html>
@@ -510,10 +556,7 @@ class TemplateClass:
         html += f"""
             </tbody>
         </table>
-        """
-
-        # Calcular todos los totales adicionales
-        totals = self.calculate_shopping_totals(data, id)
+        """ + get_totals_html()
 
         html += """
         <!-- Salto de página -->
@@ -627,6 +670,52 @@ class TemplateClass:
         shopping_number = str(shopping_data.shopping_number) if shopping_data and shopping_data.shopping_number else str(id)
         date = datetime.utcnow().strftime("%Y-%m-%d")
 
+        # Calcular todos los totales adicionales AL PRINCIPIO
+        totals = self.calculate_shopping_totals(data, id)
+        
+        # Crear función para generar HTML de totales
+        def get_totals_html():
+            totals_html = f"""
+        <div style="margin-top: 20px; font-size: 12px; text-align: right; border-top: 1px solid #ddd; padding-top: 15px;">
+            <div style="margin-bottom: 8px;">
+                <strong>Total Kilograms:</strong> {self.format_number(totals['total_kg'])} Kg
+            </div>
+            <div style="margin-bottom: 8px;">
+                <strong>Total Liters:</strong> {self.format_number(totals['total_lts'])} Lts
+            </div>
+            <div style="margin-bottom: 8px;">
+                <strong>Total Units:</strong> {self.format_number(totals['total_und'])} Units
+            </div>
+            <div style="margin-bottom: 8px;">
+                <strong>Total Shipping (Kg):</strong> {self.format_number(totals['total_shipping_kg'])} Kg
+            </div>
+            <div style="margin-bottom: 8px;">
+                <strong>Total Pallets (Units):</strong> {self.format_number(totals['total_pallets'])} Units
+            </div>"""
+            
+            # Mostrar descuento si hay prepago
+            if totals['has_prepaid'] and totals['total_with_discount'] is not None:
+                discount_amount = totals['total_without_discount'] - totals['total_with_discount']
+                totals_html += f"""
+            <div style="margin-bottom: 8px;">
+                <strong>Discount:</strong> €. {self.format_currency(discount_amount)}
+            </div>"""
+
+            totals_html += f"""
+            <div style="margin-bottom: 8px;">
+                <strong>Total without Discount:</strong> €. {self.format_currency(totals['total_without_discount'])}
+            </div>"""
+
+            # Mostrar total con descuento solo si hay prepago
+            if totals['has_prepaid'] and totals['total_with_discount'] is not None:
+                totals_html += f"""
+            <div style="margin-bottom: 8px;">
+                <strong>Total with Discount ({self.format_number(totals['prepaid_discount_percentage'])}%):</strong> €. {self.format_currency(totals['total_with_discount'])}
+            </div>"""
+
+            totals_html += "</div>"
+            return totals_html
+
         html = f"""
         <html>
         <head>
@@ -707,11 +796,12 @@ class TemplateClass:
             # Si es el primer elemento o cambiamos de categoría, agregamos header de categoría
             category_changed = item.category_id != current_category_id
             
-            # Si usamos paginación y llegamos al límite de filas, cerrar tabla actual y abrir nueva página
+            # Si usamos paginación y llegamos al límite de filas, cerrar tabla actual, agregar totales y abrir nueva página
             if use_pagination and row_count >= items_per_page:
                 html += """
             </tbody>
         </table>
+        """ + get_totals_html() + """
         <div style="page-break-before: always;"></div>
         <table>
             <thead>
@@ -754,8 +844,10 @@ class TemplateClass:
         html += f"""
             </tbody>
         </table>
+        """ + get_totals_html()
 
 
+        html += """
         </body>
         </html>
         """
