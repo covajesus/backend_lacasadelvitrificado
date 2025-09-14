@@ -9,7 +9,7 @@ class TemplateClass:
     def __init__(self, db):
         self.db = db
     
-    def truncate_text(self, text, max_length=20):
+    def truncate_text(self, text, max_length=35):
         """Trunca el texto a la longitud mÃ¡xima especificada y agrega '...'"""
         if len(text) <= max_length:
             return text
@@ -274,8 +274,8 @@ class TemplateClass:
         total_rows += len(categories)  # Agregar filas de categorías
         
         # Decidir si usar paginación
-        use_pagination = total_rows > 16
-        items_per_page = 16
+        use_pagination = total_rows > 25
+        items_per_page = 25
         current_category_id = None
         row_count = 0
         page_count = 1
@@ -475,8 +475,8 @@ class TemplateClass:
         total_rows += len(categories)  # Agregar filas de categorías
         
         # Decidir si usar paginación
-        use_pagination = total_rows > 16
-        items_per_page = 16
+        use_pagination = total_rows > 25
+        items_per_page = 25
         current_category_id = None
         row_count = 0
         page_count = 1
@@ -782,8 +782,8 @@ class TemplateClass:
         total_rows += len(categories)  # Agregar filas de categorías
         
         # Decidir si usar paginación
-        use_pagination = total_rows > 16
-        items_per_page = 16
+        use_pagination = total_rows > 25
+        items_per_page = 25
         current_category_id = None
         row_count = 0
         page_count = 1
