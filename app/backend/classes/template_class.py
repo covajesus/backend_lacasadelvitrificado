@@ -92,9 +92,6 @@ class TemplateClass:
             if item.final_unit_cost and item.quantity_per_package:
                 product_amount = float(item.quantity_per_package) * float(item.final_unit_cost)
                 total_without_discount += product_amount
-                print(f"Product {product_data.product if product_data else 'Unknown'}: {item.quantity_per_package} x {item.final_unit_cost} = {product_amount}")
-
-        print(f"Total calculated: {total_without_discount}")
 
         # Calcular pallets usando el algoritmo correcto
         calculated_pallets = self.calculate_real_mixed_pallets(products_info)
@@ -223,13 +220,47 @@ class TemplateClass:
 
         # Ordenar productos por category_id
         sorted_products = sorted(data.products, key=lambda p: p.category_id)
+        
+        # Paginación: máximo 16 filas por página
+        items_per_page = 16
         current_category_id = None
-
-        for item in sorted_products:
+        row_count = 0
+        page_count = 1
+        
+        # Comenzar primera tabla
+        for i, item in enumerate(sorted_products):
             product_data = self.db.query(ProductModel).filter(ProductModel.id == item.product_id).first()
             unit = {1: "Kg", 2: "Lts", 3: "Units"}.get(item.unit_measure_id, "")
-
-            if item.category_id != current_category_id:
+            
+            # Si es el primer elemento o cambiamos de categoría, agregamos header de categoría
+            category_changed = item.category_id != current_category_id
+            
+            # Si llegamos al límite de filas, cerrar tabla actual y abrir nueva página
+            if row_count >= items_per_page:
+                html += """
+            </tbody>
+        </table>
+        <div style="page-break-before: always;"></div>
+        <table>
+            <thead>
+                <tr>
+                    <th>Code</th>
+                    <th>Product</th>
+                    <th>Kg/Lts/Un</th>
+                    <th>Cont</th>
+                    <th>Unit Cost</th>
+                    <th>Amount</th>
+                </tr>
+            </thead>
+            <tbody>
+                """
+                row_count = 0
+                page_count += 1
+                current_category_id = None  # Reset para mostrar categoría en nueva página
+                category_changed = True  # Forzar mostrar categoría
+            
+            # Mostrar header de categoría si cambió
+            if category_changed:
                 category_data = self.db.query(CategoryModel).filter(CategoryModel.id == item.category_id).first()
                 html += f"""
                 <tr>
@@ -237,7 +268,9 @@ class TemplateClass:
                 </tr>
                 """
                 current_category_id = item.category_id
-
+                row_count += 1
+            
+            # Agregar producto
             html += f"""
             <tr>
                 <td>{product_data.code}</td>
@@ -248,6 +281,7 @@ class TemplateClass:
                 <td>€. {self.format_currency(item.quantity_per_package * item.final_unit_cost)}</td>
             </tr>
             """
+            row_count += 1
 
         html += f"""
             </tbody>
@@ -257,7 +291,9 @@ class TemplateClass:
         # Calcular todos los totales adicionales
         totals = self.calculate_shopping_totals(data, id)
 
+        # Nueva página para totales
         html += f"""
+        <div style="page-break-before: always;"></div>
         <div style="margin-top: 30px; font-size: 14px; text-align: right;">
             <div style="margin-bottom: 10px;">
                 <strong>Total Kilograms:</strong><br>
@@ -383,10 +419,17 @@ class TemplateClass:
                 """
 
         # Ordenar productos por category_id
+        # Ordenar productos por category_id
         sorted_products = sorted(data.products, key=lambda p: p.category_id)
+        
+        # Paginación: máximo 16 filas por página
+        items_per_page = 16
         current_category_id = None
-
-        for item in sorted_products:
+        row_count = 0
+        page_count = 1
+        
+        # Comenzar primera tabla
+        for i, item in enumerate(sorted_products):
             product_data = self.db.query(ProductModel).filter(ProductModel.id == item.product_id).first()
             if item.unit_measure_id == 1 or item.unit_measure_id == 2 or item.unit_measure_id == 3:
                 unit_features = (
@@ -396,7 +439,7 @@ class TemplateClass:
                 )
 
                 if not unit_features:
-                    raise ValueError(f"Producto con ID {item.product_id} no tiene configuraciï¿½n en UnitFeatureModel")
+                    raise ValueError(f"Producto con ID {item.product_id} no tiene configuración en UnitFeatureModel")
                 try:
                     quantity_per_package = float(unit_features.quantity_per_package)
                     quantity_per_pallet = float(unit_features.quantity_per_pallet)
@@ -405,16 +448,46 @@ class TemplateClass:
                     raise ValueError(f"Error al convertir valores de UnitFeatureModel a float (product_id={item.product_id})")
 
             unit = {1: "Kg", 2: "Lts", 3: "Units"}.get(item.unit_measure_id, "")
-
-            if item.category_id != current_category_id:
+            
+            # Si es el primer elemento o cambiamos de categoría, agregamos header de categoría
+            category_changed = item.category_id != current_category_id
+            
+            # Si llegamos al límite de filas, cerrar tabla actual y abrir nueva página
+            if row_count >= items_per_page:
+                html += """
+            </tbody>
+        </table>
+        <div style="page-break-before: always;"></div>
+        <table>
+            <thead>
+                <tr>
+                    <th>Pos Item no.</th>
+                    <th>Description</th>
+                    <th>Cont</th>
+                    <th>Kg/Lts/Un</th>
+                    <th>Price</th>
+                    <th>Amount</th>
+                </tr>
+            </thead>
+            <tbody>
+                """
+                row_count = 0
+                page_count += 1
+                current_category_id = None  # Reset para mostrar categoría en nueva página
+                category_changed = True  # Forzar mostrar categoría
+            
+            # Mostrar header de categoría si cambió
+            if category_changed:
                 category_data = self.db.query(CategoryModel).filter(CategoryModel.id == item.category_id).first()
                 html += f"""
                 <tr>
-                    <td colspan="8" style="background-color: {category_data.color}; font-weight: bold; text-align: center; font-size:20px;">{category_data.category}</td>
+                    <td colspan="6" style="background-color: {category_data.color}; font-weight: bold; text-align: center; font-size:20px;">{category_data.category}</td>
                 </tr>
                 """
                 current_category_id = item.category_id
-
+                row_count += 1
+            
+            # Agregar producto
             html += f"""
             <tr>
                 <td>{product_data.code}</td>
@@ -425,6 +498,7 @@ class TemplateClass:
                 <td>€. {self.format_currency(item.quantity_per_package * item.final_unit_cost)}</td>
             </tr>
             """
+            row_count += 1
 
         html += f"""
             </tbody>
@@ -434,7 +508,9 @@ class TemplateClass:
         # Calcular todos los totales adicionales
         totals = self.calculate_shopping_totals(data, id)
 
+        # Nueva página para totales
         html += f"""
+        <div style="page-break-before: always;"></div>
         <div style="margin-top: 30px; font-size: 14px; text-align: right;">
             <div style="margin-bottom: 10px;">
                 <strong>Total Kilograms:</strong><br>
@@ -653,21 +729,55 @@ class TemplateClass:
 
         # Ordenar productos por category_id
         sorted_products = sorted(data.products, key=lambda p: p.category_id)
+        
+        # Paginación: máximo 16 filas por página
+        items_per_page = 16
         current_category_id = None
-
-        for item in sorted_products:
+        row_count = 0
+        page_count = 1
+        
+        # Comenzar primera tabla
+        for i, item in enumerate(sorted_products):
             product_data = self.db.query(ProductModel).filter(ProductModel.id == item.product_id).first()
             unit = {1: "Kg", 2: "Lts", 3: "Units"}.get(item.unit_measure_id, "")
-
-            if item.category_id != current_category_id:
+            
+            # Si es el primer elemento o cambiamos de categoría, agregamos header de categoría
+            category_changed = item.category_id != current_category_id
+            
+            # Si llegamos al límite de filas, cerrar tabla actual y abrir nueva página
+            if row_count >= items_per_page:
+                html += """
+            </tbody>
+        </table>
+        <div style="page-break-before: always;"></div>
+        <table>
+            <thead>
+                <tr>
+                    <th>Code</th>
+                    <th>Product</th>
+                    <th>Kg/Lts/Un</th>
+                    <th>Cont</th>
+                </tr>
+            </thead>
+            <tbody>
+                """
+                row_count = 0
+                page_count += 1
+                current_category_id = None  # Reset para mostrar categoría en nueva página
+                category_changed = True  # Forzar mostrar categoría
+            
+            # Mostrar header de categoría si cambió
+            if category_changed:
                 category_data = self.db.query(CategoryModel).filter(CategoryModel.id == item.category_id).first()
                 html += f"""
                 <tr>
-                    <td colspan="6" style="background-color: {category_data.color}; font-weight: bold; text-align: center; font-size:20px;">{category_data.category}</td>
+                    <td colspan="4" style="background-color: {category_data.color}; font-weight: bold; text-align: center; font-size:20px;">{category_data.category}</td>
                 </tr>
                 """
                 current_category_id = item.category_id
-
+                row_count += 1
+            
+            # Agregar producto
             html += f"""
             <tr>
                 <td>{product_data.code}</td>
@@ -676,6 +786,7 @@ class TemplateClass:
                 <td>{self.format_number(item.quantity)}</td>
             </tr>
             """
+            row_count += 1
 
         html += f"""
             </tbody>
