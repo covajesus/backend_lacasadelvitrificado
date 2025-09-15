@@ -156,7 +156,6 @@ class TemplateClass:
     def generate_shopping_html_for_own_company(self, data: ShoppingCreateInput, id) -> str:
         logo_url = "file:/var/www/api.lacasadelvitrificado.com/public/assets/logo.png"
         vitrificado_logo_url = "file:/var/www/api.lacasadelvitrificado.com/public/assets/vitrificado-logo.png"
-        supplier_data = self.db.query(SupplierModel).filter(SupplierModel.id == data.supplier_id).first()
         shopping_data = self.db.query(ShoppingModel).filter(ShoppingModel.id == id).first()
         shopping_number = str(shopping_data.shopping_number) if shopping_data and shopping_data.shopping_number else str(id)
         date = datetime.utcnow().strftime("%Y-%m-%d")
@@ -253,7 +252,7 @@ class TemplateClass:
             </div>"""
             
             # Mostrar descuento si hay prepago
-            if totals['has_prepaid'] and totals['total_with_discount'] is not None:
+            if totals['total_with_discount'] == 1:
                 discount_amount = totals['total_without_discount'] - totals['total_with_discount']
                 totals_html += f"""
             <div style="margin-bottom: 8px;">
