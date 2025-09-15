@@ -16,7 +16,7 @@ class TemplateClass:
         return text[:max_length] + "..."
     
     def format_number(self, value):
-        """Formatea nÃºmeros para mostrar enteros sin decimales cuando es necesario"""
+        """Formatea números para mostrar enteros sin decimales cuando es necesario"""
         if value == int(value):
             return str(int(value))
         else:

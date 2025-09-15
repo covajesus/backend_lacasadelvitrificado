@@ -335,7 +335,8 @@ class ShoppingClass:
                 ShoppingModel.email,
                 ShoppingModel.total,
                 SupplierModel.supplier,
-                ShoppingModel.added_date
+                ShoppingModel.added_date,
+                ShoppingModel.prepaid_status_id
             ).filter(ShoppingModel.id == id).join(SupplierModel, SupplierModel.id == ShoppingModel.supplier_id).first()
 
             if not data_query:
@@ -349,7 +350,8 @@ class ShoppingClass:
                 "email": data_query.email,
                 "total": str(data_query.total),
                 "supplier": data_query.supplier,
-                "added_date": data_query.added_date.strftime("%d-%m-%Y")
+                "added_date": data_query.added_date.strftime("%d-%m-%Y"),
+                "prepaid_status_id": data_query.prepaid_status_id
             }
 
             return {"shopping_data": shopping_data}
