@@ -401,19 +401,19 @@ class TemplateClass:
             totals_html = f"""
         <div style="margin-top: 20px; font-size: 12px; text-align: right; border-top: 1px solid #ddd; padding-top: 15px;">
             <div style="margin-bottom: 8px;">
-                <strong>Total Kilograms:</strong> {self.format_number(totals['total_kg'])} Kg
+                <strong>Total Kilograms:</strong> {self.format_currency(totals['total_kg'])} Kg
             </div>
             <div style="margin-bottom: 8px;">
-                <strong>Total Liters:</strong> {self.format_number(totals['total_lts'])} Lts
+                <strong>Total Liters:</strong> {self.format_currency(totals['total_lts'])} Lts
             </div>
             <div style="margin-bottom: 8px;">
-                <strong>Total Units:</strong> {self.format_number(totals['total_und'])} Units
+                <strong>Total Units:</strong> {self.format_currency(totals['total_und'])} Units
             </div>
             <div style="margin-bottom: 8px;">
-                <strong>Total Shipping (Kg):</strong> {self.format_number(totals['total_shipping_kg'])} Kg
+                <strong>Total Shipping (Kg):</strong> {self.format_currency(totals['total_shipping_kg'])} Kg
             </div>
             <div style="margin-bottom: 8px;">
-                <strong>Total Pallets (Units):</strong> {self.format_number(totals['total_pallets'])} Units
+                <strong>Total Pallets (Units):</strong> {self.format_currency(totals['total_pallets'])} Units
             </div>"""
             
             # Mostrar descuento si hay prepago
