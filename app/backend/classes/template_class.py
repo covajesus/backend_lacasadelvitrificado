@@ -27,6 +27,8 @@ class TemplateClass:
         try:
             # Convertir a float si no lo es
             num = float(value)
+            # Redondear a 2 decimales para evitar problemas de precisión de punto flotante
+            num = round(num, 2)
             # Si es entero, mostrar sin decimales
             if num == int(num):
                 return f"{int(num):,}".replace(',', '.')
@@ -332,7 +334,7 @@ class TemplateClass:
                 <td>{self.format_number(item.quantity_per_package)} {unit}</td>
                 <td>{self.format_number(item.quantity)}</td>
                 <td>€. {self.format_currency(item.final_unit_cost)}</td>
-                <td>€. {self.format_currency(item.quantity_per_package * item.final_unit_cost)}</td>
+                <td>€. {self.format_currency(float(item.quantity_per_package) * float(item.final_unit_cost))}</td>
             </tr>
             """
             row_count += 1
