@@ -491,8 +491,8 @@ class TemplateClass:
         total_rows += len(categories)  # Agregar filas de categorías
         
         # Decidir si usar paginación
-        use_pagination = total_rows > 20
-        items_per_page = 20
+        use_pagination = total_rows > 17
+        items_per_page = 17
         current_category_id = None
         row_count = 0
         page_count = 1
