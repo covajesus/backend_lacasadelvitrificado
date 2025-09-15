@@ -748,7 +748,7 @@ class TemplateClass:
             </tbody>
         </table>
         <div style='width:100%;'>
-            <span style='float:left; font-size:16px; font-style:italic; color:#000; margin-top:30px;'>Continue on the next page</span>
+            <span style='float:left; font-size:16px; font-style:italic; color:#000; margin-top:50px;'>Continue on the next page</span>
         </div>
         <div style="page-break-before: always;"></div>
         {get_page_header()}
