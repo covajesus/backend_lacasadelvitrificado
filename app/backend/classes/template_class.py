@@ -49,7 +49,10 @@ class TemplateClass:
 
         # Obtener información del shopping para verificar si hay prepago
         shopping = self.db.query(ShoppingModel).filter(ShoppingModel.id == shopping_id).first()
-        has_prepaid = shopping and shopping.prepaid_status_id is not None
+        if shopping.prepaid_status_id == 1:
+            has_prepaid = True
+        else:
+            has_prepaid = False
 
         # Obtener porcentaje de descuento desde settings
         settings = self.db.query(SettingModel).first()
@@ -252,7 +255,7 @@ class TemplateClass:
             </div>"""
             
             # Mostrar descuento si hay prepago
-            if totals['total_with_discount'] == 1:
+            if totals['has_prepaid'] and totals['total_with_discount'] is not None:
                 discount_amount = totals['total_without_discount'] - totals['total_with_discount']
                 totals_html += f"""
             <div style="margin-bottom: 8px;">
