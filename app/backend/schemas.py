@@ -382,6 +382,7 @@ class UpdateSettings(BaseModel):
     delivery_cost: int
     shop_address: str
     payment_card_url: str
+    prepaid_discount: Optional[int] = 0
 
 class SalesReportFilter(BaseModel):
     date_from: Optional[str] = None
