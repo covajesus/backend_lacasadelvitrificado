@@ -524,6 +524,7 @@ class TemplateClass:
                 html += """
             </tbody>
         </table>
+        """ + get_totals_html() + """
         <div style="page-break-before: always;"></div>
         """ + get_page_header() + """
         <table>
@@ -627,20 +628,13 @@ class TemplateClass:
         calculated_pallets = self.calculate_real_mixed_pallets(products_info)
         how_many_pallets = len(calculated_pallets)
 
-        print("Total weight per shopping:", total_weight_per_shopping)
-        print("Pallet calculation details:")
-        for i, pallet in enumerate(calculated_pallets, 1):
-            print(f"  Pallet {i}: {pallet['total_weight']}kg / {pallet['capacity']}kg")
-            for content in pallet['contents']:
-                print(f"    - {content}")
-        print(f"Total pallets needed (correct mixed formula): {how_many_pallets}")
-
+        # Usar los totales calculados para mostrar los mismos valores que en la primera página
         html += f"""
-            <tr>
-                <td>{total_weight_per_shopping} Kg</td>
-                <td>{how_many_pallets}</td>
-            </tr>
-            """
+                <tr>
+                    <td>{self.format_currency(totals['total_shipping_kg'])} Kg</td>
+                    <td>{self.format_currency(totals['total_pallets'])}</td>
+                </tr>
+                """
 
         html += f"""
             </tbody>
