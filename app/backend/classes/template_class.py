@@ -669,27 +669,9 @@ class TemplateClass:
         shopping_number = str(shopping_data.shopping_number) if shopping_data and shopping_data.shopping_number else str(id)
         date = datetime.utcnow().strftime("%Y-%m-%d")
 
-        html = f"""
-        <html>
-        <head>
-        <meta charset="utf-8">
-        <style>@page {{ margin: 2cm 1.5cm; size: A4 portrait; }}
-            body {{ font-family: Arial, sans-serif; font-size: 14px; line-height: 1.4; margin: 0; padding: 0; }}
-            table {{ border-collapse: collapse; width: 100%; margin-top: 20px; page-break-inside: auto; }}
-            th, td {{ border: 1px solid #ddd; padding: 8px; text-align: left; word-wrap: break-word; max-width: 150px; }}
-            th {{ background-color: #f2f2f2; }} tr {{ page-break-inside: avoid; page-break-after: auto; }}
-            .logo {{ width: 200px; }}
-            .vitrificado_logo {{ width: 120px; }}
-            .header {{
-                display: flex;
-                justify-content: space-between;
-                align-items: center;
-                margin-bottom: 20px;
-            }}
-            .title {{ text-align: center; margin-top: 20px; margin-bottom: 30px; }}
-        </style>
-        </head>
-        <body>
+        # Función auxiliar para generar la cabecera completa
+        def get_page_header():
+            return f"""
         <div class="header">
             <img src="{vitrificado_logo_url}" class="vitrificado_logo float-left" />
             &ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;
@@ -713,6 +695,30 @@ class TemplateClass:
                 Date: {date}
             </div>
         </div>
+            """
+
+        html = f"""
+        <html>
+        <head>
+        <meta charset="utf-8">
+        <style>@page {{ margin: 2cm 1.5cm; size: A4 portrait; }}
+            body {{ font-family: Arial, sans-serif; font-size: 14px; line-height: 1.4; margin: 0; padding: 0; }}
+            table {{ border-collapse: collapse; width: 100%; margin-top: 20px; page-break-inside: auto; }}
+            th, td {{ border: 1px solid #ddd; padding: 8px; text-align: left; word-wrap: break-word; max-width: 150px; }}
+            th {{ background-color: #f2f2f2; }} tr {{ page-break-inside: avoid; page-break-after: auto; }}
+            .logo {{ width: 200px; }}
+            .vitrificado_logo {{ width: 120px; }}
+            .header {{
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                margin-bottom: 20px;
+            }}
+            .title {{ text-align: center; margin-top: 20px; margin-bottom: 30px; }}
+        </style>
+        </head>
+        <body>
+        {get_page_header()}
 
         <table>
             <thead>
@@ -751,15 +757,16 @@ class TemplateClass:
             
             # Si usamos paginación y llegamos al límite de filas, cerrar tabla actual, agregar totales y abrir nueva página
             if use_pagination and row_count >= items_per_page:
-                html += """
+                html += f"""
             </tbody>
         </table>
         <div style="page-break-before: always;"></div>
+        {get_page_header()}
         <table>
             <thead>
                 <tr>
-                    <th>Code</th>
-                    <th>Product</th>
+                    <th>Pos Item no.</th>
+                    <th>Description</th>
                     <th>Kg/Lts/Un</th>
                     <th>Cont</th>
                 </tr>
