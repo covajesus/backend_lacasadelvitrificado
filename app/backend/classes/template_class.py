@@ -365,6 +365,34 @@ class TemplateClass:
         shopping_number = str(shopping_data.shopping_number) if shopping_data and shopping_data.shopping_number else str(id)
         date = datetime.utcnow().strftime("%Y-%m-%d")
 
+        # Función auxiliar para generar la cabecera completa
+        def get_page_header():
+            return f"""
+        <div class="header">
+            <img src="{vitrificado_logo_url}" class="vitrificado_logo float-left" />
+            &ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;
+            &ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;
+            &ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;
+            &ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;
+            &ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;            <img src="{logo_url}" class="logo float-right" />
+        </div>
+
+        <div class="title">
+            <h2>Purchase Order #{shopping_number}</h2>
+        </div>
+
+        <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 20px;">
+            <div>
+                <strong>Vitrificadoschile Compañia Limitada</strong><br>
+                Av. Pres. Kennedy 7440 of.901<br>
+                7650618 Santiago - Chile
+            </div>
+            <div style="text-align: right;">
+                Date: {date}
+            </div>
+        </div>
+            """
+
         # Calcular todos los totales adicionales AL PRINCIPIO
         totals = self.calculate_shopping_totals(data, id)
         
@@ -436,29 +464,7 @@ class TemplateClass:
             </style>
             </head>
             <body>
-            <div class="header">
-                <img src="{vitrificado_logo_url}" class="vitrificado_logo float-left" />
-                &ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;
-                &ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;
-                &ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;
-                &ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;
-                &ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;            <img src="{logo_url}" class="logo float-right" />
-        </div>
-
-        <div class="title">
-            <h2>Purchase Order #{shopping_number}</h2>
-        </div>
-
-        <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 20px;">
-            <div>
-                <strong>Vitrificadoschile Compañia Limitada</strong><br>
-                Av. Pres. Kennedy 7440 of.901<br>
-                7650618 Santiago - Chile
-            </div>
-            <div style="text-align: right;">
-                Date: {date}
-            </div>
-        </div>
+            {get_page_header()}
 
             <table>
                 <thead>
@@ -519,6 +525,7 @@ class TemplateClass:
             </tbody>
         </table>
         <div style="page-break-before: always;"></div>
+        """ + get_page_header() + """
         <table>
             <thead>
                 <tr>
@@ -566,36 +573,13 @@ class TemplateClass:
         </table>
         """ + get_totals_html()
 
-        html += """
+        html += f"""
         <!-- Salto de página -->
         <div class="page-break"></div>
 
-        <!-- Segunda pï¿½gina -->
+        <!-- Segunda página -->
         <div class="page-break">
-            <div class="header">
-                <img src="{vitrificado_logo_url}" class="vitrificado_logo float-left" />
-                &ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;
-                &ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;
-                &ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;
-                &ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;
-                &ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;            <img src="{logo_url}" class="logo float-right" />
-
-        </div>
-
-        <div class="title">
-            <h2>Purchase Order #{shopping_number}</h2>
-        </div>
-
-        <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 20px;">
-            <div>
-                <strong>Vitrificadoschile Compañia Limitada</strong><br>
-                Av. Pres. Kennedy 7440 of.901<br>
-                7650618 Santiago - Chile
-            </div>
-            <div style="text-align: right;">
-                Date: {date}
-            </div>
-        </div>
+            {get_page_header()}
 
             <table>
                 <thead>
@@ -611,7 +595,6 @@ class TemplateClass:
         current_category_id = None
         total_weight_per_shopping = 0.0
         products_info = []
-
 
         for item in sorted_products:
             product_data = self.db.query(ProductModel).filter(ProductModel.id == item.product_id).first()
