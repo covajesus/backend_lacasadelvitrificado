@@ -194,7 +194,7 @@ class TemplateClass:
         <head>
         <meta charset="utf-8">
         <style>@page {{ margin: 2cm 1.5cm; size: A4 portrait; }}
-            body {{ font-family: Arial, sans-serif; font-size: 14px; line-height: 1.4; margin: 0; padding: 0; }}
+            body {{ font-family: Arial, sans-serif; font-size: 12px; line-height: 1.4; margin: 0; padding: 0; }}
             table {{ border-collapse: collapse; width: 100%; margin-top: 20px; page-break-inside: auto; }}
             th, td {{ border: 1px solid #ddd; padding: 8px; text-align: left; word-wrap: break-word; max-width: 150px; }}
             th {{ background-color: #f2f2f2; }} tr {{ page-break-inside: avoid; page-break-after: auto; }}
@@ -281,8 +281,8 @@ class TemplateClass:
         total_rows += len(categories)  # Agregar filas de categorías
         
         # Decidir si usar paginación
-        use_pagination = total_rows > 20
-        items_per_page = 20
+        use_pagination = total_rows > 17
+        items_per_page = 17
         current_category_id = None
         row_count = 0
         page_count = 1
