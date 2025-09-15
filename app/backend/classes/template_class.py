@@ -105,7 +105,7 @@ class TemplateClass:
 
         # Calcular total con descuento si hay prepago
         total_with_discount = None
-        if has_prepaid and prepaid_discount_percentage > 0:
+        if has_prepaid:
             total_with_discount = total_without_discount * (1 - prepaid_discount_percentage / 100)
 
         return {
