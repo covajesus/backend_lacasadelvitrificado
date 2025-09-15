@@ -331,7 +331,7 @@ class TemplateClass:
                 <td>{self.truncate_text(product_data.product)}</td>
                 <td>{self.format_number(item.quantity_per_package)} {unit}</td>
                 <td>{self.format_number(item.quantity)}</td>
-                <td>€. {self.format_number(item.final_unit_cost)}</td>
+                <td>€. {self.format_currency(item.final_unit_cost)}</td>
                 <td>€. {self.format_currency(item.quantity_per_package * item.final_unit_cost)}</td>
             </tr>
             """
@@ -547,7 +547,7 @@ class TemplateClass:
                 <td>{self.truncate_text(product_data.product)}</td>
                 <td>{self.format_number(item.quantity_per_package)} {unit}</td>
                 <td>{self.format_number(item.quantity)}</td>
-                <td>€. {self.format_number(item.final_unit_cost)}</td>
+                <td>€. {self.format_currency(item.final_unit_cost)}</td>
                 <td>€. {self.format_currency(item.quantity_per_package * item.final_unit_cost)}</td>
             </tr>
             """
