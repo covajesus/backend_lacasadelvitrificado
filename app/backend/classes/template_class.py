@@ -161,6 +161,34 @@ class TemplateClass:
         shopping_number = str(shopping_data.shopping_number) if shopping_data and shopping_data.shopping_number else str(id)
         date = datetime.utcnow().strftime("%Y-%m-%d")
 
+        # Función auxiliar para generar la cabecera completa
+        def get_page_header():
+            return f"""
+        <div class="header">
+            <img src="{vitrificado_logo_url}" class="vitrificado_logo float-left" />
+            &ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;
+            &ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;
+            &ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;
+            &ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;
+            &ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;            <img src="{logo_url}" class="logo float-right" />
+        </div>
+
+        <div class="title">
+            <h2>Purchase Order #{shopping_number}</h2>
+        </div>
+
+        <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 20px;">
+            <div>
+                <strong>Vitrificadoschile Compañia Limitada</strong><br>
+                Av. Pres. Kennedy 7440 of.901<br>
+                7650618 Santiago - Chile
+            </div>
+            <div style="text-align: right;">
+                Date: {date}
+            </div>
+        </div>
+            """
+
         html = f"""
         <html>
         <head>
@@ -182,30 +210,7 @@ class TemplateClass:
         </style>
         </head>
         <body>
-        <div class="header">
-            <img src="{vitrificado_logo_url}" class="vitrificado_logo float-left" />
-            &ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;
-            &ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;
-            &ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;
-            &ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;
-            &ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;            <img src="{logo_url}" class="logo float-right" />
-        </div>
-
-        <div class="title">
-            <h2>Purchase Order #{shopping_number}</h2>
-        </div>
-
-        <div style="margin-bottom: 20px;">
-        <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 20px;">
-            <div>
-                <strong>Vitrificadoschile Compañia Limitada</strong><br>
-                Av. Pres. Kennedy 7440 of.901<br>
-                7650618 Santiago - Chile
-            </div>
-            <div style="text-align: right;">
-                Date: {date}
-            </div>
-        </div>
+        {get_page_header()}
 
         <table>
             <thead>
@@ -232,19 +237,19 @@ class TemplateClass:
             totals_html = f"""
         <div style="margin-top: 20px; font-size: 12px; text-align: right; border-top: 1px solid #ddd; padding-top: 15px;">
             <div style="margin-bottom: 8px;">
-                <strong>Total Kilograms:</strong> {self.format_number(totals['total_kg'])} Kg
+                <strong>Total Kilograms:</strong> {self.format_currency(totals['total_kg'])} Kg
             </div>
             <div style="margin-bottom: 8px;">
-                <strong>Total Liters:</strong> {self.format_number(totals['total_lts'])} Lts
+                <strong>Total Liters:</strong> {self.format_currency(totals['total_lts'])} Lts
             </div>
             <div style="margin-bottom: 8px;">
-                <strong>Total Units:</strong> {self.format_number(totals['total_und'])} Units
+                <strong>Total Units:</strong> {self.format_currency(totals['total_und'])} Units
             </div>
             <div style="margin-bottom: 8px;">
-                <strong>Total Shipping (Kg):</strong> {self.format_number(totals['total_shipping_kg'])} Kg
+                <strong>Total Shipping (Kg):</strong> {self.format_currency(totals['total_shipping_kg'])} Kg
             </div>
             <div style="margin-bottom: 8px;">
-                <strong>Total Pallets (Units):</strong> {self.format_number(totals['total_pallets'])} Units
+                <strong>Total Pallets (Units):</strong> {self.format_currency(totals['total_pallets'])} Units
             </div>"""
             
             # Mostrar descuento si hay prepago
@@ -297,6 +302,7 @@ class TemplateClass:
         </table>
         """ + get_totals_html() + """
         <div style="page-break-before: always;"></div>
+        """ + get_page_header() + """
         <table>
             <thead>
                 <tr>
