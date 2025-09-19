@@ -68,6 +68,7 @@ def store(
     db: Session = Depends(get_db)
 ):
     try:
+        print("Session User:", session_user)
         if session_user.rol_id != 2 and payment_support is not None:
             timestamp = datetime.now().strftime("%Y_%m_%d_%H_%M_%S")
             unique_id = uuid.uuid4().hex[:8]
