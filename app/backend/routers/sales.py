@@ -78,6 +78,12 @@ def store(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error al procesar: {str(e)}")
 
+@sales.get("/check_inventory/{product_id}/{quantity}")
+def check_inventory(product_id: int, quantity: int, db: Session = Depends(get_db)):
+    response = SaleClass(db).check_product_inventory(product_id, quantity)
+
+    return response
+    
 @sales.post("/report")
 def sales_report(
     filter_data: SalesReportFilter,

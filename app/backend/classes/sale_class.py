@@ -6,6 +6,23 @@ class SaleClass:
     def __init__(self, db):
         self.db = db
 
+    class Product:
+        def __init__(self, id, quantity):
+            self.id = id
+            self.quantity = quantity
+
+    class ProductInput:
+        def __init__(self, product):
+            self.cart = [product]
+
+    def check_product_inventory(self, product_id: int, quantity: int):
+        product_input = SaleClass.ProductInput(SaleClass.Product(product_id, quantity))
+        status, insufficient = SaleClass(self.db).validate_inventory_existence(product_input)
+        if status == 1:
+            return {"status": "ok", "message": "Stock suficiente"}
+        else:
+            return {"status": "error", "message": f"Stock insuficiente para: {insufficient}"}
+
     def get_all(self, rol_id = None, rut = None, page=0, items_per_page=10):
         customer = self.db.query(CustomerModel).filter(CustomerModel.identification_number == rut).first()
         
@@ -87,7 +104,7 @@ class SaleClass:
         insufficient_products = []
 
         for item in sale_inputs.cart:
-            result = (
+            query = (
                 self.db.query(
                     func.sum(LotItemModel.quantity).label("total_stock"),
                     InventoryModel.minimum_stock,
@@ -102,8 +119,9 @@ class SaleClass:
                 .join(InventoryModel, InventoryModel.product_id == ProductModel.id)
                 .filter(ProductModel.id == item.id)
                 .group_by(ProductModel.id, InventoryModel.minimum_stock, ProductModel.product)
-                .first()
             )
+            print("[SQL QUERY]", str(query.statement.compile(compile_kwargs={"literal_binds": True})))
+            result = query.first()
 
             if result:
                 total_stock, minimum_stock, product_name = result
@@ -118,7 +136,6 @@ class SaleClass:
             return 0, insufficient_products  # Hay productos con stock insuficiente
 
         return 1, []  # Todo OK
-
 
     def store_inventory_movement(self, sale_id, sale_inputs):
         for item in sale_inputs.cart:
