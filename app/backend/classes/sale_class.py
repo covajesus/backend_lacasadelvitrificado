@@ -1,3 +1,12 @@
+class Product:
+    def __init__(self, id, quantity):
+        self.id = id
+        self.quantity = quantity
+
+class ProductInput:
+    def __init__(self, product):
+        self.cart = [product]
+
 from app.backend.db.models import SaleModel, CustomerModel, SaleProductModel, ProductModel, InventoryModel, UnitMeasureModel, SupplierModel, CategoryModel, LotItemModel, LotModel, InventoryMovementModel, InventoryLotItemModel, UnitFeatureModel
 from datetime import datetime
 from sqlalchemy import func
@@ -6,17 +15,8 @@ class SaleClass:
     def __init__(self, db):
         self.db = db
 
-    class Product:
-        def __init__(self, id, quantity):
-            self.id = id
-            self.quantity = quantity
-
-    class ProductInput:
-        def __init__(self, product):
-            self.cart = [product]
-
     def check_product_inventory(self, product_id: int, quantity: int):
-        product_input = SaleClass.ProductInput(SaleClass.Product(product_id, quantity))
+        product_input = ProductInput(Product(product_id, quantity))
         status, insufficient = SaleClass(self.db).validate_inventory_existence(product_input)
         if status == 1:
             return {"status": "ok", "message": "Stock suficiente"}

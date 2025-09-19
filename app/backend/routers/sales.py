@@ -63,16 +63,20 @@ def accept_sale_payment(id: int, session_user: UserLogin = Depends(get_current_a
 @sales.post("/store")
 def store(
     form_data: StoreSale = Depends(StoreSale.as_form),
-    payment_support: UploadFile = File(...),  # Obligatorio
+    session_user: UserLogin = Depends(get_current_active_user),
+    payment_support: UploadFile = File(None),
     db: Session = Depends(get_db)
 ):
     try:
-        timestamp = datetime.now().strftime("%Y_%m_%d_%H_%M_%S")
-        unique_id = uuid.uuid4().hex[:8]
-        extension = payment_support.filename.split('.')[-1]
-        filename = f"payment_{timestamp}_{unique_id}.{extension}"
-        FileClass(db).upload(payment_support, filename)
-        response = SaleClass(db).store(form_data, filename)
+        if session_user.rol_id != 2 and payment_support is not None:
+            timestamp = datetime.now().strftime("%Y_%m_%d_%H_%M_%S")
+            unique_id = uuid.uuid4().hex[:8]
+            extension = payment_support.filename.split('.')[-1]
+            filename = f"payment_{timestamp}_{unique_id}.{extension}"
+            FileClass(db).upload(payment_support, filename)
+            response = SaleClass(db).store(form_data, filename)
+        else:
+            response = SaleClass(db).store(form_data)
 
         return {"message": response}
     except Exception as e:
