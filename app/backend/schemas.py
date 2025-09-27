@@ -433,6 +433,7 @@ class UpdateSettings(BaseModel):
     shop_address: str
     payment_card_url: str
     prepaid_discount: Optional[int] = 0
+    phone: str
 
 class SalesReportFilter(BaseModel):
     date_from: Optional[str] = None
