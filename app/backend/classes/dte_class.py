@@ -218,7 +218,7 @@ class DteClass:
                 "dteReferenciadoExterno": {
                     "folio": folio,
                     "codigoTipoDte": dte_type_id,
-                    "ambiente": 0
+                    "ambiente": 1
                 }
             }
             
