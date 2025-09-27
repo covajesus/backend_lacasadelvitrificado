@@ -435,6 +435,13 @@ class SaleClass:
             # Obtener shipping_cost desde settings
             shipping_cost = self.get_shipping_cost()
             
+            # Si shipping_method_id == 1, shipping_cost = 0
+            if sale_inputs.shipping_method_id == 1:
+                shipping_cost = 0
+            else:
+                # Solo obtener shipping_cost si shipping_method_id == 2
+                shipping_cost = self.get_shipping_cost()
+            
             # Calcular total basado en costos del kardex si el rol es 1 o 2
             if sale_inputs.rol_id == 1 or sale_inputs.rol_id == 2:
                 subtotal, tax, total = self.calculate_kardex_based_total(sale_inputs.cart)
@@ -443,14 +450,20 @@ class SaleClass:
                 tax = sale_inputs.tax
                 total = sale_inputs.total
             
-            # Recalcular tax sobre (subtotal + shipping_cost) si hay shipping
-            if shipping_cost > 0:
+            # Recalcular tax sobre (subtotal + shipping_cost) solo si shipping_method_id == 2
+            if sale_inputs.shipping_method_id == 2 and shipping_cost > 0:
                 tax_rate = 0.19  # 19% de impuesto
                 tax = (subtotal + shipping_cost) * tax_rate
                 total = subtotal + shipping_cost + tax
             else:
-                # Si no hay shipping, mantener el cálculo original
-                total = subtotal + tax
+                # Si shipping_method_id == 1, calcular IVA solo sobre subtotal
+                if sale_inputs.shipping_method_id == 1:
+                    tax_rate = 0.19  # 19% de impuesto
+                    tax = subtotal * tax_rate
+                    total = subtotal + tax
+                else:
+                    # Mantener el cálculo original para otros casos
+                    total = subtotal + tax
   
             new_sale = SaleModel(
                 customer_id=customer_id,
