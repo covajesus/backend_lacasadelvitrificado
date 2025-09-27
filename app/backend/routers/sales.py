@@ -68,7 +68,7 @@ def accept_sale_payment(id: int, dte_type_id: int, status_id:int, session_user: 
                         # Formatear fecha
                         date_formatted = sale.added_date.strftime("%d-%m-%Y")
                         
-                        # Enviar WhatsApp
+                        # Enviar WhatsApp del DTE
                         whatsapp = WhatsappClass(db)
                         whatsapp.send_dte(
                             customer_phone=customer.phone,
@@ -78,7 +78,7 @@ def accept_sale_payment(id: int, dte_type_id: int, status_id:int, session_user: 
                             amount=int(sale.total),
                             dynamic_value=dte_response  # Usar el folio como valor dinámico
                         )
-                        print(f"[WHATSAPP] Mensaje enviado al cliente {customer.phone}")
+                        print(f"[WHATSAPP] Mensaje DTE enviado al cliente {customer.phone}")
                     else:
                         print("[WHATSAPP] Cliente no encontrado o sin teléfono")
                 except Exception as e:
@@ -99,8 +99,26 @@ def reject_sale_payment(id: int, status_id:int, session_user: UserLogin = Depend
     return {"message": reverse_response}
         
 @sales.get("/delivered_sale/{id}")
-def accept_sale_payment(id: int, session_user: UserLogin = Depends(get_current_active_user), db: Session = Depends(get_db)):
+def delivered_sale(id: int, session_user: UserLogin = Depends(get_current_active_user), db: Session = Depends(get_db)):
     SaleClass(db).change_status(id, 4)
+    
+    # Enviar alerta de pedido entregado
+    try:
+        # Obtener datos de la venta y cliente
+        sale = db.query(SaleModel).filter(SaleModel.id == id).first()
+        if sale:
+            customer = db.query(CustomerModel).filter(CustomerModel.id == sale.customer_id).first()
+            if customer and customer.phone:
+                whatsapp = WhatsappClass(db)
+                whatsapp.send_order_delivered_alert(
+                    customer_phone=customer.phone,
+                    id=sale.id
+                )
+                print(f"[WHATSAPP] Alerta de pedido entregado enviada al cliente {customer.phone}")
+            else:
+                print("[WHATSAPP] Cliente no encontrado o sin teléfono")
+    except Exception as e:
+        print(f"[WHATSAPP] Error enviando alerta de pedido entregado: {str(e)}")
 
     return {"message": "Sale marked as delivered"}
 
