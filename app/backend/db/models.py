@@ -106,6 +106,7 @@ class SaleModel(Base):
     status_id = Column(Integer)
     subtotal = Column(Float)
     tax = Column(Float)
+    shipping_cost = Column(Float, default=0)
     total = Column(Float)
     payment_support = Column(Text())
     delivery_address = Column(Text())
@@ -321,8 +322,6 @@ class InventoryMovementModel(Base):
     movement_type_id = Column(Integer, ForeignKey('movement_types.id'))
     quantity = Column(Integer)
     unit_cost = Column(Integer)
-    public_sale_price = Column(Integer)
-    private_sale_price = Column(Integer)
     reason = Column(Text())
     added_date = Column(DateTime())
     
@@ -345,3 +344,13 @@ class SupplierCategoryModel(Base):
     category_id = Column(Integer, ForeignKey('categories.id'))
     added_date = Column(DateTime(), default=datetime.now)
     updated_date = Column(DateTime())
+
+class KardexValuesModel(Base):
+    __tablename__ = 'kardex_values'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    product_id = Column(Integer, ForeignKey('products.id'))
+    quantity = Column(Integer, default=0)
+    average_cost = Column(Integer, default=0)
+    added_date = Column(DateTime(), default=datetime.now)
+    updated_date = Column(DateTime(), default=datetime.now)

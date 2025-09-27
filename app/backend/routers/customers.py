@@ -1,7 +1,7 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from app.backend.db.database import get_db
 from sqlalchemy.orm import Session
-from app.backend.schemas import UserLogin, StoreCustomer, UpdateCustomer, CustomerList
+from app.backend.schemas import UserLogin, StoreCustomer, UpdateCustomer, CustomerList, UpdateCustomerProfile
 from app.backend.classes.customer_class import CustomerClass
 from app.backend.classes.user_class import UserClass
 from app.backend.auth.auth_user import get_current_active_user
@@ -83,4 +83,28 @@ def delete(id: int, session_user: UserLogin = Depends(get_current_active_user), 
 def edit(id: int, session_user: UserLogin = Depends(get_current_active_user), db: Session = Depends(get_db)):
     data = CustomerClass(db).get(id)
 
+    return {"message": data}
+
+@customers.get("/show/{rut}")
+def show(rut: str, session_user: UserLogin = Depends(get_current_active_user), db: Session = Depends(get_db)):
+    """
+    Obtiene información completa del cliente y usuario asociado por RUT
+    """
+    data = CustomerClass(db).show(rut)
+    
+    if data.get("status") == "error":
+        raise HTTPException(status_code=404, detail=data["message"])
+    
+    return {"message": data}
+
+@customers.post("/profile/update/{rut}")
+def profile_update(rut: str, profile_data: UpdateCustomerProfile, session_user: UserLogin = Depends(get_current_active_user), db: Session = Depends(get_db)):
+    """
+    Actualiza el perfil del cliente por RUT
+    """
+    data = CustomerClass(db).profile_update(rut, profile_data)
+    
+    if data.get("status") == "error":
+        raise HTTPException(status_code=400, detail=data["message"])
+    
     return {"message": data}

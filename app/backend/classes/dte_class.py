@@ -4,10 +4,74 @@ from app.backend.classes.setting_class import SettingClass
 from sqlalchemy import func
 import requests
 import json
+import os
 
 class DteClass:
     def __init__(self, db):
         self.db = db
+
+    def generate_pdf(self, folio, dte_type_id, ambiente=0):
+        validate_token = SettingClass(self.db).validate_token()
+
+        setting_data = SettingClass(self.db).get(1)
+
+        if validate_token == 0:
+            SettingClass(self.db).get_simplefactura_token()
+            token = setting_data["setting_data"]["simplefactura_token"]
+        else:
+            token = setting_data["setting_data"]["simplefactura_token"]
+            
+        try:
+            # Determinar el código de tipo DTE
+            if dte_type_id == 1:  # Boleta
+                codigo_tipo_dte = 39
+            else:  # Factura
+                codigo_tipo_dte = 33
+            
+            # Payload para la API de SimpleFactura
+            payload = {
+                "credenciales": {
+                    "rutEmisor": "78181331-1"
+                },
+                "dteReferenciadoExterno": {
+                    "folio": folio,
+                    "codigoTipoDte": codigo_tipo_dte,
+                    "ambiente": ambiente
+                }
+            }
+            
+            headers = {
+                'Authorization': f'Bearer {token}',
+                "Content-Type": "application/json"
+            }
+            
+            # Llamar a la API de SimpleFactura
+            response = requests.post(
+                "https://api.simplefactura.cl/getPdf",
+                json=payload,
+                headers=headers
+            )
+            
+            if response.status_code == 200:
+                # Crear la carpeta files si no existe
+                files_dir = "files"
+                if not os.path.exists(files_dir):
+                    os.makedirs(files_dir)
+                
+                # Guardar el PDF
+                pdf_path = os.path.join(files_dir, f"{folio}.pdf")
+                with open(pdf_path, "wb") as f:
+                    f.write(response.content)
+                
+                print(f"PDF generado exitosamente: {pdf_path}")
+                return pdf_path
+            else:
+                print(f"Error generando PDF: {response.status_code} - {response.text}")
+                return None
+                
+        except Exception as e:
+            print(f"Error en generate_pdf: {str(e)}")
+            return None
 
     def generate_dte(self, id):
         sale = self.db.query(SaleModel).filter(SaleModel.id == id).first()
@@ -21,8 +85,6 @@ class DteClass:
         validate_token = SettingClass(self.db).validate_token()
 
         setting_data = SettingClass(self.db).get(1)
-
-        print(validate_token)
 
         if validate_token == 0:
             SettingClass(self.db).get_simplefactura_token()
@@ -97,6 +159,18 @@ class DteClass:
             print(response.text)
 
             if response.status_code == 200:
+                # Obtener el folio de la respuesta
+                response_data = response.json()
+                folio = response_data.get('folio', None)
+                
+                if folio:
+                    # Generar y descargar el PDF
+                    pdf_path = self.generate_pdf(folio, sale.dte_type_id)
+                    if pdf_path:
+                        print(f"PDF generado exitosamente: {pdf_path}")
+                    else:
+                        print("Error generando PDF")
+                
                 return 1
             else:
                 return 0
@@ -149,6 +223,18 @@ class DteClass:
             print(response.text)
 
             if response.status_code == 200:
+                # Obtener el folio de la respuesta
+                response_data = response.json()
+                folio = response_data.get('folio', None)
+                
+                if folio:
+                    # Generar y descargar el PDF
+                    pdf_path = self.generate_pdf(folio, sale.dte_type_id)
+                    if pdf_path:
+                        print(f"PDF generado exitosamente: {pdf_path}")
+                    else:
+                        print("Error generando PDF")
+                
                 return 1
             else:
                 return 0

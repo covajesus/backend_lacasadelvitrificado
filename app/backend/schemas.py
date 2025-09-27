@@ -6,6 +6,7 @@ from decimal import Decimal
 from fastapi import Form
 from typing import List
 from typing import Optional
+import json
 
 class UserLogin(BaseModel):
     rol_id: Union[int, None]
@@ -42,6 +43,15 @@ class UpdateCustomer(BaseModel):
     region_id: int
     commune_id: int
     product_discounts: Optional[Dict[int, float]] = {}
+
+class UpdateCustomerProfile(BaseModel):
+    social_reason: Optional[str] = None
+    activity: Optional[str] = None
+    address: Optional[str] = None
+    phone: Optional[str] = None
+    email: Optional[str] = None
+    region_id: Optional[int] = None
+    commune_id: Optional[int] = None
 
 class StoreCustomer(BaseModel):
     social_reason: str
@@ -110,26 +120,19 @@ class UpdateSupplier(BaseModel):
 class AddAdjustmentInput(BaseModel):
     user_id: int
     inventory_id: int
-    product_id: int
+    product_id: Optional[int] = None  # Opcional, se puede obtener del inventario
     location_id: int
     stock: int
     public_sale_price: int
     private_sale_price: int
     unit_cost: int
-    minimum_stock: int
-    maximum_stock: int
+    lot_number: str  # Número de lote requerido
 
 class RemoveAdjustmentInput(BaseModel):
     user_id: int
     inventory_id: int
-    product_id: int
-    location_id: int
-    stock: int
-    public_sale_price: int
-    private_sale_price: int
-    unit_cost: int
-    minimum_stock: int
-    maximum_stock: int
+    product_id: Optional[int] = None  # Opcional, se puede obtener del inventario
+    stock: int  # Solo cantidad
 
 class CartItem(BaseModel):
     id: int
@@ -162,18 +165,65 @@ class StoreSale(BaseModel):
         cart: str = Form(...),
         shipping_method_id: int = Form(...)
     ):
-        import json
-        return cls(
-            rol_id=rol_id,
-            customer_rut=customer_rut,
-            document_type_id=document_type_id,
-            delivery_address=delivery_address,
-            subtotal=subtotal,
-            tax=tax,
-            total=total,
-            cart=json.loads(cart),
-            shipping_method_id=shipping_method_id
-        )
+        try:
+            # Parse the cart JSON string
+            cart_data = json.loads(cart)
+            
+            # Validate that cart_data is a list
+            if not isinstance(cart_data, list):
+                raise ValueError("Cart must be a list of items")
+            
+            # Filter out None values and validate each cart item
+            validated_cart = []
+            for item in cart_data:
+                if item is None:
+                    continue  # Skip None items
+                
+                # Validate required fields for each cart item
+                if not isinstance(item, dict):
+                    continue  # Skip non-dict items
+                
+                if 'id' not in item or 'quantity' not in item:
+                    continue  # Skip items without required fields
+                
+                # Ensure id and quantity are valid
+                try:
+                    item_id = int(item['id'])
+                    item_quantity = int(item['quantity'])
+                    if item_id <= 0 or item_quantity <= 0:
+                        continue  # Skip invalid values
+                except (ValueError, TypeError):
+                    continue  # Skip items with invalid id or quantity
+                
+                # Create a valid CartItem with defaults for optional fields
+                validated_item = {
+                    'id': item_id,
+                    'quantity': item_quantity,
+                    'lot_numbers': item.get('lot_numbers', ''),
+                    'public_sale_price': item.get('public_sale_price', 0),
+                    'private_sale_price': item.get('private_sale_price', 0)
+                }
+                validated_cart.append(validated_item)
+            
+            # Ensure we have at least one valid cart item
+            if not validated_cart:
+                raise ValueError("Cart must contain at least one valid item")
+            
+            return cls(
+                rol_id=rol_id,
+                customer_rut=customer_rut,
+                document_type_id=document_type_id,
+                delivery_address=delivery_address,
+                subtotal=subtotal,
+                tax=tax,
+                total=total,
+                cart=validated_cart,
+                shipping_method_id=shipping_method_id
+            )
+        except json.JSONDecodeError as e:
+            raise ValueError(f"Invalid JSON in cart field: {str(e)}")
+        except Exception as e:
+            raise ValueError(f"Error processing cart data: {str(e)}")
 
 class StoreProduct(BaseModel):
     supplier_id: int

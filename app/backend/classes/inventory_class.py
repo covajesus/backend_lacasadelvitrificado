@@ -1,4 +1,4 @@
-from app.backend.db.models import InventoryModel, ProductModel, LotModel, LotItemModel, PreInventoryStockModel, InventoryLotItemModel, InventoryMovementModel, InventoryAuditModel
+from app.backend.db.models import InventoryModel, ProductModel, LotModel, LotItemModel, PreInventoryStockModel, InventoryLotItemModel, InventoryMovementModel, InventoryAuditModel, KardexValuesModel
 from datetime import datetime
 from sqlalchemy import func
 
@@ -188,55 +188,74 @@ class InventoryClass:
 
     def remove_adjustment(self, inventory_inputs):
         try:
-            print("Ajuste de inventario:", inventory_inputs)
+            print("Ajuste de inventario (salida):", inventory_inputs)
             # Buscar el inventario
             inventory = self.db.query(InventoryModel).filter_by(id=inventory_inputs.inventory_id).first()
             if not inventory:
                 return {"status": "error", "message": "Inventario no encontrado."}
 
-            # Actualizar mínimos y máximos
-            inventory.minimum_stock = inventory_inputs.minimum_stock
-            inventory.maximum_stock = inventory_inputs.maximum_stock
+            # Obtener product_id del inventario si no se proporciona
+            product_id = inventory_inputs.product_id or inventory.product_id
+            if not product_id:
+                return {"status": "error", "message": "Product ID no encontrado."}
+
+            # NO actualizar mínimos y máximos - solo actualizar fecha
             inventory.last_update = datetime.now()
             self.db.commit()
 
-            # Buscar relación con ítem de lote
-            inventory_lot = self.db.query(InventoryLotItemModel).filter_by(inventory_id=inventory.id).first()
-            if not inventory_lot:
-                return {"status": "error", "message": "Relación inventario-lote no encontrada."}
+            # Calcular precios promedio de los lot_items existentes del mismo producto
+            lot_items_prices = (
+                self.db.query(
+                    func.avg(LotItemModel.public_sale_price).label("avg_public_price"),
+                    func.avg(LotItemModel.private_sale_price).label("avg_private_price")
+                )
+                .filter(LotItemModel.product_id == product_id)
+                .first()
+            )
 
-            inventory_lot_value = inventory_lot.quantity + (inventory_inputs.stock * -1)
-            
-            # Actualizar relación inventario-lote
-            inventory_lot.quantity = inventory_lot_value
-            inventory_lot.updated_date = datetime.now()
+            avg_public_price = int(lot_items_prices.avg_public_price or 0)
+            avg_private_price = int(lot_items_prices.avg_private_price or 0)
+
+            print(f"[+] Precios promedio calculados para producto {product_id}:")
+            print(f"    - Precio público promedio: {avg_public_price}")
+            print(f"    - Precio privado promedio: {avg_private_price}")
+
+            # Obtener costo del kardex
+            kardex_record = (
+                self.db.query(KardexValuesModel)
+                .filter(KardexValuesModel.product_id == product_id)
+                .first()
+            )
+
+            if not kardex_record:
+                return {"status": "error", "message": "No se encontró registro de kardex para este producto."}
+
+            unit_cost = kardex_record.average_cost
+            print(f"[+] Costo obtenido del kardex: {unit_cost}")
+
+            # Reducir cantidad en kardex SIN actualizar costo promedio
+            new_quantity = kardex_record.quantity - inventory_inputs.stock
+            if new_quantity < 0:
+                new_quantity = 0
+
+            kardex_record.quantity = new_quantity
+            kardex_record.updated_date = datetime.now()
             self.db.commit()
 
-            # Buscar ítem de lote
-            lot_item = self.db.query(LotItemModel).filter_by(id=inventory_lot.lot_item_id).first()
-            if not lot_item:
-                return {"status": "error", "message": "Item del lote no encontrado."}
+            print(f"[+] Kardex actualizado para producto {product_id}:")
+            print(f"    - Cantidad anterior: {kardex_record.quantity + inventory_inputs.stock}")
+            print(f"    - Cantidad removida: {inventory_inputs.stock}")
+            print(f"    - Nueva cantidad: {new_quantity}")
+            print(f"    - Costo promedio se mantiene: {kardex_record.average_cost}")
 
-            lot_item_value = lot_item.quantity + (inventory_inputs.stock * -1)
-            # Actualizar ítem del lote
-            lot_item.product_id = inventory_inputs.product_id
-            lot_item.quantity = lot_item_value
-            lot_item.unit_cost = inventory_inputs.unit_cost
-            lot_item.public_sale_price = inventory_inputs.public_sale_price
-            lot_item.private_sale_price = inventory_inputs.private_sale_price
-            lot_item.updated_date = datetime.now()
-            self.db.commit()
-
-            # Registrar el movimiento de inventario
+            # Registrar el movimiento de inventario (solo aquí)
             inventory_movement = InventoryMovementModel(
                 inventory_id=inventory.id,
-                lot_item_id=inventory_lot.lot_item_id,
-                movement_type_id=3,
-                quantity=(inventory_inputs.stock * -1),
-                unit_cost=inventory_inputs.unit_cost,
-                public_sale_price=inventory_inputs.public_sale_price,
-                private_sale_price=inventory_inputs.private_sale_price,
-                reason='Ajuste de inventario realizado.',
+                lot_item_id=0,  # 0 para remove adjustment
+                movement_type_id=3,  # Tipo de movimiento: Salida
+                quantity=(inventory_inputs.stock * -1),  # Cantidad negativa para salida
+                unit_cost=unit_cost,
+                reason='Ajuste de inventario (salida) realizado.',
                 added_date=datetime.now()
             )
             self.db.add(inventory_movement)
@@ -244,8 +263,15 @@ class InventoryClass:
 
             return {
                 "status": "success",
-                "message": "Ajuste de inventario registrado correctamente.",
-                "inventory_id": inventory.id
+                "message": "Ajuste de inventario (salida) registrado correctamente. Kardex actualizado.",
+                "inventory_id": inventory.id,
+                "movement_id": inventory_movement.id,
+                "kardex_updated": {
+                    "previous_quantity": kardex_record.quantity + inventory_inputs.stock,
+                    "removed_quantity": inventory_inputs.stock,
+                    "new_quantity": new_quantity,
+                    "average_cost": kardex_record.average_cost
+                }
             }
 
         except Exception as e:
@@ -260,49 +286,123 @@ class InventoryClass:
             if not inventory:
                 return {"status": "error", "message": "Inventario no encontrado."}
 
-            # Actualizar mínimos y máximos
-            inventory.minimum_stock = inventory_inputs.minimum_stock
-            inventory.maximum_stock = inventory_inputs.maximum_stock
+            # Obtener product_id del inventario si no se proporciona
+            product_id = inventory_inputs.product_id or inventory.product_id
+            if not product_id:
+                return {"status": "error", "message": "Product ID no encontrado."}
+
+            # NO actualizar mínimos y máximos - solo actualizar fecha
             inventory.last_update = datetime.now()
             self.db.commit()
 
-            # Buscar relación con ítem de lote
-            inventory_lot = self.db.query(InventoryLotItemModel).filter_by(inventory_id=inventory.id).first()
-            if not inventory_lot:
-                return {"status": "error", "message": "Relación inventario-lote no encontrada."}
-            
-            inventory_lot_value = inventory_lot.quantity + (inventory_inputs.stock)
+            # Buscar o crear el lote
+            lot = (
+                self.db.query(LotModel)
+                .filter(LotModel.lot_number == inventory_inputs.lot_number)
+                .filter(LotModel.supplier_id == inventory.supplier_id if hasattr(inventory, 'supplier_id') else None)
+                .first()
+            )
 
-            # Actualizar relación inventario-lote
-            inventory_lot.quantity = inventory_lot_value
-            inventory_lot.updated_date = datetime.now()
-            self.db.commit()
+            if not lot:
+                # Crear nuevo lote
+                lot = LotModel(
+                    supplier_id=inventory.supplier_id if hasattr(inventory, 'supplier_id') else 1,
+                    lot_number=inventory_inputs.lot_number,
+                    arrival_date=datetime.now(),
+                    added_date=datetime.now(),
+                    updated_date=datetime.now()
+                )
+                self.db.add(lot)
+                self.db.commit()
+                self.db.refresh(lot)
+                print(f"[+] Nuevo lote creado: {inventory_inputs.lot_number}")
 
-            # Buscar ítem de lote
-            lot_item = self.db.query(LotItemModel).filter_by(id=inventory_lot.lot_item_id).first()
+            # Buscar o crear lot_item
+            lot_item = (
+                self.db.query(LotItemModel)
+                .filter(LotItemModel.lot_id == lot.id)
+                .filter(LotItemModel.product_id == product_id)
+                .first()
+            )
+
             if not lot_item:
-                return {"status": "error", "message": "Item del lote no encontrado."}
-            
-            lot_item_value = lot_item.quantity + inventory_inputs.stock
+                # Crear nuevo lot_item
+                lot_item = LotItemModel(
+                    lot_id=lot.id,
+                    product_id=product_id,
+                    quantity=inventory_inputs.stock,
+                    unit_cost=inventory_inputs.unit_cost,
+                    public_sale_price=inventory_inputs.public_sale_price,
+                    private_sale_price=inventory_inputs.private_sale_price,
+                    added_date=datetime.now(),
+                    updated_date=datetime.now()
+                )
+                self.db.add(lot_item)
+                self.db.commit()
+                self.db.refresh(lot_item)
+                print(f"[+] Nuevo lot_item creado para producto {product_id}")
+            else:
+                # Actualizar lot_item existente
+                lot_item.quantity = lot_item.quantity + inventory_inputs.stock
+                lot_item.unit_cost = inventory_inputs.unit_cost
+                lot_item.public_sale_price = inventory_inputs.public_sale_price
+                lot_item.private_sale_price = inventory_inputs.private_sale_price
+                lot_item.updated_date = datetime.now()
+                self.db.commit()
+                print(f"[+] Lot_item actualizado para producto {product_id}")
 
-            # Actualizar ítem del lote
-            lot_item.product_id = inventory_inputs.product_id
-            lot_item.quantity = lot_item_value
-            lot_item.unit_cost = inventory_inputs.unit_cost
-            lot_item.public_sale_price = inventory_inputs.public_sale_price
-            lot_item.private_sale_price = inventory_inputs.private_sale_price
-            lot_item.updated_date = datetime.now()
-            self.db.commit()
+            # Buscar o crear inventory_lot
+            inventory_lot = (
+                self.db.query(InventoryLotItemModel)
+                .filter(InventoryLotItemModel.inventory_id == inventory.id)
+                .filter(InventoryLotItemModel.lot_item_id == lot_item.id)
+                .first()
+            )
+
+            if not inventory_lot:
+                # Crear nuevo inventory_lot
+                inventory_lot = InventoryLotItemModel(
+                    inventory_id=inventory.id,
+                    lot_item_id=lot_item.id,
+                    quantity=inventory_inputs.stock,
+                    added_date=datetime.now(),
+                    updated_date=datetime.now()
+                )
+                self.db.add(inventory_lot)
+                self.db.commit()
+                self.db.refresh(inventory_lot)
+                print(f"[+] Nuevo inventory_lot creado")
+            else:
+                # Actualizar inventory_lot existente
+                inventory_lot.quantity = inventory_lot.quantity + inventory_inputs.stock
+                inventory_lot.updated_date = datetime.now()
+                self.db.commit()
+                print(f"[+] Inventory_lot actualizado")
+
+            # Actualizar kardex con la nueva cantidad y recalcular costo promedio
+            self.update_kardex_values(
+                product_id=product_id,
+                new_quantity=inventory_inputs.stock,
+                new_unit_cost=inventory_inputs.unit_cost
+            )
+
+            # Obtener unit_cost del kardex para el movimiento (si existe)
+            kardex_record = (
+                self.db.query(KardexValuesModel)
+                .filter(KardexValuesModel.product_id == product_id)
+                .first()
+            )
+            
+            movement_unit_cost = kardex_record.average_cost if kardex_record else inventory_inputs.unit_cost
+            print(f"[+] Unit cost para movimiento: {movement_unit_cost} (del kardex: {kardex_record.average_cost if kardex_record else 'N/A'})")
 
             # Registrar el movimiento de inventario
             inventory_movement = InventoryMovementModel(
                 inventory_id=inventory.id,
-                lot_item_id=inventory_lot.lot_item_id,
+                lot_item_id=lot_item.id,
                 movement_type_id=4,
                 quantity=inventory_inputs.stock,
-                unit_cost=inventory_inputs.unit_cost,
-                public_sale_price=inventory_inputs.public_sale_price,
-                private_sale_price=inventory_inputs.private_sale_price,
+                unit_cost=movement_unit_cost,  # Usa costo del kardex si existe
                 reason='Ajuste de inventario realizado.',
                 added_date=datetime.now()
             )
@@ -311,8 +411,11 @@ class InventoryClass:
 
             return {
                 "status": "success",
-                "message": "Ajuste de inventario registrado correctamente.",
-                "inventory_id": inventory.id
+                "message": "Ajuste de inventario registrado correctamente. Kardex actualizado.",
+                "inventory_id": inventory.id,
+                "lot_id": lot.id,
+                "lot_item_id": lot_item.id,
+                "inventory_lot_id": inventory_lot.id
             }
 
         except Exception as e:
@@ -333,22 +436,92 @@ class InventoryClass:
         except Exception as e:
             self.db.rollback()
             return {"status": "error", "message": str(e)}
+    
+    def update_kardex_values(self, product_id, new_quantity, new_unit_cost):
+        """
+        Actualiza los valores del kardex para un producto específico.
+        Calcula el costo promedio usando el método kardex.
+        
+        Ejemplo:
+        Saldo inicial: 100 unidades × 36.000 = 3.600.000
+        Compra: 50 unidades × 42.000 = 2.100.000
+        Nuevo total disponible:
+        - Unidades: 100 + 50 = 150
+        - Valor: 3.600.000 + 2.100.000 = 5.700.000
+        - Costo promedio unitario nuevo: 5.700.000 / 150 = 38.000
+        """
+        try:
+            # Buscar el registro de kardex existente para este producto
+            kardex_record = (
+                self.db.query(KardexValuesModel)
+                .filter(KardexValuesModel.product_id == product_id)
+                .first()
+            )
+            
+            if kardex_record:
+                # Calcular el nuevo costo promedio usando kardex
+                current_quantity = kardex_record.quantity
+                current_average_cost = float(kardex_record.average_cost)
+                
+                # Calcular valores actuales
+                current_total_value = current_quantity * current_average_cost
+                new_total_value = new_quantity * new_unit_cost
+                
+                # Nuevos totales
+                new_total_quantity = current_quantity + new_quantity
+                new_total_value_sum = current_total_value + new_total_value
+                
+                # Calcular nuevo costo promedio
+                if new_total_quantity > 0:
+                    new_average_cost = new_total_value_sum / new_total_quantity
+                else:
+                    new_average_cost = new_unit_cost
+                
+                # Actualizar el registro existente
+                kardex_record.quantity = new_total_quantity
+                kardex_record.average_cost = int(round(new_average_cost))
+                kardex_record.updated_date = datetime.now()
+                
+                print(f"[+] Kardex actualizado para producto {product_id}:")
+                print(f"    - Cantidad anterior: {current_quantity}")
+                print(f"    - Cantidad nueva: {new_quantity}")
+                print(f"    - Total cantidad: {new_total_quantity}")
+                print(f"    - Costo promedio anterior: {current_average_cost}")
+                print(f"    - Costo promedio nuevo: {new_average_cost}")
+                
+            else:
+                # Crear nuevo registro de kardex
+                kardex_record = KardexValuesModel(
+                    product_id=product_id,
+                    quantity=new_quantity,
+                    average_cost=int(round(new_unit_cost)),
+                    added_date=datetime.now(),
+                    updated_date=datetime.now()
+                )
+                self.db.add(kardex_record)
+                
+                print(f"[+] Nuevo kardex creado para producto {product_id}:")
+                print(f"    - Cantidad: {new_quantity}")
+                print(f"    - Costo promedio: {new_unit_cost}")
+            
+            self.db.commit()
+            return kardex_record
+            
+        except Exception as e:
+            self.db.rollback()
+            print(f"[!] Error actualizando kardex para producto {product_id}: {str(e)}")
+            raise e
         
     def store(self, inventory_inputs):
         try:
-            existence_status = (
+            # Verificar si el producto ya existe en la tabla inventory (solo por product_id)
+            existing_inventory = (
                 self.db.query(InventoryModel)
-                .join(InventoryLotItemModel, InventoryLotItemModel.inventory_id == InventoryModel.id)
-                .join(LotItemModel, LotItemModel.id == InventoryLotItemModel.lot_item_id)
-                .join(LotModel, LotModel.id == LotItemModel.lot_id)
-                .filter(
-                    InventoryModel.product_id == inventory_inputs.product_id,
-                    LotModel.lot_number == inventory_inputs.lot_number
-                )
-                .count()
+                .filter(InventoryModel.product_id == inventory_inputs.product_id)
+                .first()
             )
     
-            if existence_status == 0:
+            if not existing_inventory:
                 # Crear inventario
                 new_inventory = InventoryModel(
                     product_id=inventory_inputs.product_id,
@@ -361,120 +534,141 @@ class InventoryClass:
                 self.db.add(new_inventory)
                 self.db.flush()  # Para obtener el ID antes del commit
                 self.db.refresh(new_inventory)
-
-                product = self.db.query(ProductModel).filter(ProductModel.id == inventory_inputs.product_id).first()
-
-                # Crear lote asociado
-                new_lot = LotModel(
-                    supplier_id=product.supplier_id,
-                    lot_number=inventory_inputs.lot_number,
-                    arrival_date=inventory_inputs.arrival_date,
-                    added_date=datetime.now(),
-                    updated_date=datetime.now()
-                )
-                self.db.add(new_lot)
-
-                # Confirmar transacción
-                self.db.commit()
-                self.db.refresh(new_lot)
-                
-                # Calcular unit_cost automáticamente si viene de un shopping
-                calculated_unit_cost = inventory_inputs.unit_cost
-                if hasattr(inventory_inputs, 'shopping_id') and inventory_inputs.shopping_id:
-                    # Importar ShoppingClass aquí para evitar importación circular
-                    from app.backend.classes.shopping_class import ShoppingClass
-                    from app.backend.db.models import ShoppingModel
-                    shopping_class = ShoppingClass(self.db)
-                    
-                    # Calcular el unit_cost automáticamente
-                    calculated_unit_cost = shopping_class.calculate_unit_cost_for_product(
-                        inventory_inputs.shopping_id,
-                        inventory_inputs.product_id,
-                        inventory_inputs.stock
-                    )
-                    print(f"Unit cost calculado automáticamente: ${calculated_unit_cost:.2f}")
-                    
-                    # Actualizar el status_id del shopping a 7
-                    shopping = self.db.query(ShoppingModel).filter(ShoppingModel.id == inventory_inputs.shopping_id).first()
-                    if shopping:
-                        shopping.status_id = 7
-                        shopping.updated_date = datetime.now()
-                        self.db.commit()
-                        print(f"Shopping {inventory_inputs.shopping_id} actualizado a status_id = 7")
-                
-                # Crear lote asociado
-                new_lot_item = LotItemModel(
-                    lot_id=new_lot.id,
-                    product_id=inventory_inputs.product_id,
-                    quantity=inventory_inputs.stock,
-                    unit_cost=int(calculated_unit_cost),  # Usar el unit_cost calculado también para LotItem
-                    public_sale_price=inventory_inputs.public_sale_price,
-                    private_sale_price=inventory_inputs.private_sale_price,
-                    added_date=datetime.now(),
-                    updated_date=datetime.now()
-                )
-                self.db.add(new_lot_item)
-
-                # Confirmar transacción
-                self.db.commit()
-                self.db.refresh(new_lot_item)
-
-                # Crear lote asociado
-                new_inventory_lot = InventoryLotItemModel(
-                    inventory_id=new_inventory.id,
-                    lot_item_id=new_lot_item.id,
-                    quantity=inventory_inputs.stock,
-                    added_date=datetime.now(),
-                    updated_date=datetime.now()
-                )
-                self.db.add(new_inventory_lot)
-
-                # Confirmar transacción
-                self.db.commit()
-                self.db.refresh(new_inventory_lot)
-
-                # Crear lote asociado
-                new_inventory_movement = InventoryMovementModel(
-                    inventory_id=new_inventory.id,
-                    lot_item_id=new_lot_item.id,
-                    movement_type_id=1,
-                    quantity=inventory_inputs.stock,
-                    unit_cost=int(calculated_unit_cost),  # Usar el unit_cost calculado
-                    public_sale_price=inventory_inputs.public_sale_price,
-                    private_sale_price=inventory_inputs.private_sale_price,
-                    reason='Agregado producto al inventario.',
-                    added_date=datetime.now()
-                )
-                self.db.add(new_inventory_movement)
-
-                # Confirmar transacción
-                self.db.commit()
-                self.db.refresh(new_inventory_movement)
-
-                # Crear lote asociado
-                new_inventory_audit = InventoryAuditModel(
-                    user_id=inventory_inputs.user_id,
-                    inventory_id=new_inventory.id,
-                    previous_stock=0,  # Asumiendo que es un nuevo inventario
-                    new_stock=inventory_inputs.stock,
-                    reason='Creación de inventario y lote.',
-                    added_date=datetime.now()
-                )
-                self.db.add(new_inventory_audit)
-
-                # Confirmar transacción
-                self.db.commit()
-
-                return {
-                    "status": "success",
-                    "message": "Inventario y lote creados exitosamente.",
-                    "inventory_id": new_inventory.id,
-                    "lot_id": new_lot.id,
-                    "lot_item_id": new_lot_item.id,
-                    "inventory_lot_id": new_inventory_lot.id
-                }
+                inventory_id = new_inventory.id
+                print(f"[+] Nuevo inventario creado con ID: {inventory_id}")
             else:
-                return {"status": "error", "message": "El producto ya existe."}
+                # Usar el inventario existente
+                inventory_id = existing_inventory.id
+                print(f"[+] Usando inventario existente con ID: {inventory_id}")
+
+            product = self.db.query(ProductModel).filter(ProductModel.id == inventory_inputs.product_id).first()
+
+            # Crear lote asociado
+            new_lot = LotModel(
+                supplier_id=product.supplier_id,
+                lot_number=inventory_inputs.lot_number,
+                arrival_date=inventory_inputs.arrival_date,
+                added_date=datetime.now(),
+                updated_date=datetime.now()
+            )
+            self.db.add(new_lot)
+
+            # Confirmar transacción
+            self.db.commit()
+            self.db.refresh(new_lot)
+            
+            # Calcular unit_cost automáticamente si viene de un shopping
+            calculated_unit_cost = inventory_inputs.unit_cost
+            if hasattr(inventory_inputs, 'shopping_id') and inventory_inputs.shopping_id:
+                # Importar ShoppingClass aquí para evitar importación circular
+                from app.backend.classes.shopping_class import ShoppingClass
+                from app.backend.db.models import ShoppingModel
+                shopping_class = ShoppingClass(self.db)
+                
+                # Calcular el unit_cost automáticamente
+                calculated_unit_cost = shopping_class.calculate_unit_cost_for_product(
+                    inventory_inputs.shopping_id,
+                    inventory_inputs.product_id,
+                    inventory_inputs.stock
+                )
+                print(f"Unit cost calculado automáticamente: ${calculated_unit_cost:.2f}")
+                
+                # Actualizar el status_id del shopping a 7
+                shopping = self.db.query(ShoppingModel).filter(ShoppingModel.id == inventory_inputs.shopping_id).first()
+                if shopping:
+                    shopping.status_id = 7
+                    shopping.updated_date = datetime.now()
+                    self.db.commit()
+                    print(f"Shopping {inventory_inputs.shopping_id} actualizado a status_id = 7")
+            
+            # Crear lote asociado
+            new_lot_item = LotItemModel(
+                lot_id=new_lot.id,
+                product_id=inventory_inputs.product_id,
+                quantity=inventory_inputs.stock,
+                unit_cost=int(calculated_unit_cost),  # Usar el unit_cost calculado también para LotItem
+                public_sale_price=inventory_inputs.public_sale_price,
+                private_sale_price=inventory_inputs.private_sale_price,
+                added_date=datetime.now(),
+                updated_date=datetime.now()
+            )
+            self.db.add(new_lot_item)
+
+            # Confirmar transacción
+            self.db.commit()
+            self.db.refresh(new_lot_item)
+
+            # Actualizar kardex_values con el nuevo lote
+            self.update_kardex_values(
+                product_id=inventory_inputs.product_id,
+                new_quantity=inventory_inputs.stock,
+                new_unit_cost=calculated_unit_cost
+            )
+
+            # Crear lote asociado
+            new_inventory_lot = InventoryLotItemModel(
+                inventory_id=inventory_id,  # Usar el inventory_id (nuevo o existente)
+                lot_item_id=new_lot_item.id,
+                quantity=inventory_inputs.stock,
+                added_date=datetime.now(),
+                updated_date=datetime.now()
+            )
+            self.db.add(new_inventory_lot)
+
+            # Confirmar transacción
+            self.db.commit()
+            self.db.refresh(new_inventory_lot)
+
+            # Obtener unit_cost del kardex para el movimiento (si existe)
+            kardex_record = (
+                self.db.query(KardexValuesModel)
+                .filter(KardexValuesModel.product_id == inventory_inputs.product_id)
+                .first()
+            )
+            
+            movement_unit_cost = kardex_record.average_cost if kardex_record else int(calculated_unit_cost)
+            print(f"[+] Unit cost para movimiento: {movement_unit_cost} (del kardex: {kardex_record.average_cost if kardex_record else 'N/A'})")
+
+            # Crear lote asociado
+            new_inventory_movement = InventoryMovementModel(
+                inventory_id=inventory_id,  # Usar el inventory_id (nuevo o existente)
+                lot_item_id=new_lot_item.id,
+                movement_type_id=1,
+                quantity=inventory_inputs.stock,
+                unit_cost=movement_unit_cost,  # Usa costo del kardex si existe
+                reason='Agregado producto al inventario.',
+                added_date=datetime.now()
+            )
+            self.db.add(new_inventory_movement)
+
+            # Confirmar transacción
+            self.db.commit()
+            self.db.refresh(new_inventory_movement)
+
+            # Crear lote asociado
+            new_inventory_audit = InventoryAuditModel(
+                user_id=inventory_inputs.user_id,
+                inventory_id=inventory_id,  # Usar el inventory_id (nuevo o existente)
+                previous_stock=0,  # Asumiendo que es un nuevo inventario
+                new_stock=inventory_inputs.stock,
+                reason='Creación de inventario y lote.' if not existing_inventory else 'Agregado lote a inventario existente.',
+                added_date=datetime.now()
+            )
+            self.db.add(new_inventory_audit)
+
+            # Confirmar transacción
+            self.db.commit()
+
+            message = "Inventario y lote creados exitosamente." if not existing_inventory else "Lote agregado a inventario existente."
+            
+            return {
+                "status": "success",
+                "message": message,
+                "inventory_id": inventory_id,
+                "lot_id": new_lot.id,
+                "lot_item_id": new_lot_item.id,
+                "inventory_lot_id": new_inventory_lot.id
+            }
 
         except Exception as e:
             self.db.rollback()

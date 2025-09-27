@@ -1,4 +1,4 @@
-from app.backend.db.models import CustomerModel, RegionModel, CommuneModel, CustomerProductDiscountModel, SettingModel
+from app.backend.db.models import CustomerModel, RegionModel, CommuneModel, CustomerProductDiscountModel, SettingModel, UserModel
 from datetime import datetime
 
 class CustomerClass:
@@ -295,15 +295,126 @@ class CustomerClass:
             self.db.rollback()
             return {"status": "error", "message": str(e)}
 
+    def show(self, rut):
+        """Obtiene información completa del cliente y usuario asociado por RUT"""
+        try:
+            # Buscar el cliente por RUT
+            customer = self.db.query(CustomerModel).filter(CustomerModel.identification_number == rut).first()
+            if not customer:
+                return {"status": "error", "message": "Cliente no encontrado"}
+            
+            # Buscar el usuario asociado por RUT
+            user = self.db.query(UserModel).filter(UserModel.rut == rut).first()
+            
+            # Obtener información de región y comuna por separado
+            region = None
+            commune = None
+            
+            if customer.region_id:
+                region_obj = self.db.query(RegionModel).filter(RegionModel.id == customer.region_id).first()
+                region = region_obj.region if region_obj else None
+            
+            if customer.commune_id:
+                commune_obj = self.db.query(CommuneModel).filter(CommuneModel.id == customer.commune_id).first()
+                commune = commune_obj.commune if commune_obj else None
+            
+            # Preparar datos del cliente
+            customer_data = {
+                "id": customer.id,
+                "identification_number": customer.identification_number,
+                "social_reason": customer.social_reason,
+                "activity": customer.activity,
+                "address": customer.address,
+                "phone": customer.phone,
+                "email": customer.email,
+                "region_id": customer.region_id,
+                "commune_id": customer.commune_id,
+                "region_name": region,
+                "commune_name": commune,
+                "added_date": customer.added_date.strftime("%Y-%m-%d %H:%M:%S") if customer.added_date else None,
+                "updated_date": customer.updated_date.strftime("%Y-%m-%d %H:%M:%S") if customer.updated_date else None
+            }
+            
+            # Preparar datos del usuario si existe
+            user_data = None
+            if user:
+                user_data = {
+                    "id": user.id,
+                    "rol_id": user.rol_id,
+                    "rut": user.rut,
+                    "full_name": user.full_name,
+                    "email": user.email,
+                    "phone": user.phone,
+                    "added_date": user.added_date.strftime("%Y-%m-%d %H:%M:%S") if user.added_date else None,
+                    "updated_date": user.updated_date.strftime("%Y-%m-%d %H:%M:%S") if user.updated_date else None
+                }
+            
+            return {
+                "status": "success",
+                "customer": customer_data,
+                "user": user_data
+            }
+            
+        except Exception as e:
+            return {"status": "error", "message": str(e)}
+
+    def profile_update(self, rut, profile_data):
+        """Actualiza el perfil del cliente por RUT"""
+        try:
+            # Buscar el cliente por RUT
+            customer = self.db.query(CustomerModel).filter(CustomerModel.identification_number == rut).first()
+            if not customer:
+                return {"status": "error", "message": "Cliente no encontrado"}
+            
+            # Actualizar solo los campos que se proporcionaron
+            if profile_data.social_reason is not None:
+                customer.social_reason = profile_data.social_reason
+            if profile_data.activity is not None:
+                customer.activity = profile_data.activity
+            if profile_data.address is not None:
+                customer.address = profile_data.address
+            if profile_data.phone is not None:
+                customer.phone = profile_data.phone
+            if profile_data.email is not None:
+                customer.email = profile_data.email
+            if profile_data.region_id is not None:
+                customer.region_id = profile_data.region_id
+            if profile_data.commune_id is not None:
+                customer.commune_id = profile_data.commune_id
+            
+            # Actualizar fecha de modificación
+            customer.updated_date = datetime.now()
+            
+            # Guardar cambios
+            self.db.commit()
+            
+            return {"status": "success", "message": "Perfil actualizado exitosamente"}
+            
+        except Exception as e:
+            self.db.rollback()
+            return {"status": "error", "message": str(e)}
+
     def delete(self, id):
         try:
-            data = self.db.query(CustomerModel).filter(CustomerModel.id == id).first()
-            if data:
-                self.db.delete(data)
-                self.db.commit()
-                return 'success'
-            else:
+            # Buscar el cliente
+            customer = self.db.query(CustomerModel).filter(CustomerModel.id == id).first()
+            if not customer:
                 return "No data found"
+            
+            # Buscar el usuario asociado por RUT
+            user = self.db.query(UserModel).filter(UserModel.rut == customer.identification_number).first()
+            
+            # Eliminar el cliente
+            self.db.delete(customer)
+            
+            # Eliminar el usuario si existe
+            if user:
+                self.db.delete(user)
+            
+            self.db.commit()
+            return 'success'
+            
         except Exception as e:
+            self.db.rollback()
             error_message = str(e)
             return f"Error: {error_message}"
