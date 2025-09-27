@@ -67,7 +67,7 @@ class WhatsappClass:
         url = "https://graph.facebook.com/v22.0/790586727468909/messages"
         token = os.getenv('META_TOKEN')        
         setting_data = SettingClass(self.db).get(1)
-        admin_phone = 928783036
+        admin_phone = setting_data["setting_data"]["phone"]
 
         payload = {
             "messaging_product": "whatsapp",
