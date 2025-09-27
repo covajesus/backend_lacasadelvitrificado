@@ -5,6 +5,8 @@ from sqlalchemy import func
 import requests
 import json
 import os
+from fastapi import HTTPException
+from fastapi.responses import Response
 
 class DteClass:
     def __init__(self, db):
@@ -180,3 +182,76 @@ class DteClass:
             else:
                 print(f"[DEBUG FACTURA] Error en la respuesta: {response.status_code}")
                 return 0
+
+    def download(self, folio):
+        """
+        Descarga el PDF del DTE por folio
+        """
+        try:
+            # Verificar que la venta existe y tiene el folio
+            sale = self.db.query(SaleModel).filter(SaleModel.folio == folio).first()
+            if not sale:
+                raise HTTPException(status_code=404, detail="DTE no encontrado")
+            
+            # Obtener token de SimpleFactura
+            validate_token = SettingClass(self.db).validate_token()
+            setting_data = SettingClass(self.db).get(1)
+            
+            if validate_token == 0:
+                SettingClass(self.db).get_simplefactura_token()
+                token = setting_data["setting_data"]["simplefactura_token"]
+            else:
+                token = setting_data["setting_data"]["simplefactura_token"]
+            
+            # Determinar el código de tipo DTE
+            if sale.dte_type_id == 1:  # Boleta
+                dte_type_id = 39
+            else:  # Factura
+                dte_type_id = 33
+            
+            # Payload para la API de SimpleFactura
+            payload = {
+                "credenciales": {
+                    "rutEmisor": "77176777-K",
+                    "nombreSucursal": "Casa Matriz"
+                },
+                "dteReferenciadoExterno": {
+                    "folio": folio,
+                    "codigoTipoDte": dte_type_id,
+                    "ambiente": 0
+                }
+            }
+            
+            headers = {
+                'Authorization': f'Bearer {token}',
+                "Content-Type": "application/json"
+            }
+            
+            # Llamar a la API de SimpleFactura para obtener el PDF
+            response = requests.post(
+                "https://api.simplefactura.cl/getPdf",
+                json=payload,
+                headers=headers
+            )
+            
+            if response.status_code == 200:
+                # Retornar el PDF como respuesta forzando descarga
+                return Response(
+                    content=response.content,
+                    media_type="application/pdf",
+                    headers={
+                        "Content-Disposition": f"attachment; filename=dte_{folio}.pdf",
+                        "Content-Type": "application/pdf",
+                        "Cache-Control": "no-cache, no-store, must-revalidate",
+                        "Pragma": "no-cache",
+                        "Expires": "0"
+                    }
+                )
+            else:
+                raise HTTPException(
+                    status_code=response.status_code, 
+                    detail=f"Error generando PDF: {response.text}"
+                )
+                
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Error al procesar: {str(e)}")

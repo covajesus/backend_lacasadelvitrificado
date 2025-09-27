@@ -8,6 +8,7 @@ from app.backend.classes.file_class import FileClass
 from fastapi import File, UploadFile, HTTPException
 from app.backend.classes.dte_class import DteClass
 from app.backend.classes.inventory_class import InventoryClass
+from app.backend.classes.whatsapp_class import WhatsappClass
 from app.backend.db.models import SaleModel
 from datetime import datetime
 import uuid
@@ -32,6 +33,12 @@ def edit(id: int, session_user: UserLogin = Depends(get_current_active_user), db
 @sales.get("/details/{id}")
 def edit(id: int, session_user: UserLogin = Depends(get_current_active_user), db: Session = Depends(get_db)):
     data = SaleClass(db).details(id)
+
+    return {"message": data}
+
+@sales.get("/ws")
+def edit(db: Session = Depends(get_db)):
+    data = WhatsappClass(db).send()
 
     return {"message": data}
 
