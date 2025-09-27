@@ -32,7 +32,8 @@ class DteClass:
             # Payload para la API de SimpleFactura
             payload = {
                 "credenciales": {
-                    "rutEmisor": "77176777-K"
+                    "rutEmisor": "77176777-K",
+                    "nombreSucursal": "Casa Matriz"
                 },
                 "dteReferenciadoExterno": {
                     "folio": folio,
