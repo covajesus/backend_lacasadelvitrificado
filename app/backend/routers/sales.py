@@ -9,7 +9,7 @@ from fastapi import File, UploadFile, HTTPException
 from app.backend.classes.dte_class import DteClass
 from app.backend.classes.inventory_class import InventoryClass
 from app.backend.classes.whatsapp_class import WhatsappClass
-from app.backend.db.models import SaleModel
+from app.backend.db.models import SaleModel, CustomerModel
 from datetime import datetime
 import uuid
 
@@ -56,6 +56,34 @@ def accept_sale_payment(id: int, dte_type_id: int, status_id:int, session_user: 
                 sale.folio = dte_response
                 sale.updated_date = datetime.now()
                 db.commit()
+                
+                # Enviar WhatsApp con los datos del DTE
+                try:
+                    # Obtener datos del cliente
+                    customer = db.query(CustomerModel).filter(CustomerModel.id == sale.customer_id).first()
+                    if customer and customer.phone:
+                        # Determinar tipo de DTE
+                        dte_type = "Boleta Electrónica" if sale.dte_type_id == 1 else "Factura Electrónica"
+                        
+                        # Formatear fecha
+                        date_formatted = sale.added_date.strftime("%d-%m-%Y")
+                        
+                        # Enviar WhatsApp
+                        whatsapp = WhatsappClass(db)
+                        whatsapp.send_dte(
+                            customer_phone=customer.phone,
+                            dte_type=dte_type,
+                            folio=dte_response,
+                            date=date_formatted,
+                            amount=int(sale.total),
+                            dynamic_value=dte_response  # Usar el folio como valor dinámico
+                        )
+                        print(f"[WHATSAPP] Mensaje enviado al cliente {customer.phone}")
+                    else:
+                        print("[WHATSAPP] Cliente no encontrado o sin teléfono")
+                except Exception as e:
+                    print(f"[WHATSAPP] Error enviando mensaje: {str(e)}")
+                
                 return {"message": f"Dte created successfully with folio: {dte_response}"}
             else:
                 return {"message": "Sale not found"}

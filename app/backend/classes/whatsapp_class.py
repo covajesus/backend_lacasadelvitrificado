@@ -7,13 +7,20 @@ class WhatsappClass:
     def __init__(self, db):
         self.db = db
 
-    def send(self): 
+    def send_dte(self, customer_phone, dte_type, folio, date, amount, dynamic_value): 
         url = "https://graph.facebook.com/v22.0/790586727468909/messages"
         token = os.getenv('META_TOKEN')
 
+        # Formatear el número de teléfono
+        phone_str = str(customer_phone).strip()
+        if not phone_str.startswith("56"):
+            customer_phone_formatted = "56" + phone_str
+        else:
+            customer_phone_formatted = phone_str
+
         payload = {
             "messaging_product": "whatsapp",
-            "to": "56979670323",  # Número destino
+            "to": customer_phone_formatted,
             "type": "template",
             "template": {
                 "name": "envio_dte_cliente_generado_v2",  # nombre EXACTO de tu plantilla
@@ -22,10 +29,10 @@ class WhatsappClass:
                     {
                         "type": "body",
                         "parameters": [
-                            {"type": "text", "text": "Boleta Electrónica"}, 
-                            {"type": "text", "text": "5544"},       # N° Boleta
-                            {"type": "text", "text": "28-07-2022"}, # Fecha
-                            {"type": "text", "text": "50000"},      # Monto
+                            {"type": "text", "text": dte_type}, 
+                            {"type": "text", "text": str(folio)},       # N° Boleta/Factura
+                            {"type": "text", "text": date},             # Fecha
+                            {"type": "text", "text": str(amount)},      # Monto
                         ]
                     },
                     {
@@ -35,15 +42,13 @@ class WhatsappClass:
                         "parameters": [
                             {
                                 "type": "text",
-                                "text": "2000"  # valor dinámico para {{1}}
+                                "text": str(dynamic_value)  # valor dinámico para {{1}}
                             }
                         ]
                     }
                 ]
             }
         }
-
-        print
 
         headers = {
             "Authorization": f"Bearer {token}",
@@ -52,5 +57,7 @@ class WhatsappClass:
 
         response = requests.post(url, json=payload, headers=headers)
 
-        print(response.status_code)
-        print(response.json())
+        print(f"[WHATSAPP] Status: {response.status_code}")
+        print(f"[WHATSAPP] Response: {response.json()}")
+        
+        return response
