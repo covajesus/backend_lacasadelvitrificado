@@ -47,11 +47,17 @@ class DteClass:
             }
             
             # Llamar a la API de SimpleFactura
+            print(f"[DEBUG PDF] Llamando a SimpleFactura con folio: {folio}")
+            print(f"[DEBUG PDF] Payload: {json.dumps(payload, indent=2)}")
+            
             response = requests.post(
                 "https://api.simplefactura.cl/getPdf",
                 json=payload,
                 headers=headers
             )
+            
+            print(f"[DEBUG PDF] Response status: {response.status_code}")
+            print(f"[DEBUG PDF] Response headers: {dict(response.headers)}")
             
             if response.status_code == 200:
                 # Usar FileClass para guardar el PDF
@@ -154,23 +160,31 @@ class DteClass:
                 headers=headers
             )
 
-            print(response.text)
+            print(f"[DEBUG BOLETA] Response status: {response.status_code}")
+            print(f"[DEBUG BOLETA] Response text: {response.text}")
 
             if response.status_code == 200:
                 # Obtener el folio de la respuesta
                 response_data = response.json()
-                folio = response_data.get('folio', None)
+                # El folio está dentro del campo 'data'
+                data_section = response_data.get('data', {})
+                folio = data_section.get('folio', None)
+                print(f"[DEBUG BOLETA] Folio obtenido: {folio}")
                 
                 if folio:
+                    print(f"[DEBUG BOLETA] Iniciando generación de PDF para folio: {folio}")
                     # Generar y descargar el PDF
                     pdf_path = self.generate_pdf(folio, sale.dte_type_id)
                     if pdf_path:
-                        print(f"PDF generado exitosamente: {pdf_path}")
+                        print(f"[DEBUG BOLETA] PDF generado exitosamente: {pdf_path}")
                     else:
-                        print("Error generando PDF")
+                        print("[DEBUG BOLETA] Error generando PDF")
+                else:
+                    print("[DEBUG BOLETA] No se pudo obtener el folio de la respuesta")
                 
                 return 1
             else:
+                print(f"[DEBUG BOLETA] Error en la respuesta: {response.status_code}")
                 return 0
         else:
             payload = {
@@ -218,21 +232,29 @@ class DteClass:
                 headers=headers
             )
 
-            print(response.text)
+            print(f"[DEBUG FACTURA] Response status: {response.status_code}")
+            print(f"[DEBUG FACTURA] Response text: {response.text}")
 
             if response.status_code == 200:
                 # Obtener el folio de la respuesta
                 response_data = response.json()
-                folio = response_data.get('folio', None)
+                # El folio está dentro del campo 'data'
+                data_section = response_data.get('data', {})
+                folio = data_section.get('folio', None)
+                print(f"[DEBUG FACTURA] Folio obtenido: {folio}")
                 
                 if folio:
+                    print(f"[DEBUG FACTURA] Iniciando generación de PDF para folio: {folio}")
                     # Generar y descargar el PDF
                     pdf_path = self.generate_pdf(folio, sale.dte_type_id)
                     if pdf_path:
-                        print(f"PDF generado exitosamente: {pdf_path}")
+                        print(f"[DEBUG FACTURA] PDF generado exitosamente: {pdf_path}")
                     else:
-                        print("Error generando PDF")
+                        print("[DEBUG FACTURA] Error generando PDF")
+                else:
+                    print("[DEBUG FACTURA] No se pudo obtener el folio de la respuesta")
                 
                 return 1
             else:
+                print(f"[DEBUG FACTURA] Error en la respuesta: {response.status_code}")
                 return 0
