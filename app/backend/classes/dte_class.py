@@ -54,7 +54,7 @@ class DteClass:
             
             if response.status_code == 200:
                 # Crear la carpeta files si no existe
-                files_dir = "files"
+                files_dir = "/var/www/api.lacasadelvitrificado.com/files"
                 if not os.path.exists(files_dir):
                     os.makedirs(files_dir)
                 
