@@ -1,6 +1,7 @@
 import requests
 import os
 from dotenv import load_dotenv
+from app.backend.classes.setting_class import SettingClass
 load_dotenv() 
 
 class WhatsappClass:
@@ -59,5 +60,41 @@ class WhatsappClass:
 
         print(f"[WHATSAPP] Status: {response.status_code}")
         print(f"[WHATSAPP] Response: {response.json()}")
+        
+        return response
+
+    def send_new_order_alert(self, customer_name): 
+        url = "https://graph.facebook.com/v22.0/790586727468909/messages"
+        token = os.getenv('META_TOKEN')        
+        setting_data = SettingClass(self.db).get(1)
+        admin_phone = 928783036
+
+        payload = {
+            "messaging_product": "whatsapp",
+            "to": admin_phone,
+            "type": "template",
+            "template": {
+                "name": "alerta_nueva_orden",
+                "language": {"code": "es"},
+                "components": [
+                    {
+                        "type": "body",
+                        "parameters": [
+                            {"type": "text", "text": customer_name}
+                        ]
+                    }
+                ]
+            }
+        }
+
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json"
+        }
+
+        response = requests.post(url, json=payload, headers=headers)
+
+        print(f"[WHATSAPP ALERT] Status: {response.status_code}")
+        print(f"[WHATSAPP ALERT] Response: {response.json()}")
         
         return response

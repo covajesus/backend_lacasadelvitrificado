@@ -485,6 +485,29 @@ class SaleClass:
 
             self.store_inventory_movement(new_sale.id, sale_inputs)
 
+            # Enviar alerta de nueva orden por WhatsApp
+            try:
+                from app.backend.classes.whatsapp_class import WhatsappClass
+                
+                # Obtener datos del cliente
+                customer = self.db.query(CustomerModel).filter(CustomerModel.id == customer_id).first()
+                if customer:
+                    customer_name = customer.social_reason or f"Cliente {customer.identification_number}"
+                else:
+                    customer_name = f"Cliente {sale_inputs.customer_rut}"
+                
+                # Formatear fecha
+                date_formatted = new_sale.added_date.strftime("%d-%m-%Y")
+                
+                # Enviar alerta
+                whatsapp = WhatsappClass(self.db)
+                whatsapp.send_new_order_alert(
+                    customer_name=customer_name
+                )
+                print(f"[WHATSAPP ALERT] Alerta enviada para nueva orden {new_sale.id}")
+            except Exception as e:
+                print(f"[WHATSAPP ALERT] Error enviando alerta: {str(e)}")
+
             return {"status": "Venta registrada exitosamente.", "sale_id": new_sale.id}
 
         except Exception as e:

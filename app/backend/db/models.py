@@ -26,6 +26,7 @@ class SettingModel(Base):
     shop_address = Column(String(255))
     payment_card_url = Column(String(255))
     prepaid_discount = Column(Integer)
+    phone = Column(String(255))
     updated_date = Column(DateTime())
 
 class ShoppingModel(Base):
