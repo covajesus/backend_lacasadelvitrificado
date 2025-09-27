@@ -11,7 +11,7 @@ dtes = APIRouter(
 )
 
 @dtes.get("/download/{folio}")
-def download_dte(folio: int, session_user: UserLogin = Depends(get_current_active_user), db: Session = Depends(get_db)):
+def download_dte(folio: int, db: Session = Depends(get_db)):
     """
     Descarga el PDF del DTE por folio
     """
