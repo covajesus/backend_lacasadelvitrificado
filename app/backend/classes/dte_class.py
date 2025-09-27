@@ -25,19 +25,19 @@ class DteClass:
         try:
             # Determinar el código de tipo DTE
             if dte_type_id == 1:  # Boleta
-                codigo_tipo_dte = 39
+                dte_type_id = 39
             else:  # Factura
-                codigo_tipo_dte = 33
+                dte_type_id = 33
             
             # Payload para la API de SimpleFactura
             payload = {
                 "credenciales": {
-                    "rutEmisor": "78181331-1"
+                    "rutEmisor": "77176777-K"
                 },
                 "dteReferenciadoExterno": {
                     "folio": folio,
-                    "codigoTipoDte": codigo_tipo_dte,
-                    "ambiente": ambiente
+                    "codigoTipoDte": dte_type_id,
+                    "ambiente": 0
                 }
             }
             
