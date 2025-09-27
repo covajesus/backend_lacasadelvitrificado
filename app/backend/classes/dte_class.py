@@ -5,6 +5,7 @@ from sqlalchemy import func
 import requests
 import json
 import os
+from app.backend.classes.file_class import FileClass
 
 class DteClass:
     def __init__(self, db):
@@ -53,18 +54,15 @@ class DteClass:
             )
             
             if response.status_code == 200:
-                # Crear la carpeta files si no existe
-                files_dir = "/var/www/api.lacasadelvitrificado.com/files"
-                if not os.path.exists(files_dir):
-                    os.makedirs(files_dir)
+                # Usar FileClass para guardar el PDF
+                file_class = FileClass(self.db)
+                remote_path = f"{folio}.pdf"
                 
-                # Guardar el PDF
-                pdf_path = os.path.join(files_dir, f"{folio}.pdf")
-                with open(pdf_path, "wb") as f:
-                    f.write(response.content)
+                # Guardar el PDF usando temporal_upload
+                result = file_class.temporal_upload(response.content, remote_path)
                 
-                print(f"PDF generado exitosamente: {pdf_path}")
-                return pdf_path
+                print(f"PDF generado exitosamente: {result}")
+                return remote_path
             else:
                 print(f"Error generando PDF: {response.status_code} - {response.text}")
                 return None
