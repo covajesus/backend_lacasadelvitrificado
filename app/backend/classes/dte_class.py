@@ -5,78 +5,11 @@ from sqlalchemy import func
 import requests
 import json
 import os
-from app.backend.classes.file_class import FileClass
 
 class DteClass:
     def __init__(self, db):
         self.db = db
 
-    def generate_pdf(self, folio, dte_type_id, ambiente=0):
-        validate_token = SettingClass(self.db).validate_token()
-
-        setting_data = SettingClass(self.db).get(1)
-
-        if validate_token == 0:
-            SettingClass(self.db).get_simplefactura_token()
-            token = setting_data["setting_data"]["simplefactura_token"]
-        else:
-            token = setting_data["setting_data"]["simplefactura_token"]
-            
-        try:
-            # Determinar el código de tipo DTE
-            if dte_type_id == 1:  # Boleta
-                dte_type_id = 39
-            else:  # Factura
-                dte_type_id = 33
-            
-            # Payload para la API de SimpleFactura
-            payload = {
-                "credenciales": {
-                    "rutEmisor": "77176777-K",
-                    "nombreSucursal": "Casa Matriz"
-                },
-                "dteReferenciadoExterno": {
-                    "folio": folio,
-                    "codigoTipoDte": dte_type_id,
-                    "ambiente": 0
-                }
-            }
-            
-            headers = {
-                'Authorization': f'Bearer {token}',
-                "Content-Type": "application/json"
-            }
-            
-            # Llamar a la API de SimpleFactura
-            print(f"[DEBUG PDF] Llamando a SimpleFactura con folio: {folio}")
-            print(f"[DEBUG PDF] Payload: {json.dumps(payload, indent=2)}")
-            
-            response = requests.post(
-                "https://api.simplefactura.cl/getPdf",
-                json=payload,
-                headers=headers
-            )
-            
-            print(f"[DEBUG PDF] Response status: {response.status_code}")
-            print(f"[DEBUG PDF] Response headers: {dict(response.headers)}")
-            
-            if response.status_code == 200:
-                # Usar FileClass para guardar el PDF
-                file_class = FileClass(self.db)
-                remote_path = f"{folio}.pdf"
-                
-                # Guardar el PDF usando temporal_upload
-                result = file_class.temporal_upload(response.content, remote_path)
-                
-                print(f"PDF generado exitosamente: {result}")
-                return remote_path
-            else:
-                print(f"Error generando PDF: {response.status_code} - {response.text}")
-                return None
-                
-        except Exception as e:
-            print(f"Error en generate_pdf: {str(e)}")
-            return None
 
     def generate_dte(self, id):
         sale = self.db.query(SaleModel).filter(SaleModel.id == id).first()
@@ -173,17 +106,11 @@ class DteClass:
                 print(f"[DEBUG BOLETA] Folio obtenido: {folio}")
                 
                 if folio:
-                    print(f"[DEBUG BOLETA] Iniciando generación de PDF para folio: {folio}")
-                    # Generar y descargar el PDF
-                    pdf_path = self.generate_pdf(folio, sale.dte_type_id)
-                    if pdf_path:
-                        print(f"[DEBUG BOLETA] PDF generado exitosamente: {pdf_path}")
-                    else:
-                        print("[DEBUG BOLETA] Error generando PDF")
+                    print(f"[DEBUG BOLETA] DTE generado exitosamente con folio: {folio}")
                 else:
                     print("[DEBUG BOLETA] No se pudo obtener el folio de la respuesta")
                 
-                return 1
+                return folio  # Retornar el folio en lugar de 1
             else:
                 print(f"[DEBUG BOLETA] Error en la respuesta: {response.status_code}")
                 return 0
@@ -245,17 +172,11 @@ class DteClass:
                 print(f"[DEBUG FACTURA] Folio obtenido: {folio}")
                 
                 if folio:
-                    print(f"[DEBUG FACTURA] Iniciando generación de PDF para folio: {folio}")
-                    # Generar y descargar el PDF
-                    pdf_path = self.generate_pdf(folio, sale.dte_type_id)
-                    if pdf_path:
-                        print(f"[DEBUG FACTURA] PDF generado exitosamente: {pdf_path}")
-                    else:
-                        print("[DEBUG FACTURA] Error generando PDF")
+                    print(f"[DEBUG FACTURA] DTE generado exitosamente con folio: {folio}")
                 else:
                     print("[DEBUG FACTURA] No se pudo obtener el folio de la respuesta")
                 
-                return 1
+                return folio  # Retornar el folio en lugar de 1
             else:
                 print(f"[DEBUG FACTURA] Error en la respuesta: {response.status_code}")
                 return 0

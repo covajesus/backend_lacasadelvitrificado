@@ -8,6 +8,7 @@ from app.backend.classes.file_class import FileClass
 from fastapi import File, UploadFile, HTTPException
 from app.backend.classes.dte_class import DteClass
 from app.backend.classes.inventory_class import InventoryClass
+from app.backend.db.models import SaleModel
 from datetime import datetime
 import uuid
 
@@ -41,8 +42,16 @@ def accept_sale_payment(id: int, dte_type_id: int, status_id:int, session_user: 
 
         dte_response = DteClass(db).generate_dte(id)
 
-        if dte_response == 1:
-            return {"message": "Dte created successfully"}
+        if dte_response and dte_response > 0:  # Si se generó el DTE y retornó un folio
+            # Actualizar el folio en la venta
+            sale = db.query(SaleModel).filter(SaleModel.id == id).first()
+            if sale:
+                sale.folio = dte_response
+                sale.updated_date = datetime.now()
+                db.commit()
+                return {"message": f"Dte created successfully with folio: {dte_response}"}
+            else:
+                return {"message": "Sale not found"}
         else:
             return {"message": "Dte creation failed"}
 
