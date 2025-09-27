@@ -23,7 +23,7 @@ class WhatsappClass:
             "to": customer_phone_formatted,
             "type": "template",
             "template": {
-                "name": "envio_dte_cliente_generado_v3",  # nombre EXACTO de tu plantilla
+                "name": "envio_dte_cliente_generado_v4",  # nombre EXACTO de tu plantilla
                 "language": {"code": "es"},
                 "components": [
                     {
