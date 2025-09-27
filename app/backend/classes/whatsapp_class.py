@@ -69,9 +69,16 @@ class WhatsappClass:
         setting_data = SettingClass(self.db).get(1)
         admin_phone = setting_data["setting_data"]["phone"]
 
+        # Formatear el número de teléfono
+        phone_str = str(admin_phone).strip()
+        if not phone_str.startswith("56"):
+            admin_phone_formatted = "56" + phone_str
+        else:
+            admin_phone_formatted = phone_str
+
         payload = {
             "messaging_product": "whatsapp",
-            "to": admin_phone,
+            "to": admin_phone_formatted,
             "type": "template",
             "template": {
                 "name": "alerta_nueva_orden",
