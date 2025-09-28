@@ -1,3 +1,8 @@
+from app.backend.db.models import SaleModel, CustomerModel, SaleProductModel, ProductModel, InventoryModel, UnitMeasureModel, SupplierModel, CategoryModel, LotItemModel, LotModel, InventoryMovementModel, InventoryLotItemModel, UnitFeatureModel, KardexValuesModel, SettingModel, UserModel
+from datetime import datetime
+from sqlalchemy import func
+from app.backend.classes.whatsapp_class import WhatsappClass
+
 class Product:
     def __init__(self, id, quantity):
         self.id = id
@@ -7,9 +12,6 @@ class ProductInput:
     def __init__(self, product):
         self.cart = [product]
 
-from app.backend.db.models import SaleModel, CustomerModel, SaleProductModel, ProductModel, InventoryModel, UnitMeasureModel, SupplierModel, CategoryModel, LotItemModel, LotModel, InventoryMovementModel, InventoryLotItemModel, UnitFeatureModel, KardexValuesModel, SettingModel, UserModel
-from datetime import datetime
-from sqlalchemy import func
 
 class SaleClass:
     def __init__(self, db):
@@ -487,8 +489,6 @@ class SaleClass:
 
             # Enviar alerta de nueva orden por WhatsApp
             try:
-                from app.backend.classes.whatsapp_class import WhatsappClass
-                
                 # Obtener datos del cliente
                 customer = self.db.query(CustomerModel).filter(CustomerModel.id == customer_id).first()
                 if customer:
@@ -519,28 +519,79 @@ class SaleClass:
 
         try:
             for sales_product in sales_products:
+                # Obtener el movimiento de inventario original
                 inventory_movement = self.db.query(InventoryMovementModel).filter(
                     InventoryMovementModel.id == sales_product.inventory_movement_id
                 ).first()
 
-                inventory_lot_item = self.db.query(InventoryLotItemModel).filter(InventoryLotItemModel.inventory_id == sales_product.inventory_id).filter(InventoryLotItemModel.lot_item_id == inventory_movement.lot_item_id).first()
-                new_quantity = inventory_lot_item.quantity + (inventory_movement.quantity * -1)
-                inventory_lot_item.quantity = new_quantity
-                inventory_lot_item.updated_date = datetime.now()
-                self.db.commit()
+                if inventory_movement:
+                    # Crear movimiento contrario (si era salida, crear entrada)
+                    reverse_quantity = inventory_movement.quantity * -1  # Cambiar signo
+                    
+                    # Crear nuevo movimiento de inventario (entrada)
+                    reverse_movement = InventoryMovementModel(
+                        inventory_id=inventory_movement.inventory_id,
+                        lot_item_id=inventory_movement.lot_item_id,
+                        movement_type_id=1,  # Tipo entrada
+                        quantity=reverse_quantity,
+                        unit_cost=inventory_movement.unit_cost,
+                        reason="Reversa de venta",
+                        added_date=datetime.now()
+                    )
+                    self.db.add(reverse_movement)
+                    self.db.commit()
 
-                lot_items = self.db.query(LotItemModel).filter(LotItemModel.id == sales_product.lot_item_id).first()
-                lot_items.quantity = int(lot_items.quantity) + int(sales_product.quantity)
-                lot_items.updated_date = datetime.now()
-                self.db.commit()
+                    # Actualizar kardex sumando la cantidad
+                    self.update_kardex_for_reverse(
+                        product_id=sales_product.product_id,
+                        returned_quantity=abs(inventory_movement.quantity),
+                        unit_cost=inventory_movement.unit_cost
+                    )
 
-                self.db.delete(inventory_movement)
-                self.db.commit()
+                    print(f"[REVERSE] Movimiento reverso creado para producto {sales_product.product_id}: {reverse_quantity}")
 
-            return "Inventory reject successfully"
+            return "Inventory reversed successfully"
         except Exception as e:
             self.db.rollback()
-            return "Error trying to reject inventory"
+            print(f"[REVERSE] Error: {str(e)}")
+            return f"Error trying to reverse inventory: {str(e)}"
+
+    def update_kardex_for_reverse(self, product_id, returned_quantity, unit_cost):
+        """Actualiza el kardex sumando la cantidad devuelta sin cambiar el costo promedio"""
+        try:
+            # Buscar registro existente en kardex
+            kardex_record = (
+                self.db.query(KardexValuesModel)
+                .filter(KardexValuesModel.product_id == product_id)
+                .first()
+            )
+            
+            if kardex_record:
+                # Solo sumar la cantidad devuelta, mantener el costo promedio
+                new_quantity = kardex_record.quantity + returned_quantity
+                
+                # Actualizar solo la cantidad, mantener el costo promedio
+                kardex_record.quantity = new_quantity
+                kardex_record.updated_date = datetime.now()
+                
+                print(f"[REVERSE KARDEX] Producto {product_id}: +{returned_quantity} unidades, nuevo total: {new_quantity}, costo promedio sin cambios: {kardex_record.average_cost}")
+            else:
+                # Si no existe kardex, crear uno nuevo
+                kardex_record = KardexValuesModel(
+                    product_id=product_id,
+                    quantity=returned_quantity,
+                    average_cost=unit_cost,
+                    added_date=datetime.now(),
+                    updated_date=datetime.now()
+                )
+                self.db.add(kardex_record)
+                print(f"[REVERSE KARDEX] Nuevo kardex creado para producto {product_id}: {returned_quantity} unidades")
+            
+            self.db.commit()
+            
+        except Exception as e:
+            print(f"[REVERSE KARDEX] Error actualizando kardex: {str(e)}")
+            self.db.rollback()
         
     def get(self, id):
         try:

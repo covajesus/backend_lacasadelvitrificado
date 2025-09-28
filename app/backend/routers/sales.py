@@ -96,6 +96,24 @@ def reject_sale_payment(id: int, status_id:int, session_user: UserLogin = Depend
 
     reverse_response = SaleClass(db).reverse(id)
 
+    # Enviar alerta de pago rechazado por WhatsApp
+    try:
+        # Obtener datos de la venta y cliente
+        sale = db.query(SaleModel).filter(SaleModel.id == id).first()
+        if sale:
+            customer = db.query(CustomerModel).filter(CustomerModel.id == sale.customer_id).first()
+            if customer and customer.phone:
+                whatsapp = WhatsappClass(db)
+                whatsapp.send_rejected_payment_alert(
+                    customer_phone=customer.phone,
+                    id=sale.id
+                )
+                print(f"[WHATSAPP] Alerta de pago rechazado enviada al cliente {customer.phone}")
+            else:
+                print("[WHATSAPP] Cliente no encontrado o sin teléfono")
+    except Exception as e:
+        print(f"[WHATSAPP] Error enviando alerta de pago rechazado: {str(e)}")
+
     return {"message": reverse_response}
         
 @sales.get("/delivered_sale/{id}")
