@@ -54,6 +54,11 @@ class DteClass:
                 "MontoItem": int(int(sp.price) * int(sp.quantity))  # monto total línea
             })
 
+        if sale.shipping_method_id == 2:
+            subtotal = sale.subtotal + sale.shipping_cost
+        else:
+            subtotal = sale.subtotal
+
         if sale.dte_type_id == 1:
             # Armar el payload
             payload = {
@@ -76,7 +81,7 @@ class DteClass:
                             "RznSocRecep": customer.social_reason
                         },
                         "Totales": {
-                            "MntNeto": round(sale.subtotal),
+                            "MntNeto": round(subtotal),
                             "IVA": round(sale.tax),
                             "MntTotal": round(sale.total)
                         }
@@ -127,7 +132,7 @@ class DteClass:
                         },
                         "Emisor": {
                             "RUTEmisor": "77176777-K",
-                            "RznSoc": "Vitrificados Chile Compaaañia Limitada",
+                            "RznSoc": "Vitrificados Chile Compañia Limitada",
                             "GiroEmis": "VENTA AL POR MENOR DE ARTICULOS DE FERRETERIA Y MATERIALES DE CONSTRUCCION",
                             "DirOrigen": "Santiago",
                             "CmnaOrigen": "Santiago"
@@ -142,7 +147,7 @@ class DteClass:
                             "CiudadRecep": region.region
                         },
                         "Totales": {
-                            "MntNeto": round(sale.subtotal),
+                            "MntNeto": round(subtotal),
                             "IVA": round(sale.tax),
                             "MntTotal": round(sale.total)
                         }
