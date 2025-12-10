@@ -160,6 +160,44 @@ def store(
     return {"message": response}
 
 
+@sales.post("/upload_payment/{sale_id}")
+def upload_payment(
+    sale_id: int,
+    payment_support: UploadFile = File(...),
+    session_user: UserLogin = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Sube el comprobante de pago para una venta existente.
+    """
+    try:
+        # Verificar que la venta existe
+        sale = db.query(SaleModel).filter(SaleModel.id == sale_id).first()
+        if not sale:
+            raise HTTPException(status_code=404, detail="Venta no encontrada")
+        
+        # Generar nombre único para el archivo
+        timestamp = datetime.now().strftime("%Y_%m_%d_%H_%M_%S")
+        unique_id = uuid.uuid4().hex[:8]
+        extension = payment_support.filename.split('.')[-1]
+        filename = f"payment_{timestamp}_{unique_id}.{extension}"
+        
+        # Subir archivo
+        FileClass(db).upload(payment_support, filename)
+        
+        # Actualizar la venta con el nombre del archivo
+        sale.payment_support = filename
+        sale.updated_date = datetime.now()
+        db.commit()
+        
+        return {"message": {"status": "success", "filename": filename, "message": "Comprobante de pago subido exitosamente"}}
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error al subir comprobante: {str(e)}")
+
+
 @sales.get("/check_inventory/{product_id}/{quantity}")
 def check_inventory(product_id: int, quantity: int, db: Session = Depends(get_db)):
     response = SaleClass(db).check_product_inventory(product_id, quantity)
@@ -190,4 +228,21 @@ def sales_report(
         end_date=filter_data.date_to
     )
 
+    return {"message": data}
+
+@sales.delete("/delete/{sale_id}")
+def delete_sale(
+    sale_id: int,
+    session_user: UserLogin = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Elimina una venta y sus productos asociados.
+    Solo se pueden eliminar ventas que no tengan DTE generado (sin folio).
+    """
+    data = SaleClass(db).delete(sale_id)
+    
+    if data.get("status") == "error":
+        raise HTTPException(status_code=400, detail=data["message"])
+    
     return {"message": data}

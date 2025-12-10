@@ -937,3 +937,38 @@ class SaleClass:
             
         except Exception as e:
             return {"status": "error", "message": f"Error al generar reporte: {str(e)}"}
+    
+    def delete(self, sale_id: int):
+        try:
+            # Buscar la venta
+            sale = self.db.query(SaleModel).filter(SaleModel.id == sale_id).first()
+            
+            if not sale:
+                return {"status": "error", "message": "Venta no encontrada"}
+            
+            # Verificar si la venta tiene un DTE generado (folio)
+            if sale.folio:
+                return {"status": "error", "message": "No se puede eliminar una venta con DTE generado"}
+            
+            # Buscar todos los productos de la venta
+            sale_products = (
+                self.db.query(SaleProductModel)
+                .filter(SaleProductModel.sale_id == sale_id)
+                .all()
+            )
+            
+            # Eliminar cada producto de la venta
+            for sale_product in sale_products:
+                self.db.delete(sale_product)
+            
+            # Eliminar la venta
+            self.db.delete(sale)
+            
+            # Confirmar cambios
+            self.db.commit()
+            
+            return {"status": "success", "message": "Venta eliminada correctamente"}
+            
+        except Exception as e:
+            self.db.rollback()
+            return {"status": "error", "message": f"Error al eliminar la venta: {str(e)}"}
