@@ -154,9 +154,8 @@ def store_shopping(data: ShoppingCreateInput, db: Session = Depends(get_db)):
 
     shopping_data = ShoppingClass(db).store(data)
     
-    # Obtener shopping_number para el subject del correo
-    shopping_record = db.query(ShoppingModel).filter(ShoppingModel.id == shopping_data["shopping_id"]).first()
-    shopping_number = str(shopping_record.shopping_number) if shopping_record and shopping_record.shopping_number else str(shopping_data["shopping_id"])
+    # Usar shopping_number directamente del objeto data
+    shopping_number = str(data.shopping_number)
 
     html_content_for_own_company = TemplateClass(db).generate_shopping_html_for_own_company(data, shopping_data["shopping_id"])
     html_content_for_supplier = TemplateClass(db).generate_shopping_html_for_supplier(data, shopping_data["shopping_id"])
@@ -204,9 +203,8 @@ def update_shopping(id: int, data: UpdateShopping, session_user: UserLogin = Dep
         cc_emails = [email for email in [data.second_email, data.third_email] if email]
 
         # Generar contenido HTML y PDF
-        # Obtener shopping_number para el subject del correo
-        shopping_record = db.query(ShoppingModel).filter(ShoppingModel.id == id).first()
-        shopping_number = str(shopping_record.shopping_number) if shopping_record and shopping_record.shopping_number else str(id)
+        # Usar shopping_number directamente del objeto data
+        shopping_number = str(data.shopping_number)
         
         html_content_for_own_company = TemplateClass(db).generate_shopping_html_for_own_company(data, id)
         html_content_for_supplier = TemplateClass(db).generate_shopping_html_for_supplier(data, id)

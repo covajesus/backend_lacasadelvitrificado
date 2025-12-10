@@ -198,6 +198,41 @@ def upload_payment(
         raise HTTPException(status_code=500, detail=f"Error al subir comprobante: {str(e)}")
 
 
+@sales.delete("/delete_payment/{sale_id}")
+def delete_payment(
+    sale_id: int,
+    session_user: UserLogin = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Elimina el comprobante de pago de una venta existente.
+    """
+    try:
+        # Verificar que la venta existe
+        sale = db.query(SaleModel).filter(SaleModel.id == sale_id).first()
+        if not sale:
+            raise HTTPException(status_code=404, detail="Venta no encontrada")
+        
+        # Verificar si tiene comprobante de pago
+        if not sale.payment_support:
+            raise HTTPException(status_code=404, detail="La venta no tiene comprobante de pago")
+        
+        # Eliminar el archivo físico
+        FileClass(db).delete(sale.payment_support)
+        
+        # Actualizar la venta eliminando la referencia al archivo
+        sale.payment_support = None
+        sale.updated_date = datetime.now()
+        db.commit()
+        
+        return {"message": {"status": "success", "message": "Comprobante de pago eliminado exitosamente"}}
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error al eliminar comprobante: {str(e)}")
+
+
 @sales.get("/check_inventory/{product_id}/{quantity}")
 def check_inventory(product_id: int, quantity: int, db: Session = Depends(get_db)):
     response = SaleClass(db).check_product_inventory(product_id, quantity)
