@@ -1,4 +1,4 @@
-from app.backend.schemas import ShoppingCreateInput
+﻿from app.backend.schemas import ShoppingCreateInput
 import pdfkit
 from io import BytesIO
 from app.backend.db.models import SupplierModel, ProductModel, CategoryModel, UnitFeatureModel, ShoppingProductModel, SettingModel, ShoppingModel
@@ -9,12 +9,34 @@ class TemplateClass:
     def __init__(self, db):
         self.db = db
     
+    def truncate_text(self, text, max_length=35):
+        """Trunca el texto a la longitud mÃ¡xima especificada y agrega '...'"""
+        if len(text) <= max_length:
+            return text
+        return text[:max_length] + "..."
+    
     def format_number(self, value):
-        """Formatea números para mostrar enteros sin decimales y decimales cuando es necesario"""
+        """Formatea números para mostrar enteros sin decimales cuando es necesario"""
         if value == int(value):
             return str(int(value))
         else:
             return f"{value:.2f}"
+    
+    def format_currency(self, value):
+        """Formatea números como moneda con separador de miles (punto)"""
+        try:
+            # Convertir a float si no lo es
+            num = float(value)
+            # Redondear a 2 decimales para evitar problemas de precisión de punto flotante
+            num = round(num, 2)
+            # Si es entero, mostrar sin decimales
+            if num == int(num):
+                return f"{int(num):,}".replace(',', '.')
+            else:
+                # Si tiene decimales, mostrar con 2 decimales
+                return f"{num:,.2f}".replace(',', 'X').replace('.', ',').replace('X', '.')
+        except (ValueError, TypeError):
+            return "0"
 
     def calculate_shopping_totals(self, data: ShoppingCreateInput, shopping_id: int):
         """Calcula todos los totales necesarios para el template"""
@@ -27,10 +49,14 @@ class TemplateClass:
 
         # Obtener información del shopping para verificar si hay prepago
         shopping = self.db.query(ShoppingModel).filter(ShoppingModel.id == shopping_id).first()
-        has_prepaid = shopping and shopping.prepaid_status_id is not None
+        if shopping.prepaid_status_id == 1:
+            has_prepaid = True
+        else:
+            has_prepaid = False
 
-        # Usar un descuento fijo del 5% para prepagos (puedes ajustar este valor)
-        prepaid_discount_percentage = 5.0 if has_prepaid else 0.0
+        # Obtener porcentaje de descuento desde settings
+        settings = self.db.query(SettingModel).first()
+        prepaid_discount_percentage = float(settings.prepaid_discount) if settings and settings.prepaid_discount and has_prepaid else 0.0
 
         for item in data.products:
             # Obtener datos del producto
@@ -44,23 +70,22 @@ class TemplateClass:
             if not shopping_product:
                 continue
 
-            # Calcular totales por unidad de medida (usando quantity * quantity_per_package)
-            total_quantity_per_package = float(shopping_product.quantity) * float(shopping_product.quantity_per_package)
-            
+            # Calcular totales por unidad de medida usando los mismos datos que el template
+            # Usar item.quantity_per_package del request
             if item.unit_measure_id == 1:  # Kilogramos
-                total_kg += total_quantity_per_package
+                total_kg += float(item.quantity_per_package)
             elif item.unit_measure_id == 2:  # Litros
-                total_lts += total_quantity_per_package
+                total_lts += float(item.quantity_per_package)
             elif item.unit_measure_id == 3:  # Unidades
-                total_und += total_quantity_per_package
+                total_und += float(item.quantity_per_package)
 
-            # Calcular peso total para envío
+            # Calcular peso total para envío usando los datos del request
             if unit_feature:
                 weight_per_unit = float(unit_feature.weight_per_unit) if unit_feature.weight_per_unit else 0.0
-                product_total_weight = weight_per_unit * float(shopping_product.quantity)
+                product_total_weight = weight_per_unit * float(item.quantity)
                 total_shipping_kg += product_total_weight
                 
-                # Para cálculo de pallets
+                # Para cï¿½lculo de pallets
                 weight_per_pallet = float(unit_feature.weight_per_pallet) if unit_feature.weight_per_pallet else 1000.0
                 products_info.append({
                     'name': product_data.product if product_data else 'Unknown',
@@ -68,9 +93,11 @@ class TemplateClass:
                     'weight_per_pallet': weight_per_pallet
                 })
 
-            # Calcular total sin descuento usando el campo amount que ya tiene el cálculo correcto
-            if shopping_product.amount:
-                total_without_discount += float(shopping_product.amount)
+            # Calcular total sin descuento usando los mismos datos que el template
+            # Usar item.final_unit_cost e item.quantity_per_package del request
+            if item.final_unit_cost and item.quantity_per_package:
+                product_amount = float(item.quantity_per_package) * float(item.final_unit_cost)
+                total_without_discount += product_amount
 
         # Calcular pallets usando el algoritmo correcto
         calculated_pallets = self.calculate_real_mixed_pallets(products_info)
@@ -78,7 +105,7 @@ class TemplateClass:
 
         # Calcular total con descuento si hay prepago
         total_with_discount = None
-        if has_prepaid and prepaid_discount_percentage > 0:
+        if has_prepaid:
             total_with_discount = total_without_discount * (1 - prepaid_discount_percentage / 100)
 
         return {
@@ -104,7 +131,7 @@ class TemplateClass:
             if not active:
                 break
             
-            # Capacidad del pallet = MÁXIMA de productos activos (sincronizado con frontend)
+            # Capacidad del pallet = Mï¿½XIMA de productos activos (sincronizado con frontend)
             pallet_capacity = max(p["capacity"] for p in active)
             pallet_weight = 0
             pallet_contents = []
@@ -112,7 +139,7 @@ class TemplateClass:
             # Llenar pallet con productos disponibles
             for product in remaining:
                 if product["weight"] > 0 and pallet_weight < pallet_capacity:
-                    # Cuánto puede agregar de este producto
+                    # Cuï¿½nto puede agregar de este producto
                     space_available = pallet_capacity - pallet_weight
                     can_add = min(product["weight"], space_available)
                     
@@ -132,20 +159,47 @@ class TemplateClass:
     def generate_shopping_html_for_own_company(self, data: ShoppingCreateInput, id) -> str:
         logo_url = "file:/var/www/api.lacasadelvitrificado.com/public/assets/logo.png"
         vitrificado_logo_url = "file:/var/www/api.lacasadelvitrificado.com/public/assets/vitrificado-logo.png"
-        supplier_data = self.db.query(SupplierModel).filter(SupplierModel.id == data.supplier_id).first()
         shopping_data = self.db.query(ShoppingModel).filter(ShoppingModel.id == id).first()
         shopping_number = str(shopping_data.shopping_number) if shopping_data and shopping_data.shopping_number else str(id)
         date = datetime.utcnow().strftime("%Y-%m-%d")
+
+        # Función auxiliar para generar la cabecera completa
+        def get_page_header():
+            return f"""
+        <div class="header">
+            <img src="{vitrificado_logo_url}" class="vitrificado_logo float-left" />
+            &ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;
+            &ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;
+            &ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;
+            &ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;
+            &ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;            <img src="{logo_url}" class="logo float-right" />
+        </div>
+
+        <div class="title">
+            <h2>Purchase Order #{shopping_number}</h2>
+        </div>
+
+        <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 20px;">
+            <div>
+                <strong>Vitrificadoschile Compañia Limitada</strong><br>
+                Av. Pres. Kennedy 7440 of.901<br>
+                7650618 Santiago - Chile
+            </div>
+            <div style="text-align: right;">
+                Date: {date}
+            </div>
+        </div>
+            """
 
         html = f"""
         <html>
         <head>
         <meta charset="utf-8">
-        <style>
-            body {{ font-family: Arial, sans-serif; font-size: 14px; }}
-            table {{ border-collapse: collapse; width: 100%; margin-top: 20px; }}
-            th, td {{ border: 1px solid #ddd; padding: 8px; text-align: left; }}
-            th {{ background-color: #f2f2f2; }}
+        <style>@page {{ margin: 2cm 1.5cm; size: A4 portrait; }}
+            body {{ font-family: Arial, sans-serif; font-size: 12px; line-height: 1.4; margin: 0; padding: 0; }}
+            table {{ border-collapse: collapse; width: 100%; margin-top: 20px; page-break-inside: auto; }}
+            th, td {{ border: 1px solid #ddd; padding: 8px; text-align: left; word-wrap: break-word; max-width: 150px; }}
+            th {{ background-color: #f2f2f2; }} tr {{ page-break-inside: avoid; page-break-after: auto; }}
             .logo {{ width: 200px; }}
             .vitrificado_logo {{ width: 120px; }}
             .header {{
@@ -158,31 +212,15 @@ class TemplateClass:
         </style>
         </head>
         <body>
-        <div class="header">
-            <img src="{vitrificado_logo_url}" class="vitrificado_logo float-left" />
-            &ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;
-            &ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;
-            &ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;
-            &ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;
-            &ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;
-            <img src="{logo_url}" class="logo float-right" />
-        </div>
-
-        <div class="title">
-            <h2>Purchase Order #{shopping_number}</h2>
-        </div>
-
-        <div>
-            Date: {date}
-        </div>
+        {get_page_header()}
 
         <table>
             <thead>
             <tr>
                 <th>Pos Item no.</th>
                 <th>Description</th>
-                <th>Cont</th>
                 <th>Kg/Lts/Un</th>
+                <th>Cont</th>
                 <th>Price</th>
                 <th>Amount</th>
             </tr>
@@ -192,13 +230,101 @@ class TemplateClass:
 
         # Ordenar productos por category_id
         sorted_products = sorted(data.products, key=lambda p: p.category_id)
+        
+        # Calcular todos los totales adicionales AL PRINCIPIO
+        totals = self.calculate_shopping_totals(data, id)
+        
+        # Crear función para generar HTML de totales
+        def get_totals_html():
+            totals_html = f"""
+        <div style="margin-top: 20px; font-size: 12px; text-align: right; border-top: 1px solid #ddd; padding-top: 15px;">
+            <div style="margin-bottom: 8px;">
+                <strong>Total Kilograms:</strong> {self.format_currency(totals['total_kg'])} Kg
+            </div>
+            <div style="margin-bottom: 8px;">
+                <strong>Total Liters:</strong> {self.format_currency(totals['total_lts'])} Lts
+            </div>
+            <div style="margin-bottom: 8px;">
+                <strong>Total Units:</strong> {self.format_currency(totals['total_und'])} Units
+            </div>
+            <div style="margin-bottom: 8px;">
+                <strong>Total Shipping (Kg):</strong> {self.format_currency(totals['total_shipping_kg'])} Kg
+            </div>
+            <div style="margin-bottom: 8px;">
+                <strong>Total Pallets (Units):</strong> {self.format_currency(totals['total_pallets'])} Units
+            </div>"""
+            
+            # Mostrar descuento si hay prepago
+            if totals['has_prepaid'] and totals['total_with_discount'] is not None:
+                discount_amount = totals['total_without_discount'] - totals['total_with_discount']
+                totals_html += f"""
+            <div style="margin-bottom: 8px;">
+                <strong>Discount:</strong> €. {self.format_currency(discount_amount)}
+            </div>"""
+
+            totals_html += f"""
+            <div style="margin-bottom: 8px;">
+                <strong>Total without Discount:</strong> €. {self.format_currency(totals['total_without_discount'])}
+            </div>"""
+
+            # Mostrar total con descuento solo si hay prepago
+            if totals['has_prepaid'] and totals['total_with_discount'] is not None:
+                totals_html += f"""
+            <div style="margin-bottom: 8px;">
+                <strong>Total with Discount ({self.format_number(totals['prepaid_discount_percentage'])}%):</strong> €. {self.format_currency(totals['total_with_discount'])}
+            </div>"""
+
+            totals_html += "</div>"
+            return totals_html
+        
+        # Calcular total de filas (productos + headers de categoría)
+        total_rows = len(sorted_products)
+        categories = set(item.category_id for item in sorted_products)
+        total_rows += len(categories)  # Agregar filas de categorías
+        
+        # Decidir si usar paginación
+        use_pagination = total_rows > 17
+        items_per_page = 17
         current_category_id = None
-
-        for item in sorted_products:
+        row_count = 0
+        page_count = 1
+        
+        # Comenzar primera tabla
+        for i, item in enumerate(sorted_products):
             product_data = self.db.query(ProductModel).filter(ProductModel.id == item.product_id).first()
-            unit = {1: "Kg", 2: "Lts", 3: "Und"}.get(item.unit_measure_id, "")
-
-            if item.category_id != current_category_id:
+            unit = {1: "Kg", 2: "Lts", 3: "Units"}.get(item.unit_measure_id, "")
+            
+            # Si es el primer elemento o cambiamos de categoría, agregamos header de categoría
+            category_changed = item.category_id != current_category_id
+            
+            # Si usamos paginación y llegamos al límite de filas, cerrar tabla actual, agregar totales y abrir nueva página
+            if use_pagination and row_count >= items_per_page:
+                html += """
+            </tbody>
+        </table>
+        """ + get_totals_html() + """
+        <div style="page-break-before: always;"></div>
+        """ + get_page_header() + """
+        <table>
+            <thead>
+                <tr>
+                    <th>Code</th>
+                    <th>Product</th>
+                    <th>Kg/Lts/Un</th>
+                    <th>Cont</th>
+                    <th>Unit Cost</th>
+                    <th>Amount</th>
+                </tr>
+            </thead>
+            <tbody>
+                """
+                row_count = 0
+                page_count += 1
+                current_category_id = None  # Reset para mostrar categoría en nueva página
+                category_changed = True  # Forzar mostrar categoría
+            
+            # Mostrar header de categoría si cambió
+            if category_changed:
                 category_data = self.db.query(CategoryModel).filter(CategoryModel.id == item.category_id).first()
                 html += f"""
                 <tr>
@@ -206,64 +332,28 @@ class TemplateClass:
                 </tr>
                 """
                 current_category_id = item.category_id
-
+                row_count += 1
+            
+            # Agregar producto
             html += f"""
             <tr>
                 <td>{product_data.code}</td>
-                <td>{product_data.product}</td>
-                <td>{item.quantity}</td>
+                <td>{self.truncate_text(product_data.product)}</td>
                 <td>{self.format_number(item.quantity_per_package)} {unit}</td>
-                <td>€. {self.format_number(item.final_unit_cost)}</td>
-                <td>€. {self.format_number(item.amount)}</td>
+                <td>{self.format_number(item.quantity)}</td>
+                <td>€. {self.format_currency(item.final_unit_cost)}</td>
+                <td>€. {self.format_currency(float(item.quantity_per_package) * float(item.final_unit_cost))}</td>
             </tr>
             """
+            row_count += 1
 
+        # Cerrar tabla final y agregar totales
         html += f"""
             </tbody>
         </table>
-        """
+        """ + get_totals_html()
 
-        # Calcular todos los totales adicionales
-        totals = self.calculate_shopping_totals(data, id)
-
-        html += f"""
-        <div style="margin-top: 30px; font-size: 14px; text-align: right;">
-            <div style="margin-bottom: 10px;">
-                <strong>Total por Kilogramos:</strong><br>
-                {self.format_number(totals['total_kg'])} Kg
-            </div>
-            <div style="margin-bottom: 10px;">
-                <strong>Total por Litros:</strong><br>
-                {self.format_number(totals['total_lts'])} Lts
-            </div>
-            <div style="margin-bottom: 10px;">
-                <strong>Total por Unidad:</strong><br>
-                {self.format_number(totals['total_und'])} Und
-            </div>
-            <div style="margin-bottom: 10px;">
-                <strong>Total Envío (Kg):</strong><br>
-                {self.format_number(totals['total_shipping_kg'])} Kg
-            </div>
-            <div style="margin-bottom: 10px;">
-                <strong>Total Pallets (Und):</strong><br>
-                {self.format_number(totals['total_pallets'])} Und
-            </div>
-            <div style="margin-bottom: 10px;">
-                <strong>Total sin Descuento:</strong><br>
-                €. {self.format_number(totals['total_without_discount'])}
-            </div>"""
-
-        # Mostrar total con descuento solo si hay prepago
-        if totals['has_prepaid'] and totals['total_with_discount'] is not None:
-            html += f"""
-            <div style="margin-bottom: 10px;">
-                <strong>Total con Descuento2 ({self.format_number(totals['prepaid_discount_percentage'])}%):</strong><br>
-                €. {self.format_number(totals['total_with_discount'])}
-            </div>"""
-
-        html += f"""
-        </div>
-
+        html += """
         </body>
         </html>
         """
@@ -277,15 +367,89 @@ class TemplateClass:
         shopping_number = str(shopping_data.shopping_number) if shopping_data and shopping_data.shopping_number else str(id)
         date = datetime.utcnow().strftime("%Y-%m-%d")
 
+        # Función auxiliar para generar la cabecera completa
+        def get_page_header():
+            return f"""
+        <div class="header">
+            <img src="{vitrificado_logo_url}" class="vitrificado_logo float-left" />
+            &ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;
+            &ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;
+            &ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;
+            &ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;
+            &ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;            <img src="{logo_url}" class="logo float-right" />
+        </div>
+
+        <div class="title">
+            <h2>Purchase Order #{shopping_number}</h2>
+        </div>
+
+        <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 20px;">
+            <div>
+                <strong>Vitrificadoschile Compañia Limitada</strong><br>
+                Av. Pres. Kennedy 7440 of.901<br>
+                7650618 Santiago - Chile
+            </div>
+            <div style="text-align: right;">
+                Date: {date}
+            </div>
+        </div>
+            """
+
+        # Calcular todos los totales adicionales AL PRINCIPIO
+        totals = self.calculate_shopping_totals(data, id)
+        
+        # Crear función para generar HTML de totales
+        def get_totals_html():
+            totals_html = f"""
+        <div style="margin-top: 20px; font-size: 12px; text-align: right; border-top: 1px solid #ddd; padding-top: 15px;">
+            <div style="margin-bottom: 8px;">
+                <strong>Total Kilograms:</strong> {self.format_currency(totals['total_kg'])} Kg
+            </div>
+            <div style="margin-bottom: 8px;">
+                <strong>Total Liters:</strong> {self.format_currency(totals['total_lts'])} Lts
+            </div>
+            <div style="margin-bottom: 8px;">
+                <strong>Total Units:</strong> {self.format_currency(totals['total_und'])} Units
+            </div>
+            <div style="margin-bottom: 8px;">
+                <strong>Total Shipping (Kg):</strong> {self.format_currency(totals['total_shipping_kg'])} Kg
+            </div>
+            <div style="margin-bottom: 8px;">
+                <strong>Total Pallets (Units):</strong> {self.format_currency(totals['total_pallets'])} Units
+            </div>"""
+            
+            # Mostrar descuento si hay prepago
+            if totals['has_prepaid'] and totals['total_with_discount'] is not None:
+                discount_amount = totals['total_without_discount'] - totals['total_with_discount']
+                totals_html += f"""
+            <div style="margin-bottom: 8px;">
+                <strong>Discount:</strong> €. {self.format_currency(discount_amount)}
+            </div>"""
+
+            totals_html += f"""
+            <div style="margin-bottom: 8px;">
+                <strong>Total without Discount:</strong> €. {self.format_currency(totals['total_without_discount'])}
+            </div>"""
+
+            # Mostrar total con descuento solo si hay prepago
+            if totals['has_prepaid'] and totals['total_with_discount'] is not None:
+                totals_html += f"""
+            <div style="margin-bottom: 8px;">
+                <strong>Total with Discount ({self.format_number(totals['prepaid_discount_percentage'])}%):</strong> €. {self.format_currency(totals['total_with_discount'])}
+            </div>"""
+
+            totals_html += "</div>"
+            return totals_html
+
         html = f"""
         <html>
             <head>
             <meta charset="utf-8">
-            <style>
-                body {{ font-family: Arial, sans-serif; font-size: 14px; }}
-                table {{ border-collapse: collapse; width: 100%; margin-top: 20px; }}
-                th, td {{ border: 1px solid #ddd; padding: 8px; text-align: left; }}
-                th {{ background-color: #f2f2f2; }}
+            <style>@page {{ margin: 2cm 1.5cm; size: A4 portrait; }}
+                body {{ font-family: Arial, sans-serif; font-size: 14px; line-height: 1.4; margin: 0; padding: 0; }}
+                table {{ border-collapse: collapse; width: 100%; margin-top: 20px; page-break-inside: auto; }}
+                th, td {{ border: 1px solid #ddd; padding: 8px; text-align: left; word-wrap: break-word; max-width: 150px; }}
+                th {{ background-color: #f2f2f2; }} tr {{ page-break-inside: avoid; page-break-after: auto; }}
                 .logo {{ width: 200px; }}
                 .vitrificado_logo {{ width: 120px; }}
                 .header {{
@@ -302,23 +466,7 @@ class TemplateClass:
             </style>
             </head>
             <body>
-            <div class="header">
-                <img src="{vitrificado_logo_url}" class="vitrificado_logo float-left" />
-                &ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;
-                &ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;
-                &ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;
-                &ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;
-                &ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;
-                <img src="{logo_url}" class="logo float-right" />
-            </div>
-
-            <div class="title">
-                <h2>Purchase Order #{shopping_number}</h2>
-            </div>
-
-            <div>
-                Date: {date}
-            </div>
+            {get_page_header()}
 
             <table>
                 <thead>
@@ -336,9 +484,21 @@ class TemplateClass:
 
         # Ordenar productos por category_id
         sorted_products = sorted(data.products, key=lambda p: p.category_id)
+        
+        # Calcular total de filas (productos + headers de categoría)
+        total_rows = len(sorted_products)
+        categories = set(item.category_id for item in sorted_products)
+        total_rows += len(categories)  # Agregar filas de categorías
+        
+        # Decidir si usar paginación
+        use_pagination = total_rows > 17
+        items_per_page = 17
         current_category_id = None
-
-        for item in sorted_products:
+        row_count = 0
+        page_count = 1
+        
+        # Comenzar primera tabla
+        for i, item in enumerate(sorted_products):
             product_data = self.db.query(ProductModel).filter(ProductModel.id == item.product_id).first()
             if item.unit_measure_id == 1 or item.unit_measure_id == 2 or item.unit_measure_id == 3:
                 unit_features = (
@@ -356,95 +516,73 @@ class TemplateClass:
                 except ValueError:
                     raise ValueError(f"Error al convertir valores de UnitFeatureModel a float (product_id={item.product_id})")
 
-            unit = {1: "Kg", 2: "Lts", 3: "Und"}.get(item.unit_measure_id, "")
-
-            if item.category_id != current_category_id:
+            unit = {1: "Kg", 2: "Lts", 3: "Units"}.get(item.unit_measure_id, "")
+            
+            # Si es el primer elemento o cambiamos de categoría, agregamos header de categoría
+            category_changed = item.category_id != current_category_id
+            
+            # Si usamos paginación y llegamos al límite de filas, cerrar tabla actual y abrir nueva página
+            if use_pagination and row_count >= items_per_page:
+                html += """
+            </tbody>
+        </table>
+        """ + get_totals_html() + """
+        <div style="page-break-before: always;"></div>
+        """ + get_page_header() + """
+        <table>
+            <thead>
+                <tr>
+                    <th>Pos Item no.</th>
+                    <th>Description</th>
+                    <th>Cont</th>
+                    <th>Kg/Lts/Un</th>
+                    <th>Price</th>
+                    <th>Amount</th>
+                </tr>
+            </thead>
+            <tbody>
+                """
+                row_count = 0
+                page_count += 1
+                current_category_id = None  # Reset para mostrar categoría en nueva página
+                category_changed = True  # Forzar mostrar categoría
+            
+            # Mostrar header de categoría si cambió
+            if category_changed:
                 category_data = self.db.query(CategoryModel).filter(CategoryModel.id == item.category_id).first()
                 html += f"""
                 <tr>
-                    <td colspan="8" style="background-color: {category_data.color}; font-weight: bold; text-align: center; font-size:20px;">{category_data.category}</td>
+                    <td colspan="6" style="background-color: {category_data.color}; font-weight: bold; text-align: center; font-size:20px;">{category_data.category}</td>
                 </tr>
                 """
                 current_category_id = item.category_id
-
+                row_count += 1
+            
+            # Agregar producto
             html += f"""
             <tr>
                 <td>{product_data.code}</td>
-                <td>{product_data.product}</td>
-                <td>{item.quantity}</td>
+                <td>{self.truncate_text(product_data.product)}</td>
                 <td>{self.format_number(item.quantity_per_package)} {unit}</td>
-                <td>€. {self.format_number(item.final_unit_cost)}</td>
-                <td>€. {self.format_number(item.amount)}</td>
+                <td>{self.format_number(item.quantity)}</td>
+                <td>€. {self.format_currency(item.final_unit_cost)}</td>
+                <td>€. {self.format_currency(item.quantity_per_package * item.final_unit_cost)}</td>
             </tr>
             """
+            row_count += 1
 
         html += f"""
             </tbody>
         </table>
-        """
-
-        # Calcular todos los totales adicionales
-        totals = self.calculate_shopping_totals(data, id)
+        """ + get_totals_html()
 
         html += f"""
-        <div style="margin-top: 30px; font-size: 14px; text-align: right;">
-            <div style="margin-bottom: 10px;">
-                <strong>Total por Kilogramos:</strong><br>
-                {self.format_number(totals['total_kg'])} Kg
-            </div>
-            <div style="margin-bottom: 10px;">
-                <strong>Total por Litros:</strong><br>
-                {self.format_number(totals['total_lts'])} Lts
-            </div>
-            <div style="margin-bottom: 10px;">
-                <strong>Total por Unidad:</strong><br>
-                {self.format_number(totals['total_und'])} Und
-            </div>
-            <div style="margin-bottom: 10px;">
-                <strong>Total Envío (Kg):</strong><br>
-                {self.format_number(totals['total_shipping_kg'])} Kg
-            </div>
-            <div style="margin-bottom: 10px;">
-                <strong>Total Pallets (Und):</strong><br>
-                {self.format_number(totals['total_pallets'])} Und
-            </div>
-            <div style="margin-bottom: 10px;">
-                <strong>Total sin Descuento:</strong><br>
-                €. {self.format_number(totals['total_without_discount'])}
-            </div>"""
-
-        # Mostrar total con descuento solo si hay prepago
-        if totals['has_prepaid'] and totals['total_with_discount'] is not None:
-            html += f"""
-            <div style="margin-bottom: 10px;">
-                <strong>Total con Descuento ({self.format_number(totals['prepaid_discount_percentage'])}%):</strong><br>
-                €. {self.format_number(totals['total_with_discount'])}
-            </div>"""
-
-        html += f"""
-        </div>
-
         <!-- Salto de página -->
         <div class="page-break"></div>
 
         <!-- Segunda página -->
         <div class="page-break">
-            <div class="header">
-                <img src="{vitrificado_logo_url}" class="vitrificado_logo float-left" />
-                &ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;
-                &ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;
-                &ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;
-                &ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;
-                &ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;
-                <img src="{logo_url}" class="logo float-right" />
-            </div>
-            <div class="title">
-                <h2>Purchase Order #{shopping_number}</h2>
-            </div>
-
-            <div>
-                Date: {date}
-            </div>
+            {get_page_header()}
 
             <table>
                 <thead>
@@ -460,7 +598,6 @@ class TemplateClass:
         current_category_id = None
         total_weight_per_shopping = 0.0
         products_info = []
-
 
         for item in sorted_products:
             product_data = self.db.query(ProductModel).filter(ProductModel.id == item.product_id).first()
@@ -482,7 +619,7 @@ class TemplateClass:
 
                 total_weight_per_shopping += product_total_weight
                 
-                # Acumular información de productos para cálculo correcto de pallets
+                # Acumular informaciï¿½n de productos para cï¿½lculo correcto de pallets
                 products_info.append({
                     'name': product_data.product if product_data else 'Unknown',
                     'total_weight': product_total_weight,
@@ -493,20 +630,13 @@ class TemplateClass:
         calculated_pallets = self.calculate_real_mixed_pallets(products_info)
         how_many_pallets = len(calculated_pallets)
 
-        print("Total weight per shopping:", total_weight_per_shopping)
-        print("Pallet calculation details:")
-        for i, pallet in enumerate(calculated_pallets, 1):
-            print(f"  Pallet {i}: {pallet['total_weight']}kg / {pallet['capacity']}kg")
-            for content in pallet['contents']:
-                print(f"    - {content}")
-        print(f"Total pallets needed (correct mixed formula): {how_many_pallets}")
-
+        # Usar los totales calculados para mostrar los mismos valores que en la primera página
         html += f"""
-            <tr>
-                <td>{total_weight_per_shopping} Kg</td>
-                <td>{how_many_pallets}</td>
-            </tr>
-            """
+                <tr>
+                    <td>{self.format_currency(totals['total_shipping_kg'])} Kg</td>
+                    <td>{self.format_currency(totals['total_pallets'])}</td>
+                </tr>
+                """
 
         html += f"""
             </tbody>
@@ -522,20 +652,47 @@ class TemplateClass:
     def generate_shopping_html_for_supplier(self, data: ShoppingCreateInput, id) -> str:
         logo_url = "file:/var/www/api.lacasadelvitrificado.com/public/assets/logo.png"
         vitrificado_logo_url = "file:/var/www/api.lacasadelvitrificado.com/public/assets/vitrificado-logo.png"
-        supplier_data = self.db.query(SupplierModel).filter(SupplierModel.id == data.supplier_id).first()
         shopping_data = self.db.query(ShoppingModel).filter(ShoppingModel.id == id).first()
         shopping_number = str(shopping_data.shopping_number) if shopping_data and shopping_data.shopping_number else str(id)
         date = datetime.utcnow().strftime("%Y-%m-%d")
+
+        # Función auxiliar para generar la cabecera completa
+        def get_page_header():
+            return f"""
+        <div class="header">
+            <img src="{vitrificado_logo_url}" class="vitrificado_logo float-left" />
+            &ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;
+            &ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;
+            &ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;
+            &ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;
+            &ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;            <img src="{logo_url}" class="logo float-right" />
+        </div>
+
+        <div class="title">
+            <h2>Purchase Order #{shopping_number}</h2>
+        </div>
+
+        <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 20px;">
+            <div>
+                <strong>Vitrificadoschile Compañia Limitada</strong><br>
+                Av. Pres. Kennedy 7440 of.901<br>
+                7650618 Santiago - Chile
+            </div>
+            <div style="text-align: right;">
+                Date: {date}
+            </div>
+        </div>
+            """
 
         html = f"""
         <html>
         <head>
         <meta charset="utf-8">
-        <style>
-            body {{ font-family: Arial, sans-serif; font-size: 14px; }}
-            table {{ border-collapse: collapse; width: 100%; margin-top: 20px; }}
-            th, td {{ border: 1px solid #ddd; padding: 8px; text-align: left; }}
-            th {{ background-color: #f2f2f2; }}
+        <style>@page {{ margin: 2cm 1.5cm; size: A4 portrait; }}
+            body {{ font-family: Arial, sans-serif; font-size: 14px; line-height: 1.4; margin: 0; padding: 0; }}
+            table {{ border-collapse: collapse; width: 100%; margin-top: 20px; page-break-inside: auto; }}
+            th, td {{ border: 1px solid #ddd; padding: 8px; text-align: left; word-wrap: break-word; max-width: 150px; }}
+            th {{ background-color: #f2f2f2; }} tr {{ page-break-inside: avoid; page-break-after: auto; }}
             .logo {{ width: 200px; }}
             .vitrificado_logo {{ width: 120px; }}
             .header {{
@@ -548,31 +705,15 @@ class TemplateClass:
         </style>
         </head>
         <body>
-        <div class="header">
-            <img src="{vitrificado_logo_url}" class="vitrificado_logo float-left" />
-            &ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;
-            &ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;
-            &ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;
-            &ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;
-            &ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;
-            <img src="{logo_url}" class="logo float-right" />
-        </div>
-
-        <div class="title">
-            <h2>Purchase Order #{shopping_number}</h2>
-        </div>
-
-        <div>
-            Date: {date}
-        </div>
+        {get_page_header()}
 
         <table>
             <thead>
             <tr>
                 <th>Pos Item no.</th>
                 <th>Description</th>
-                <th>Cont</th>
                 <th>Kg/Lts/Un</th>
+                <th>Cont</th>
             </tr>
             </thead>
             <tbody>
@@ -580,35 +721,78 @@ class TemplateClass:
 
         # Ordenar productos por category_id
         sorted_products = sorted(data.products, key=lambda p: p.category_id)
+        
+        # Calcular total de filas (productos + headers de categoría)
+        total_rows = len(sorted_products)
+        categories = set(item.category_id for item in sorted_products)
+        total_rows += len(categories)  # Agregar filas de categorías
+        
+        # Decidir si usar paginación
+        use_pagination = total_rows > 22
+        items_per_page = 22
         current_category_id = None
-
-        for item in sorted_products:
+        row_count = 0
+        page_count = 1
+        
+        # Comenzar primera tabla
+        for i, item in enumerate(sorted_products):
             product_data = self.db.query(ProductModel).filter(ProductModel.id == item.product_id).first()
-            unit = {1: "Kg", 2: "Lts", 3: "Und"}.get(item.unit_measure_id, "")
-
-            if item.category_id != current_category_id:
+            unit = {1: "Kg", 2: "Lts", 3: "Units"}.get(item.unit_measure_id, "")
+            
+            # Si es el primer elemento o cambiamos de categoría, agregamos header de categoría
+            category_changed = item.category_id != current_category_id
+            
+            # Si usamos paginación y llegamos al límite de filas, cerrar tabla actual, agregar totales y abrir nueva página
+            if use_pagination and row_count >= items_per_page:
+                html += f"""
+            </tbody>
+        </table>
+        <div style='width:100%;'>
+            <span style='float:left; font-size:16px; font-style:italic; color:#000; margin-top:50px;'>Continue on the next page</span>
+        </div>
+        <div style="page-break-before: always;"></div>
+        {get_page_header()}
+        <table>
+            <thead>
+                <tr>
+                    <th>Pos Item no.</th>
+                    <th>Description</th>
+                    <th>Kg/Lts/Un</th>
+                    <th>Cont</th>
+                </tr>
+            </thead>
+            <tbody>
+                """
+                row_count = 0
+                page_count += 1
+                current_category_id = None  # Reset para mostrar categoría en nueva página
+                category_changed = True  # Forzar mostrar categoría
+            
+            # Mostrar header de categoría si cambió
+            if category_changed:
                 category_data = self.db.query(CategoryModel).filter(CategoryModel.id == item.category_id).first()
                 html += f"""
                 <tr>
-                    <td colspan="6" style="background-color: {category_data.color}; font-weight: bold; text-align: center; font-size:20px;">{category_data.category}</td>
+                    <td colspan="4" style="background-color: {category_data.color}; font-weight: bold; text-align: center; font-size:20px;">{category_data.category}</td>
                 </tr>
                 """
                 current_category_id = item.category_id
-
+                row_count += 1
+            
+            # Agregar producto
             html += f"""
             <tr>
                 <td>{product_data.code}</td>
-                <td>{product_data.product}</td>
-                <td>{item.quantity}</td>
+                <td>{self.truncate_text(product_data.product)}</td>
                 <td>{self.format_number(item.quantity_per_package)} {unit}</td>
+                <td>{self.format_number(item.quantity)}</td>
             </tr>
             """
+            row_count += 1
 
         html += f"""
             </tbody>
         </table>
-
-
         </body>
         </html>
         """
@@ -639,11 +823,11 @@ class TemplateClass:
         <html>
         <head>
         <meta charset="utf-8">
-        <style>
-            body {{ font-family: Arial, sans-serif; font-size: 14px; }}
-            table {{ border-collapse: collapse; width: 100%; margin-top: 20px; }}
-            th, td {{ border: 1px solid #ddd; padding: 8px; text-align: left; }}
-            th {{ background-color: #f2f2f2; }}
+        <style>@page {{ margin: 2cm 1.5cm; size: A4 portrait; }}
+            body {{ font-family: Arial, sans-serif; font-size: 14px; line-height: 1.4; margin: 0; padding: 0; }}
+            table {{ border-collapse: collapse; width: 100%; margin-top: 20px; page-break-inside: auto; }}
+            th, td {{ border: 1px solid #ddd; padding: 8px; text-align: left; word-wrap: break-word; max-width: 150px; }}
+            th {{ background-color: #f2f2f2; }} tr {{ page-break-inside: avoid; page-break-after: auto; }}
             .logo {{ width: 200px; }}
             .vitrificado_logo {{ width: 120px; }}
             .header {{
@@ -687,11 +871,11 @@ class TemplateClass:
         <html>
         <head>
         <meta charset="utf-8">
-        <style>
-            body {{ font-family: Arial, sans-serif; font-size: 14px; }}
-            table {{ border-collapse: collapse; width: 100%; margin-top: 20px; }}
-            th, td {{ border: 1px solid #ddd; padding: 8px; text-align: left; }}
-            th {{ background-color: #f2f2f2; }}
+        <style>@page {{ margin: 2cm 1.5cm; size: A4 portrait; }}
+            body {{ font-family: Arial, sans-serif; font-size: 14px; line-height: 1.4; margin: 0; padding: 0; }}
+            table {{ border-collapse: collapse; width: 100%; margin-top: 20px; page-break-inside: auto; }}
+            th, td {{ border: 1px solid #ddd; padding: 8px; text-align: left; word-wrap: break-word; max-width: 150px; }}
+            th {{ background-color: #f2f2f2; }} tr {{ page-break-inside: avoid; page-break-after: auto; }}
             .logo {{ width: 200px; }}
             .vitrificado_logo {{ width: 120px; }}
             .header {{
@@ -725,3 +909,6 @@ class TemplateClass:
         """
 
         return html
+
+
+

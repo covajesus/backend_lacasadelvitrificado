@@ -8,6 +8,38 @@ class ShoppingClass:
     def __init__(self, db):
         self.db = db
 
+    def list_all(self):
+        try:
+            data = (
+                self.db.query(
+                    ShoppingModel.id,
+                    ShoppingModel.shopping_number,
+                    ShoppingModel.supplier_id,
+                    ShoppingModel.status_id,
+                    ShoppingModel.email,
+                    ShoppingModel.total,
+                    SupplierModel.supplier,
+                    ShoppingModel.added_date
+                )
+                .join(SupplierModel, SupplierModel.id == ShoppingModel.supplier_id)
+                .order_by(ShoppingModel.id.desc())
+                .all()
+            )
+
+            return [{
+                "id": shopping.id,
+                "shopping_number": shopping.shopping_number,
+                "supplier_id": shopping.supplier_id,
+                "status_id": shopping.status_id,
+                "email": shopping.email,
+                "total": str(shopping.total),
+                "supplier": shopping.supplier,
+                "added_date": shopping.added_date.strftime("%d-%m-%Y")
+            } for shopping in data]
+
+        except Exception as e:
+            return {"status": "error", "message": str(e)}
+
     def confirm(self, id):
         existing_shopping = self.db.query(ShoppingModel).filter(ShoppingModel.id == id).one_or_none()
 
@@ -70,8 +102,8 @@ class ShoppingClass:
                 "original_unit_cost": sp.original_unit_cost,
                 "final_unit_cost": sp.final_unit_cost,
                 "category_id": category_id,
-                "amount": sp.amount,
-                "quantity_per_package": sp.quantity_per_package,
+                "total_amount": sp.total_amount,
+                "quantity_to_buy": sp.quantity_to_buy,
                 "discount_percentage": sp.discount_percentage
             })
 
@@ -151,13 +183,105 @@ class ShoppingClass:
             error_message = str(e)
             return {"status": "error", "message": error_message}
     
+    def get_list(self):
+        try:
+            query = (
+                self.db.query(
+                    ShoppingModel.id,
+                    ShoppingModel.shopping_number,
+                    ShoppingModel.supplier_id,
+                    ShoppingModel.status_id,
+                    ShoppingModel.email,
+                    ShoppingModel.total,
+                    SupplierModel.supplier,
+                    ShoppingModel.added_date
+                )
+                .join(SupplierModel, SupplierModel.id == ShoppingModel.supplier_id)
+                .order_by(ShoppingModel.id.desc())
+            )
+
+            data = query.all()
+
+            serialized_data = [{
+                "id": shopping.id,
+                "shopping_number": shopping.shopping_number,
+                "supplier_id": shopping.supplier_id,
+                "status_id": shopping.status_id,
+                "email": shopping.email,
+                "total": str(shopping.total),
+                "supplier": shopping.supplier,
+                "added_date": shopping.added_date.strftime("%d-%m-%Y")
+            } for shopping in data]
+
+            return serialized_data
+
+        except Exception as e:
+            error_message = str(e)
+            return {"status": "error", "message": error_message}
+    
+    def get_shopping_products_detail(self, shopping_id):
+        try:
+            query = (
+                self.db.query(
+                    ShoppingProductModel.id,
+                    ShoppingProductModel.shopping_id,
+                    ShoppingProductModel.product_id,
+                    ShoppingProductModel.unit_measure_id,
+                    ShoppingProductModel.quantity,
+                    ShoppingProductModel.quantity_to_buy,
+                    ShoppingProductModel.original_unit_cost,
+                    ShoppingProductModel.discount_percentage,
+                    ShoppingProductModel.final_unit_cost,
+                    ShoppingProductModel.total_amount,
+                    ProductModel.product,
+                    ProductModel.code,
+                    UnitMeasureModel.unit_measure,
+                    CategoryModel.category,
+                    ShoppingProductModel.added_date
+                )
+                .join(ProductModel, ProductModel.id == ShoppingProductModel.product_id)
+                .join(UnitMeasureModel, UnitMeasureModel.id == ShoppingProductModel.unit_measure_id)
+                .join(CategoryModel, CategoryModel.id == ProductModel.category_id)
+                .filter(ShoppingProductModel.shopping_id == shopping_id)
+                .order_by(ShoppingProductModel.id)
+            )
+
+            data = query.all()
+
+            if not data:
+                return {"status": "error", "message": "No products found for this shopping"}
+
+            serialized_data = [{
+                "id": item.id,
+                "shopping_id": item.shopping_id,
+                "product_id": item.product_id,
+                "product": item.product,
+                "code": item.code,
+                "unit_measure_id": item.unit_measure_id,
+                "unit_measure": item.unit_measure,
+                "category": item.category,
+                "quantity": item.quantity,
+                "quantity_to_buy": str(item.quantity_to_buy) if item.quantity_to_buy else "0",
+                "original_unit_cost": str(item.original_unit_cost) if item.original_unit_cost else "0",
+                "discount_percentage": item.discount_percentage,
+                "final_unit_cost": str(item.final_unit_cost) if item.final_unit_cost else "0",
+                "total_amount": str(item.total_amount) if item.total_amount else "0",
+                "added_date": item.added_date.strftime("%d-%m-%Y %H:%M:%S") if item.added_date else None
+            } for item in data]
+
+            return serialized_data
+
+        except Exception as e:
+            error_message = str(e)
+            return {"status": "error", "message": error_message}
+    
     def get_pre_inventory_products(self, id, page=0, items_per_page=10000):
         try:
             query = (
                 self.db.query(
                     ShoppingProductModel.product_id,
                     ShoppingProductModel.quantity,
-                    ShoppingProductModel.quantity_per_package,
+                    ShoppingProductModel.quantity_to_buy,
                     ShoppingProductModel.unit_measure_id,
                     UnitMeasureModel.unit_measure,
                     ProductModel.product,
@@ -165,7 +289,7 @@ class ShoppingClass:
                     ProductModel.code,
                     ShoppingProductModel.original_unit_cost,
                     ShoppingProductModel.discount_percentage,
-                    ShoppingProductModel.amount,
+                    ShoppingProductModel.total_amount,
                     ShoppingProductModel.final_unit_cost,
                     PreInventoryStockModel.stock,
                     PreInventoryStockModel.lot_number
@@ -200,10 +324,10 @@ class ShoppingClass:
                     "code": shopping_product.code,
                     "original_unit_cost": shopping_product.original_unit_cost,
                     "final_unit_cost": shopping_product.final_unit_cost,
-                    "quantity_per_package": shopping_product.quantity_per_package,
+                    "quantity_to_buy": shopping_product.quantity_to_buy,
                     "category": shopping_product.category,
                     "discount_percentage": shopping_product.discount_percentage,
-                    "amount": shopping_product.amount,
+                    "total_amount": shopping_product.total_amount,
                     "stock": shopping_product.stock,
                     "lot_number": shopping_product.lot_number
                 } for shopping_product in data]
@@ -227,10 +351,10 @@ class ShoppingClass:
                     "product": shopping_product.product,
                     "code": shopping_product.code,
                     "original_unit_cost": shopping_product.original_unit_cost,
-                    "quantity_per_package": shopping_product.quantity_per_package,
+                    "quantity_to_buy": shopping_product.quantity_to_buy,
                     "category": shopping_product.category,
                     "discount_percentage": shopping_product.discount_percentage,
-                    "amount": shopping_product.amount,
+                    "total_amount": shopping_product.total_amount,
                     "final_unit_cost": shopping_product.final_unit_cost,
                     "stock": shopping_product.stock,
                     "lot_number": shopping_product.lot_number
@@ -248,7 +372,7 @@ class ShoppingClass:
                 self.db.query(
                     ShoppingProductModel.product_id,
                     ShoppingProductModel.quantity,
-                    ShoppingProductModel.quantity_per_package,
+                    ShoppingProductModel.quantity_to_buy,
                     ShoppingProductModel.unit_measure_id,
                     UnitMeasureModel.unit_measure,
                     ProductModel.product,
@@ -256,7 +380,7 @@ class ShoppingClass:
                     ProductModel.code,
                     ShoppingProductModel.original_unit_cost,
                     ShoppingProductModel.discount_percentage,
-                    ShoppingProductModel.amount,
+                    ShoppingProductModel.total_amount,
                     ShoppingProductModel.final_unit_cost
                 )
                 .join(ProductModel, ProductModel.id == ShoppingProductModel.product_id)
@@ -287,10 +411,10 @@ class ShoppingClass:
                     "code": shopping_product.code,
                     "original_unit_cost": shopping_product.original_unit_cost,
                     "final_unit_cost": shopping_product.final_unit_cost,
-                    "quantity_per_package": shopping_product.quantity_per_package,
+                    "quantity_to_buy": shopping_product.quantity_to_buy,
                     "category": shopping_product.category,
                     "discount_percentage": shopping_product.discount_percentage,
-                    "amount": shopping_product.amount
+                    "total_amount": shopping_product.total_amount
                 } for shopping_product in data]
 
                 return {
@@ -312,10 +436,10 @@ class ShoppingClass:
                     "product": shopping_product.product,
                     "code": shopping_product.code,
                     "original_unit_cost": shopping_product.original_unit_cost,
-                    "quantity_per_package": shopping_product.quantity_per_package,
+                    "quantity_to_buy": shopping_product.quantity_to_buy,
                     "category": shopping_product.category,
                     "discount_percentage": shopping_product.discount_percentage,
-                    "amount": shopping_product.amount,
+                    "total_amount": shopping_product.total_amount,
                     "final_unit_cost": shopping_product.final_unit_cost
                 } for shopping_product in data]
 
@@ -335,7 +459,8 @@ class ShoppingClass:
                 ShoppingModel.email,
                 ShoppingModel.total,
                 SupplierModel.supplier,
-                ShoppingModel.added_date
+                ShoppingModel.added_date,
+                ShoppingModel.prepaid_status_id
             ).filter(ShoppingModel.id == id).join(SupplierModel, SupplierModel.id == ShoppingModel.supplier_id).first()
 
             if not data_query:
@@ -349,7 +474,8 @@ class ShoppingClass:
                 "email": data_query.email,
                 "total": str(data_query.total),
                 "supplier": data_query.supplier,
-                "added_date": data_query.added_date.strftime("%d-%m-%Y")
+                "added_date": data_query.added_date.strftime("%d-%m-%Y"),
+                "prepaid_status_id": data_query.prepaid_status_id
             }
 
             return {"shopping_data": shopping_data}
@@ -436,11 +562,11 @@ class ShoppingClass:
                     product_id=product.product_id,
                     unit_measure_id=product.unit_measure_id,
                     quantity=product.quantity,
-                    quantity_per_package=product.quantity_per_package,
+                    quantity_to_buy=product.quantity_to_buy,
                     original_unit_cost=product.original_unit_cost,
                     discount_percentage=product.discount_percentage,
                     final_unit_cost=product.final_unit_cost,
-                    amount=product.amount,
+                    total_amount=product.total_amount,
                     added_date=datetime.utcnow(),
                     updated_date=datetime.utcnow()
                 )
@@ -526,11 +652,11 @@ class ShoppingClass:
                     product_id=product.product_id,
                     unit_measure_id=product.unit_measure_id,
                     quantity=product.quantity,
-                    quantity_per_package=product.quantity_per_package,
+                    quantity_to_buy=product.quantity_to_buy,
                     original_unit_cost=product.original_unit_cost,
                     discount_percentage=product.discount_percentage,
                     final_unit_cost=product.final_unit_cost,
-                    amount=product.amount,
+                    total_amount=product.total_amount,
                     added_date=datetime.utcnow(),
                     updated_date=datetime.utcnow()
                 )

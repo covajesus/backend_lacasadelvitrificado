@@ -1,5 +1,6 @@
-from app.backend.db.models import CustomerModel, RegionModel, CommuneModel, CustomerProductDiscountModel
+from app.backend.db.models import CustomerModel, RegionModel, CommuneModel, CustomerProductDiscountModel, SettingModel, UserModel
 from datetime import datetime
+from app.backend.auth.auth_user import generate_bcrypt_hash
 
 class CustomerClass:
     def __init__(self, db):
@@ -35,7 +36,7 @@ class CustomerClass:
             error_message = str(e)
             return {"status": "error", "message": error_message}
 
-    def get_all(self, page=0, items_per_page=10):
+    def get_all(self, page=0, items_per_page=10, name=None, rut=None):
         try:
             query = (
                 self.db.query(
@@ -48,6 +49,13 @@ class CustomerClass:
                 )
                 .order_by(CustomerModel.id)
             )
+
+            # Aplicar filtros de búsqueda si se proporcionan
+            if name and name.strip():
+                query = query.filter(CustomerModel.social_reason.ilike(f"%{name.strip()}%"))
+
+            if rut and rut.strip():
+                query = query.filter(CustomerModel.identification_number == rut.strip())
 
             if page > 0:
                 total_items = query.count()
@@ -67,6 +75,7 @@ class CustomerClass:
                     "identification_number": customer.identification_number,
                     "address": customer.address,
                     "phone": customer.phone,
+                    "email": customer.email if customer.email else None,
                 } for customer in data]
 
                 return {
@@ -86,6 +95,7 @@ class CustomerClass:
                     "identification_number": customer.identification_number,
                     "address": customer.address,
                     "phone": customer.phone,
+                    "email": customer.email if customer.email else None,
                 } for customer in data]
 
                 return serialized_data
@@ -158,8 +168,30 @@ class CustomerClass:
             )
 
             self.db.add(new_customer)
-            self.db.commit()
+            self.db.flush()
             self.db.refresh(new_customer)
+
+            # Verificar si ya existe un usuario con este RUT
+            existing_user = (
+                self.db.query(UserModel)
+                .filter(UserModel.rut == customer_inputs.identification_number)
+                .first()
+            )
+
+            # Crear usuario solo si no existe
+            if not existing_user:
+                new_user = UserModel(
+                    rut=customer_inputs.identification_number,
+                    rol_id=5,  # Rol de cliente público
+                    full_name=customer_inputs.social_reason,
+                    hashed_password=generate_bcrypt_hash('123456'),  # Contraseña por defecto
+                    email=customer_inputs.email,
+                    phone=customer_inputs.phone,
+                    added_date=datetime.now(),
+                    updated_date=datetime.now()
+                )
+                self.db.add(new_user)
+                self.db.flush()
 
             if customer_inputs.product_discounts:
                 for product_id, discount_percentage in customer_inputs.product_discounts.items():
@@ -171,6 +203,8 @@ class CustomerClass:
                         )
                         self.db.add(discount_record)
                 
+                self.db.commit()
+            else:
                 self.db.commit()
 
             return {
@@ -219,15 +253,195 @@ class CustomerClass:
         except Exception as e:
             return {"error": str(e)}
         
+    def apply_settings_discount(self, customer_id, product_id):
+        """
+        Aplica el descuento de settings a un producto específico para un cliente
+        """
+        try:
+            # Obtener el descuento de settings
+            setting = self.db.query(SettingModel).filter(SettingModel.id == 1).first()
+            
+            if not setting or not setting.prepaid_discount:
+                return {"status": "error", "message": "No se encontró descuento en configuración"}
+            
+            discount_percentage = setting.prepaid_discount
+            
+            # Verificar si ya existe un descuento para este producto/cliente
+            existing_discount = self.db.query(CustomerProductDiscountModel).filter(
+                CustomerProductDiscountModel.customer_id == customer_id,
+                CustomerProductDiscountModel.product_id == product_id
+            ).first()
+            
+            if existing_discount:
+                # Actualizar el descuento existente
+                existing_discount.discount_percentage = discount_percentage
+                message = f"Descuento actualizado a {discount_percentage}% desde configuración"
+            else:
+                # Crear nuevo descuento
+                new_discount = CustomerProductDiscountModel(
+                    customer_id=customer_id,
+                    product_id=product_id,
+                    discount_percentage=discount_percentage
+                )
+                self.db.add(new_discount)
+                message = f"Descuento de {discount_percentage}% aplicado desde configuración"
+            
+            self.db.commit()
+            
+            return {
+                "status": "success", 
+                "message": message,
+                "discount_percentage": discount_percentage
+            }
+            
+        except Exception as e:
+            self.db.rollback()
+            return {"status": "error", "message": str(e)}
+
+    def delete_product_discount(self, customer_id, product_id):
+        """
+        Elimina un descuento específico de producto para un cliente
+        """
+        try:
+            # Buscar el descuento específico
+            discount = self.db.query(CustomerProductDiscountModel).filter(
+                CustomerProductDiscountModel.customer_id == customer_id,
+                CustomerProductDiscountModel.product_id == product_id
+            ).first()
+            
+            if not discount:
+                return {"status": "error", "message": "Descuento no encontrado"}
+            
+            # Eliminar el descuento
+            self.db.delete(discount)
+            self.db.commit()
+            
+            return {"status": "success", "message": "Descuento eliminado exitosamente"}
+            
+        except Exception as e:
+            self.db.rollback()
+            return {"status": "error", "message": str(e)}
+
+    def show(self, rut):
+        """Obtiene información completa del cliente y usuario asociado por RUT"""
+        try:
+            # Buscar el cliente por RUT
+            customer = self.db.query(CustomerModel).filter(CustomerModel.identification_number == rut).first()
+            if not customer:
+                return {"status": "error", "message": "Cliente no encontrado"}
+            
+            # Buscar el usuario asociado por RUT
+            user = self.db.query(UserModel).filter(UserModel.rut == rut).first()
+            
+            # Obtener información de región y comuna por separado
+            region = None
+            commune = None
+            
+            if customer.region_id:
+                region_obj = self.db.query(RegionModel).filter(RegionModel.id == customer.region_id).first()
+                region = region_obj.region if region_obj else None
+            
+            if customer.commune_id:
+                commune_obj = self.db.query(CommuneModel).filter(CommuneModel.id == customer.commune_id).first()
+                commune = commune_obj.commune if commune_obj else None
+            
+            # Preparar datos del cliente
+            customer_data = {
+                "id": customer.id,
+                "identification_number": customer.identification_number,
+                "social_reason": customer.social_reason,
+                "activity": customer.activity,
+                "address": customer.address,
+                "phone": customer.phone,
+                "email": customer.email,
+                "region_id": customer.region_id,
+                "commune_id": customer.commune_id,
+                "region_name": region,
+                "commune_name": commune,
+                "added_date": customer.added_date.strftime("%Y-%m-%d %H:%M:%S") if customer.added_date else None,
+                "updated_date": customer.updated_date.strftime("%Y-%m-%d %H:%M:%S") if customer.updated_date else None
+            }
+            
+            # Preparar datos del usuario si existe
+            user_data = None
+            if user:
+                user_data = {
+                    "id": user.id,
+                    "rol_id": user.rol_id,
+                    "rut": user.rut,
+                    "full_name": user.full_name,
+                    "email": user.email,
+                    "phone": user.phone,
+                    "added_date": user.added_date.strftime("%Y-%m-%d %H:%M:%S") if user.added_date else None,
+                    "updated_date": user.updated_date.strftime("%Y-%m-%d %H:%M:%S") if user.updated_date else None
+                }
+            
+            return {
+                "status": "success",
+                "customer": customer_data,
+                "user": user_data
+            }
+            
+        except Exception as e:
+            return {"status": "error", "message": str(e)}
+
+    def profile_update(self, rut, profile_data):
+        """Actualiza el perfil del cliente por RUT"""
+        try:
+            # Buscar el cliente por RUT
+            customer = self.db.query(CustomerModel).filter(CustomerModel.identification_number == rut).first()
+            if not customer:
+                return {"status": "error", "message": "Cliente no encontrado"}
+            
+            # Actualizar solo los campos que se proporcionaron
+            if profile_data.social_reason is not None:
+                customer.social_reason = profile_data.social_reason
+            if profile_data.activity is not None:
+                customer.activity = profile_data.activity
+            if profile_data.address is not None:
+                customer.address = profile_data.address
+            if profile_data.phone is not None:
+                customer.phone = profile_data.phone
+            if profile_data.email is not None:
+                customer.email = profile_data.email
+            if profile_data.region_id is not None:
+                customer.region_id = profile_data.region_id
+            if profile_data.commune_id is not None:
+                customer.commune_id = profile_data.commune_id
+            
+            # Actualizar fecha de modificación
+            customer.updated_date = datetime.now()
+            
+            # Guardar cambios
+            self.db.commit()
+            
+            return {"status": "success", "message": "Perfil actualizado exitosamente"}
+            
+        except Exception as e:
+            self.db.rollback()
+            return {"status": "error", "message": str(e)}
+
     def delete(self, id):
         try:
-            data = self.db.query(CustomerModel).filter(CustomerModel.id == id).first()
-            if data:
-                self.db.delete(data)
-                self.db.commit()
-                return 'success'
-            else:
+            # Buscar el cliente
+            customer = self.db.query(CustomerModel).filter(CustomerModel.id == id).first()
+            if not customer:
                 return "No data found"
+            
+            # Buscar el usuario asociado por RUT
+            user = self.db.query(UserModel).filter(UserModel.rut == customer.identification_number).first()
+            
+            # Eliminar el cliente
+            self.db.delete(customer)
+            
+            # Eliminar el usuario si existe
+            if user:
+                self.db.delete(user)
+            
+            self.db.commit()
+            return 'success'
+            
         except Exception as e:
+            self.db.rollback()
             error_message = str(e)
             return f"Error: {error_message}"

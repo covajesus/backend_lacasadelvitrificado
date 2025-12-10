@@ -66,6 +66,8 @@ class SettingClass:
             existing_setting.delivery_cost = form_data.delivery_cost
             existing_setting.shop_address = form_data.shop_address
             existing_setting.payment_card_url = form_data.payment_card_url
+            existing_setting.prepaid_discount = form_data.prepaid_discount
+            existing_setting.phone = form_data.phone
             existing_setting.updated_date = datetime.now()
 
             self.db.commit()
@@ -95,7 +97,9 @@ class SettingClass:
                     "delivery_cost": data_query.delivery_cost,
                     "simplefactura_token": data_query.simplefactura_token,
                     "shop_address": data_query.shop_address,
-                    "payment_card_url": data_query.payment_card_url
+                    "payment_card_url": data_query.payment_card_url,
+                    "prepaid_discount": data_query.prepaid_discount,
+                    "phone": data_query.phone
                 }
 
                 return {"setting_data": setting_data}

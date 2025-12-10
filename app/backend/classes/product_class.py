@@ -1,4 +1,4 @@
-from app.backend.db.models import ProductModel, SupplierModel, UnitFeatureModel, CategoryModel, LotModel, LotItemModel, UnitMeasureModel
+from app.backend.db.models import ProductModel, SupplierModel, UnitFeatureModel, CategoryModel, LotModel, LotItemModel, UnitMeasureModel, InventoryLotItemModel
 from app.backend.classes.file_class import FileClass
 from datetime import datetime
 from sqlalchemy import func
@@ -480,23 +480,46 @@ class ProductClass:
         
     def get(self, id):
         try:
-            data_query = self.db.query(
-                ProductModel.id,
-                ProductModel.supplier_id,
-                ProductModel.category_id,
-                ProductModel.code,
-                ProductModel.product,
-                ProductModel.original_unit_cost,
-                ProductModel.discount_percentage,
-                ProductModel.final_unit_cost,
-                ProductModel.short_description,
-                ProductModel.description,
-                ProductModel.unit_measure_id,
-                ProductModel.is_compound,
-                ProductModel.compound_product_id,
-                ProductModel.photo,
-                ProductModel.catalog
-            ).filter(ProductModel.id == id).first()
+            data_query = (
+                self.db.query(
+                    ProductModel.id,
+                    ProductModel.supplier_id,
+                    ProductModel.category_id,
+                    ProductModel.code,
+                    ProductModel.product,
+                    ProductModel.original_unit_cost,
+                    ProductModel.discount_percentage,
+                    ProductModel.final_unit_cost,
+                    ProductModel.short_description,
+                    ProductModel.description,
+                    ProductModel.unit_measure_id,
+                    ProductModel.is_compound,
+                    ProductModel.compound_product_id,
+                    ProductModel.photo,
+                    ProductModel.catalog,
+                    func.max(LotItemModel.public_sale_price).label("public_sale_price")
+                )
+                .join(LotItemModel, LotItemModel.product_id == ProductModel.id, isouter=True)
+                .filter(ProductModel.id == id)
+                .group_by(
+                    ProductModel.id,
+                    ProductModel.supplier_id,
+                    ProductModel.category_id,
+                    ProductModel.code,
+                    ProductModel.product,
+                    ProductModel.original_unit_cost,
+                    ProductModel.discount_percentage,
+                    ProductModel.final_unit_cost,
+                    ProductModel.short_description,
+                    ProductModel.description,
+                    ProductModel.unit_measure_id,
+                    ProductModel.is_compound,
+                    ProductModel.compound_product_id,
+                    ProductModel.photo,
+                    ProductModel.catalog
+                )
+                .first()
+            )
 
             if not data_query:
                 return {"error": "No se encontraron datos para el producto especificado."}
@@ -518,7 +541,9 @@ class ProductClass:
                 "compound_product_id": data_query.compound_product_id,
                 "photo": data_query.photo,
                 "catalog": data_query.catalog,
-                "features": None
+                "public_sale_price": data_query.public_sale_price if data_query.public_sale_price is not None else 0,
+                "features": None,
+                "inventory": 0
             }
 
             if data_query.unit_measure_id == 1 or data_query.unit_measure_id == 2 or data_query.unit_measure_id == 3:
@@ -535,6 +560,16 @@ class ProductClass:
                         "added_date": features.added_date,
                         "updated_date": features.updated_date,
                     }
+
+            # Obtener cantidad en inventario desde inventories_lots (InventoryLotItemModel)
+            inventory_quantity = (
+                self.db.query(func.sum(InventoryLotItemModel.quantity))
+                .join(LotItemModel, LotItemModel.id == InventoryLotItemModel.lot_item_id)
+                .filter(LotItemModel.product_id == id)
+                .scalar()
+            )
+
+            product_data["inventory"] = int(inventory_quantity) if inventory_quantity else 0
 
             return {"product_data": product_data}
 

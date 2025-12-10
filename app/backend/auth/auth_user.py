@@ -1,5 +1,4 @@
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
-from passlib.context import CryptContext
 from fastapi import HTTPException, Depends
 from app.backend.db.models import UserModel
 import os
@@ -9,7 +8,14 @@ from sqlalchemy.orm import Session
 import bcrypt
 
 oauth2_scheme = OAuth2PasswordBearer("/login_users/token")
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
+def verify_password(plain_password: str, hashed_password: str) -> bool:
+    """Verifica una contraseña plana contra un hash bcrypt"""
+    return bcrypt.checkpw(plain_password.encode('utf-8'), hashed_password.encode('utf-8'))
+
+def hash_password(password: str) -> str:
+    """Genera un hash bcrypt de una contraseña"""
+    return bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
 
 def get_current_user(token: str = Depends(oauth2_scheme)):
     try:
@@ -22,7 +28,7 @@ def get_current_user(token: str = Depends(oauth2_scheme)):
 
     user = get_user(username)
 
-    if user is None:
+    if user is None or user == "":
         raise HTTPException(status_code=401, detail="Could not validate credentials", headers={"WWW-Authenticate": "Bearer"})
     return user
     
@@ -33,11 +39,11 @@ def get_user(rut):
     db: Session = next(get_db())
 
     user = db.query(UserModel). \
-                    filter(UserModel.id == rut). \
+                    filter(UserModel.rut == rut). \
                     first()
     
     if not user:
-        return ""
+        return None
     return user
 
 def generate_bcrypt_hash(input_string):

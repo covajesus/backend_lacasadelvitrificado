@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field, EmailStr
+from pydantic import BaseModel, Field, EmailStr, validator
 from fastapi import UploadFile, File
 from typing import Union, List, Dict, Optional
 from datetime import datetime, date
@@ -6,6 +6,7 @@ from decimal import Decimal
 from fastapi import Form
 from typing import List
 from typing import Optional
+import json
 
 class UserLogin(BaseModel):
     rol_id: Union[int, None]
@@ -43,6 +44,15 @@ class UpdateCustomer(BaseModel):
     commune_id: int
     product_discounts: Optional[Dict[int, float]] = {}
 
+class UpdateCustomerProfile(BaseModel):
+    social_reason: Optional[str] = None
+    activity: Optional[str] = None
+    address: Optional[str] = None
+    phone: Optional[str] = None
+    email: Optional[str] = None
+    region_id: Optional[int] = None
+    commune_id: Optional[int] = None
+
 class StoreCustomer(BaseModel):
     social_reason: str
     identification_number: str
@@ -59,6 +69,8 @@ class LocationList(BaseModel):
 
 class CustomerList(BaseModel):
     page: int
+    name: Optional[str] = None
+    rut: Optional[str] = None
 
 class CategoryList(BaseModel):
     page: int
@@ -108,26 +120,19 @@ class UpdateSupplier(BaseModel):
 class AddAdjustmentInput(BaseModel):
     user_id: int
     inventory_id: int
-    product_id: int
+    product_id: Optional[int] = None  # Opcional, se puede obtener del inventario
     location_id: int
     stock: int
     public_sale_price: int
     private_sale_price: int
     unit_cost: int
-    minimum_stock: int
-    maximum_stock: int
+    lot_number: str  # Número de lote requerido
 
 class RemoveAdjustmentInput(BaseModel):
     user_id: int
     inventory_id: int
-    product_id: int
-    location_id: int
-    stock: int
-    public_sale_price: int
-    private_sale_price: int
-    unit_cost: int
-    minimum_stock: int
-    maximum_stock: int
+    product_id: Optional[int] = None  # Opcional, se puede obtener del inventario
+    stock: int  # Solo cantidad
 
 class CartItem(BaseModel):
     id: int
@@ -135,6 +140,39 @@ class CartItem(BaseModel):
     lot_numbers: Optional[str] = ""
     public_sale_price: Optional[int] = 0
     private_sale_price: Optional[int] = 0
+
+class BudgetProductItem(BaseModel):
+    product_id: int
+    quantity: int
+    sale_price: int
+    amount: int
+
+class StoreBudget(BaseModel):
+    customer_id: int
+    products: List[BudgetProductItem]
+    subtotal: int
+    shipping: Optional[int] = 0
+    tax: int
+    total: int
+
+    @validator("products")
+    def validate_products(cls, value):
+        if not value or len(value) == 0:
+            raise ValueError("At least one product is required")
+
+        for product in value:
+            if product.quantity <= 0:
+                raise ValueError("Product quantity must be greater than 0")
+            if product.sale_price < 0:
+                raise ValueError("Sale price cannot be negative")
+            if product.amount < 0:
+                raise ValueError("Amount cannot be negative")
+        return value
+
+class BudgetList(BaseModel):
+    page: int
+    identification_number: Optional[str] = None
+    social_reason: Optional[str] = None
 
 class StoreSale(BaseModel):
     rol_id: int
@@ -160,18 +198,65 @@ class StoreSale(BaseModel):
         cart: str = Form(...),
         shipping_method_id: int = Form(...)
     ):
-        import json
-        return cls(
-            rol_id=rol_id,
-            customer_rut=customer_rut,
-            document_type_id=document_type_id,
-            delivery_address=delivery_address,
-            subtotal=subtotal,
-            tax=tax,
-            total=total,
-            cart=json.loads(cart),
-            shipping_method_id=shipping_method_id
-        )
+        try:
+            # Parse the cart JSON string
+            cart_data = json.loads(cart)
+            
+            # Validate that cart_data is a list
+            if not isinstance(cart_data, list):
+                raise ValueError("Cart must be a list of items")
+            
+            # Filter out None values and validate each cart item
+            validated_cart = []
+            for item in cart_data:
+                if item is None:
+                    continue  # Skip None items
+                
+                # Validate required fields for each cart item
+                if not isinstance(item, dict):
+                    continue  # Skip non-dict items
+                
+                if 'id' not in item or 'quantity' not in item:
+                    continue  # Skip items without required fields
+                
+                # Ensure id and quantity are valid
+                try:
+                    item_id = int(item['id'])
+                    item_quantity = int(item['quantity'])
+                    if item_id <= 0 or item_quantity <= 0:
+                        continue  # Skip invalid values
+                except (ValueError, TypeError):
+                    continue  # Skip items with invalid id or quantity
+                
+                # Create a valid CartItem with defaults for optional fields
+                validated_item = {
+                    'id': item_id,
+                    'quantity': item_quantity,
+                    'lot_numbers': item.get('lot_numbers', ''),
+                    'public_sale_price': item.get('public_sale_price', 0),
+                    'private_sale_price': item.get('private_sale_price', 0)
+                }
+                validated_cart.append(validated_item)
+            
+            # Ensure we have at least one valid cart item
+            if not validated_cart:
+                raise ValueError("Cart must contain at least one valid item")
+            
+            return cls(
+                rol_id=rol_id,
+                customer_rut=customer_rut,
+                document_type_id=document_type_id,
+                delivery_address=delivery_address,
+                subtotal=subtotal,
+                tax=tax,
+                total=total,
+                cart=validated_cart,
+                shipping_method_id=shipping_method_id
+            )
+        except json.JSONDecodeError as e:
+            raise ValueError(f"Invalid JSON in cart field: {str(e)}")
+        except Exception as e:
+            raise ValueError(f"Error processing cart data: {str(e)}")
 
 class StoreProduct(BaseModel):
     supplier_id: int
@@ -232,12 +317,12 @@ class StoreProduct(BaseModel):
 class ShoppingProductInput(BaseModel):
     category_id: int
     product_id: int
-    quantity: int
-    quantity_per_package: float
-    discount_percentage: int
+    quantity: float
+    quantity_to_buy: float
+    discount_percentage: float
     original_unit_cost: float
     final_unit_cost: float
-    amount: float
+    total_amount: float
     unit_measure_id: int
 
 class ShoppingList(BaseModel):
@@ -330,6 +415,12 @@ class ShoppingCreateInput(BaseModel):
     third_email: Optional[str] = None
     supplier_id: int
 
+    @validator('shopping_number', pre=True)
+    def convert_shopping_number(cls, v):
+        if v is not None and not isinstance(v, str):
+            return str(v)
+        return v
+
 class UpdateShopping(BaseModel):
     shopping_number: Optional[str] = None
     products: List[ShoppingProductInput]
@@ -339,6 +430,12 @@ class UpdateShopping(BaseModel):
     second_email: Optional[str] = None
     third_email: Optional[str] = None
     supplier_id: int
+
+    @validator('shopping_number', pre=True)
+    def convert_shopping_number(cls, v):
+        if v is not None and not isinstance(v, str):
+            return str(v)
+        return v
     
 class SupplierList(BaseModel):
     page: int
@@ -368,7 +465,30 @@ class UpdateSettings(BaseModel):
     delivery_cost: int
     shop_address: str
     payment_card_url: str
+    prepaid_discount: Optional[int] = 0
+    phone: str
 
 class SalesReportFilter(BaseModel):
     date_from: Optional[str] = None
     date_to: Optional[str] = None
+
+class SupplierCategoryCreate(BaseModel):
+    supplier_id: int
+    category_id: int
+
+class SupplierCategoryUpdate(BaseModel):
+    supplier_id: Optional[int] = None
+    category_id: Optional[int] = None
+
+class SupplierCategoryList(BaseModel):
+    page: int = 1
+
+class SupplierCategoryResponse(BaseModel):
+    id: int
+    supplier_id: int
+    category_id: int
+    added_date: Optional[datetime] = None
+    updated_date: Optional[datetime] = None
+    
+    class Config:
+        from_attributes = True

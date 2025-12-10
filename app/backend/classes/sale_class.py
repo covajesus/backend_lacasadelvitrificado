@@ -1,10 +1,29 @@
-from app.backend.db.models import SaleModel, CustomerModel, SaleProductModel, ProductModel, InventoryModel, UnitMeasureModel, SupplierModel, CategoryModel, LotItemModel, LotModel, InventoryMovementModel, InventoryLotItemModel, UnitFeatureModel
+from app.backend.db.models import SaleModel, CustomerModel, SaleProductModel, ProductModel, InventoryModel, UnitMeasureModel, SupplierModel, CategoryModel, LotItemModel, LotModel, InventoryMovementModel, InventoryLotItemModel, UnitFeatureModel, KardexValuesModel, SettingModel, UserModel
 from datetime import datetime
 from sqlalchemy import func
+from app.backend.classes.whatsapp_class import WhatsappClass
+
+class Product:
+    def __init__(self, id, quantity):
+        self.id = id
+        self.quantity = quantity
+
+class ProductInput:
+    def __init__(self, product):
+        self.cart = [product]
+
 
 class SaleClass:
     def __init__(self, db):
         self.db = db
+
+    def check_product_inventory(self, product_id: int, quantity: int):
+        product_input = ProductInput(Product(product_id, quantity))
+        status, insufficient = SaleClass(self.db).validate_inventory_existence(product_input)
+        if status == 1:
+            return {"status": "ok", "message": "Stock suficiente"}
+        else:
+            return {"status": "error", "message": f"Stock insuficiente para: {insufficient}"}
 
     def get_all(self, rol_id = None, rut = None, page=0, items_per_page=10):
         customer = self.db.query(CustomerModel).filter(CustomerModel.identification_number == rut).first()
@@ -16,6 +35,7 @@ class SaleClass:
                         SaleModel.id,
                         SaleModel.subtotal,
                         SaleModel.tax,
+                        SaleModel.shipping_cost,
                         SaleModel.total,
                         SaleModel.status_id,
                         SaleModel.added_date,                
@@ -27,6 +47,7 @@ class SaleClass:
                     self.db.query(
                         SaleModel.id,
                         SaleModel.subtotal,
+                        SaleModel.shipping_cost,
                         SaleModel.tax,
                         SaleModel.total,
                         SaleModel.status_id,
@@ -51,6 +72,7 @@ class SaleClass:
                 serialized_data = [{
                     "id": sale.id,
                     "subtotal": sale.subtotal,
+                    "shipping_cost": sale.shipping_cost,
                     "tax": sale.tax,
                     "total": sale.total,
                     "status_id": sale.status_id,
@@ -71,6 +93,7 @@ class SaleClass:
                 serialized_data = [{  
                     "id": sale.id,
                     "subtotal": sale.subtotal,
+                    "shipping_cost": sale.shipping_cost,
                     "tax": sale.tax,
                     "total": sale.total,
                     "status_id": sale.status_id,
@@ -87,146 +110,312 @@ class SaleClass:
         insufficient_products = []
 
         for item in sale_inputs.cart:
-            result = (
-                self.db.query(
-                    func.sum(LotItemModel.quantity).label("total_stock"),
-                    InventoryModel.minimum_stock,
-                    ProductModel.product.label("product_name")
-                )
-                .select_from(ProductModel)
-                .join(UnitMeasureModel, UnitMeasureModel.id == ProductModel.unit_measure_id, isouter=True)
-                .join(SupplierModel, SupplierModel.id == ProductModel.supplier_id, isouter=True)
-                .join(CategoryModel, CategoryModel.id == ProductModel.category_id, isouter=True)
-                .join(LotItemModel, LotItemModel.product_id == ProductModel.id)
+            # Calcular stock total disponible para este producto
+            total_stock_query = (
+                self.db.query(func.sum(LotItemModel.quantity).label("total_stock"))
                 .join(LotModel, LotModel.id == LotItemModel.lot_id)
+                .filter(LotItemModel.product_id == item.id)
+                .filter(LotItemModel.quantity > 0)
+            )
+            
+            total_stock = total_stock_query.scalar() or 0
+            
+            # Obtener información del producto y stock mínimo
+            product_info = (
+                self.db.query(
+                    ProductModel.product.label("product_name"),
+                    InventoryModel.minimum_stock
+                )
                 .join(InventoryModel, InventoryModel.product_id == ProductModel.id)
                 .filter(ProductModel.id == item.id)
-                .group_by(ProductModel.id, InventoryModel.minimum_stock, ProductModel.product)
                 .first()
             )
-
-            if result:
-                total_stock, minimum_stock, product_name = result
-                if (total_stock - item.quantity) < minimum_stock:
-                    insufficient_products.append(product_name)
-            else:
-                # Producto no encontrado o sin stock
-                product = self.db.query(ProductModel.product).filter(ProductModel.id == item.id).scalar()
-                insufficient_products.append(product or f"Producto {item.id}")
+            
+            if not product_info:
+                insufficient_products.append(f"Producto {item.id} no encontrado")
+                continue
+            
+            product_name, minimum_stock = product_info
+            
+            # Verificar si hay suficiente stock
+            if total_stock < item.quantity:
+                insufficient_products.append(f"{product_name} (disponible: {total_stock}, solicitado: {item.quantity})")
+                continue
+            
+            # Verificar si después de la venta quedaría por debajo del stock mínimo
+            remaining_stock = total_stock - item.quantity
+            if remaining_stock < minimum_stock:
+                insufficient_products.append(f"{product_name} (quedaría {remaining_stock}, mínimo requerido: {minimum_stock})")
+                continue
+            
+            print(f"[+] Stock validation passed for {product_name}: {total_stock} available, {item.quantity} requested")
 
         if insufficient_products:
             return 0, insufficient_products  # Hay productos con stock insuficiente
 
         return 1, []  # Todo OK
 
+    def update_kardex_for_sale(self, product_id, sold_quantity, unit_cost):
+        """
+        Actualiza el kardex cuando se vende un producto.
+        Resta la cantidad vendida del kardex.
+        """
+        try:
+            # Buscar el registro de kardex existente para este producto
+            kardex_record = (
+                self.db.query(KardexValuesModel)
+                .filter(KardexValuesModel.product_id == product_id)
+                .first()
+            )
+            
+            if kardex_record:
+                # Restar la cantidad vendida
+                new_quantity = kardex_record.quantity - sold_quantity
+                
+                # Asegurar que la cantidad no sea negativa
+                if new_quantity < 0:
+                    new_quantity = 0
+                
+                # Actualizar el registro
+                kardex_record.quantity = new_quantity
+                kardex_record.updated_date = datetime.now()
+                
+                print(f"[+] Kardex actualizado por venta para producto {product_id}:")
+                print(f"    - Cantidad anterior: {kardex_record.quantity + sold_quantity}")
+                print(f"    - Cantidad vendida: {sold_quantity}")
+                print(f"    - Nueva cantidad: {new_quantity}")
+                print(f"    - Costo promedio se mantiene: {kardex_record.average_cost}")
+                
+                self.db.commit()
+            else:
+                print(f"[!] No se encontró registro de kardex para producto {product_id}")
+            
+        except Exception as e:
+            print(f"[!] Error actualizando kardex por venta para producto {product_id}: {str(e)}")
 
     def store_inventory_movement(self, sale_id, sale_inputs):
         for item in sale_inputs.cart:
-            print(item.lot_numbers)
-            lot_ids = item.lot_numbers.split(',')
-            quantity_to_deduct = item.quantity  # Total por descontar
-
-            for lot_id in lot_ids:
-                print(2323232323)
-                print(lot_id)
-                lot_id = lot_id.strip()
-                if not lot_id or quantity_to_deduct <= 0:
-                    continue
-
-                # Obtener el lote individual por número de lote y producto
-                print(55555555555555888)
-                lot_item, lot = (
+            print(f"[+] Processing product {item.id} with quantity {item.quantity}")
+            print(f"[+] Lot numbers: {item.lot_numbers}")
+            
+            # Si no hay lot_numbers especificados, buscar lotes disponibles automáticamente
+            if not item.lot_numbers or item.lot_numbers.strip() == "":
+                # Buscar lotes disponibles para este producto
+                available_lots = (
                     self.db.query(LotItemModel, LotModel)
                     .join(LotModel, LotModel.id == LotItemModel.lot_id)
-                    .filter(LotModel.lot_number == lot_id)
                     .filter(LotItemModel.product_id == item.id)
-                    .first()
+                    .filter(LotItemModel.quantity > 0)
+                    .order_by(LotModel.arrival_date.asc())  # FIFO - First In, First Out
+                    .all()
                 )
-
-                print(f"[+] Processing lot {lot_id} for product {item.id}")
-
-                if not lot_item or lot_item.quantity <= 0:
+                
+                if not available_lots:
+                    print(f"[!] No hay lotes disponibles para el producto {item.id}")
                     continue
-
-                print(8888)
-
-                deduct_qty = min(quantity_to_deduct, lot_item.quantity)
-
+                
+                # Usar todos los lotes disponibles
+                lot_items_to_process = available_lots
+            else:
+                # Procesar lotes específicos
+                lot_ids = [lot_id.strip() for lot_id in item.lot_numbers.split(',') if lot_id.strip()]
+                lot_items_to_process = []
+                
+                for lot_id in lot_ids:
+                    lot_item, lot = (
+                        self.db.query(LotItemModel, LotModel)
+                        .join(LotModel, LotModel.id == LotItemModel.lot_id)
+                        .filter(LotModel.lot_number == lot_id)
+                        .filter(LotItemModel.product_id == item.id)
+                        .first()
+                    )
+                    
+                    if lot_item and lot_item.quantity > 0:
+                        lot_items_to_process.append((lot_item, lot))
+                    else:
+                        print(f"[!] Lote {lot_id} no encontrado o sin stock para producto {item.id}")
+            
+            quantity_to_process = item.quantity  # Total a procesar
+            total_processed = 0
+            
+            for lot_item, lot in lot_items_to_process:
+                if quantity_to_process <= 0:
+                    break
+                
+                print(f"[+] Processing lot {lot.lot_number} for product {item.id}")
+                print(f"[+] Available quantity in lot: {lot_item.quantity}")
+                
+                # Calcular cantidad a procesar de este lote
+                process_qty = min(quantity_to_process, lot_item.quantity)
+                
+                if process_qty <= 0:
+                    continue
+                
                 # Obtener inventario relacionado
                 inventory = (
                     self.db.query(InventoryModel)
-                    .join(LotModel, LotModel.id == lot.id)
                     .filter(InventoryModel.product_id == item.id)
                     .first()
                 )
-
-                if not inventory:
-                    continue
-
-                # Descontar cantidad del lote
-                lot_item.quantity = lot_item.quantity - deduct_qty
-                lot_item.updated_date = datetime.now()
-                self.db.commit()
-
-                # Descontar cantidad del inventario_lote
-                inventory_lot = self.db.query(InventoryLotItemModel).filter(
-                    InventoryLotItemModel.lot_item_id == lot_item.id
-                ).first()
                 
-                if not inventory_lot:
-                    print(f"[!] No se encontró inventario_lote para inventory_id={inventory.id}, lot_item_id={lot_item.id}")
+                if not inventory:
+                    print(f"[!] No se encontró inventario para el producto {item.id}")
+                    continue
+                
+                # NO actualizar lot_item.quantity ni inventory_lot.quantity
+                # Solo registrar el movimiento y la venta
+                
+                # Obtener unit_cost del kardex para el movimiento (si existe)
+                kardex_record = (
+                    self.db.query(KardexValuesModel)
+                    .filter(KardexValuesModel.product_id == item.id)
+                    .first()
+                )
+                
+                movement_unit_cost = kardex_record.average_cost if kardex_record else lot_item.unit_cost
+                print(f"[+] Unit cost para movimiento de venta: {movement_unit_cost} (del kardex: {kardex_record.average_cost if kardex_record else 'N/A'})")
 
-                if inventory_lot:
-                    inventory_lot.quantity -= deduct_qty
-                    inventory_lot.updated_date = datetime.now()
-                    self.db.commit()
-
-              
-
-                # Registrar movimiento
+                # Registrar movimiento de inventario (movement_products)
                 inventory_movement = InventoryMovementModel(
                     inventory_id=inventory.id,
                     lot_item_id=lot_item.id,
-                    movement_type_id=2,
-                    quantity=(deduct_qty * -1),
-                    unit_cost=lot_item.unit_cost,
-                    public_sale_price=lot_item.public_sale_price,
-                    private_sale_price=lot_item.private_sale_price,
+                    movement_type_id=2,  # Tipo de movimiento: Venta
+                    quantity=(process_qty * -1),  # Cantidad negativa para venta
+                    unit_cost=movement_unit_cost,  # Usa costo del kardex si existe
                     reason="Venta",
                     added_date=datetime.now()
                 )
                 self.db.add(inventory_movement)
                 self.db.commit()
-
-                if sale_inputs.rol_id == 1 or sale_inputs.rol_id == 2:
-                    price = item.private_sale_price
+                
+                # Determinar precio según el rol
+                if sale_inputs.rol_id == 1 or sale_inputs.rol_id == 2:  # Roles 1 y 2 usan costo del kardex
+                    price = movement_unit_cost  # Usar costo promedio del kardex
                 else:
-                    price = item.public_sale_price
-
+                    if sale_inputs.rol_id == 2:  # Solo rol 2 usa precio privado
+                        price = item.private_sale_price
+                    else:
+                        price = item.public_sale_price
+                
+                # Crear registro de producto vendido (sales_products)
                 sale_product = SaleProductModel(
                     sale_id=sale_id,
                     product_id=item.id,
                     inventory_movement_id=inventory_movement.id,
                     inventory_id=inventory.id,
                     lot_item_id=lot_item.id,
-                    quantity=item.quantity,
+                    quantity=process_qty,  # Cantidad procesada de este lote
                     price=price
                 )
-
-  
-
-                print(f"[+] Deducted {deduct_qty} from lot {lot_id} for product {item.id}")
-
+                
                 self.db.add(sale_product)
                 self.db.commit()
-
-                quantity_to_deduct -= deduct_qty
-
-                if quantity_to_deduct <= 0:
+                
+                print(f"[+] Processed {process_qty} from lot {lot.lot_number} for product {item.id}")
+                print(f"[+] Created movement record and sale product record")
+                
+                # Actualizar contadores
+                quantity_to_process -= process_qty
+                total_processed += process_qty
+                
+                if quantity_to_process <= 0:
                     break
+            
+            # Actualizar kardex con la cantidad total vendida de este producto
+            if total_processed > 0:
+                self.update_kardex_for_sale(
+                    product_id=item.id,
+                    sold_quantity=total_processed,
+                    unit_cost=0  # No necesitamos el unit_cost para ventas
+                )
+            
+            # Verificar que se haya procesado la cantidad total
+            if total_processed < item.quantity:
+                print(f"[!] Warning: Solo se procesó {total_processed} de {item.quantity} para el producto {item.id}")
+                # Aquí podrías lanzar una excepción o manejar el error según tu lógica de negocio
 
-    def store(self, sale_inputs, photo_path):
+    def get_shipping_cost(self):
+        """Obtiene el costo de envío desde la tabla settings"""
         try:
+            setting = self.db.query(SettingModel).first()
+            if setting and setting.delivery_cost:
+                return float(setting.delivery_cost)
+            return 0.0
+        except Exception as e:
+            print(f"[!] Error obteniendo shipping_cost desde settings: {str(e)}")
+            return 0.0
+
+    def calculate_kardex_based_total(self, cart_items):
+        """Calcula el subtotal de la venta basado en los costos del kardex para roles 1 y 2"""
+        try:
+            subtotal = 0
+            
+            for item in cart_items:
+                # Obtener costo del kardex para este producto
+                kardex_record = (
+                    self.db.query(KardexValuesModel)
+                    .filter(KardexValuesModel.product_id == item.id)
+                    .first()
+                )
+                
+                if kardex_record:
+                    # Usar costo promedio del kardex
+                    unit_cost = kardex_record.average_cost
+                else:
+                    # Si no hay kardex, usar precio público como fallback
+                    unit_cost = item.public_sale_price
+                
+                # Calcular subtotal para este producto
+                item_subtotal = item.quantity * unit_cost
+                subtotal += item_subtotal
+                
+                print(f"[+] Producto {item.id}: {item.quantity} x {unit_cost} = {item_subtotal}")
+            
+            # Calcular impuestos solo sobre el subtotal (sin shipping)
+            tax_rate = 0.19
+            tax = subtotal * tax_rate
+            total = subtotal + tax
+            
+            print(f"[+] Subtotal kardex: {subtotal}, Tax: {tax}, Total: {total}")
+            
+            return subtotal, tax, total
+            
+        except Exception as e:
+            print(f"[!] Error calculando total basado en kardex: {str(e)}")
+            # En caso de error, devolver valores por defecto
+            return 0, 0, 0
+
+    def store(self, sale_inputs, photo_path = None):
+        try:
+            # Validate cart items before processing
+            if not hasattr(sale_inputs, 'cart') or not sale_inputs.cart:
+                return {
+                    "status": "error",
+                    "message": "Cart is empty or invalid"
+                }
+            
+            # Filter out any None or invalid cart items
+            valid_cart_items = []
+            for item in sale_inputs.cart:
+                if item is None:
+                    continue
+                if not hasattr(item, 'id') or not hasattr(item, 'quantity'):
+                    continue
+                if item.id is None or item.quantity is None:
+                    continue
+                if item.id <= 0 or item.quantity <= 0:
+                    continue
+                valid_cart_items.append(item)
+            
+            if not valid_cart_items:
+                return {
+                    "status": "error",
+                    "message": "No valid items in cart"
+                }
+            
+            # Update the cart with only valid items
+            sale_inputs.cart = valid_cart_items
+            
             status, failed_products = self.validate_inventory_existence(sale_inputs)
 
             if status == 0:
@@ -245,14 +434,48 @@ class SaleClass:
                 customer_id = customer_data.id
                 status_id = 1
 
+            # Obtener shipping_cost desde settings
+            shipping_cost = self.get_shipping_cost()
+            
+            # Si shipping_method_id == 1, shipping_cost = 0
+            if sale_inputs.shipping_method_id == 1:
+                shipping_cost = 0
+            else:
+                # Solo obtener shipping_cost si shipping_method_id == 2
+                shipping_cost = self.get_shipping_cost()
+            
+            # Calcular total basado en costos del kardex si el rol es 1 o 2
+            if sale_inputs.rol_id == 1 or sale_inputs.rol_id == 2:
+                subtotal, tax, total = self.calculate_kardex_based_total(sale_inputs.cart)
+            else:
+                subtotal = sale_inputs.subtotal
+                tax = sale_inputs.tax
+                total = sale_inputs.total
+            
+            # Recalcular tax sobre (subtotal + shipping_cost) solo si shipping_method_id == 2
+            if sale_inputs.shipping_method_id == 2 and shipping_cost > 0:
+                tax_rate = 0.19  # 19% de impuesto
+                tax = (subtotal + shipping_cost) * tax_rate
+                total = subtotal + shipping_cost + tax
+            else:
+                # Si shipping_method_id == 1, calcular IVA solo sobre subtotal
+                if sale_inputs.shipping_method_id == 1:
+                    tax_rate = 0.19  # 19% de impuesto
+                    tax = subtotal * tax_rate
+                    total = subtotal + tax
+                else:
+                    # Mantener el cálculo original para otros casos
+                    total = subtotal + tax
+  
             new_sale = SaleModel(
                 customer_id=customer_id,
                 shipping_method_id=sale_inputs.shipping_method_id,
                 dte_type_id=sale_inputs.document_type_id,
                 status_id=status_id,
-                subtotal=sale_inputs.subtotal,
-                tax=sale_inputs.tax,
-                total=sale_inputs.total,
+                subtotal=subtotal,
+                tax=tax,
+                shipping_cost=shipping_cost,
+                total=total,
                 payment_support=photo_path,
                 delivery_address=sale_inputs.delivery_address,
                 added_date=datetime.now()
@@ -263,6 +486,27 @@ class SaleClass:
             self.db.refresh(new_sale)
 
             self.store_inventory_movement(new_sale.id, sale_inputs)
+
+            # Enviar alerta de nueva orden por WhatsApp
+            try:
+                # Obtener datos del cliente
+                customer = self.db.query(CustomerModel).filter(CustomerModel.id == customer_id).first()
+                if customer:
+                    customer_name = customer.social_reason or f"Cliente {customer.identification_number}"
+                else:
+                    customer_name = f"Cliente {sale_inputs.customer_rut}"
+                
+                # Formatear fecha
+                date_formatted = new_sale.added_date.strftime("%d-%m-%Y")
+                
+                # Enviar alerta
+                whatsapp = WhatsappClass(self.db)
+                whatsapp.send_new_order_alert(
+                    customer_name=customer_name
+                )
+                print(f"[WHATSAPP ALERT] Alerta enviada para nueva orden {new_sale.id}")
+            except Exception as e:
+                print(f"[WHATSAPP ALERT] Error enviando alerta: {str(e)}")
 
             return {"status": "Venta registrada exitosamente.", "sale_id": new_sale.id}
 
@@ -275,28 +519,79 @@ class SaleClass:
 
         try:
             for sales_product in sales_products:
+                # Obtener el movimiento de inventario original
                 inventory_movement = self.db.query(InventoryMovementModel).filter(
                     InventoryMovementModel.id == sales_product.inventory_movement_id
                 ).first()
 
-                inventory_lot_item = self.db.query(InventoryLotItemModel).filter(InventoryLotItemModel.inventory_id == sales_product.inventory_id).filter(InventoryLotItemModel.lot_item_id == inventory_movement.lot_item_id).first()
-                new_quantity = inventory_lot_item.quantity + (inventory_movement.quantity * -1)
-                inventory_lot_item.quantity = new_quantity
-                inventory_lot_item.updated_date = datetime.now()
-                self.db.commit()
+                if inventory_movement:
+                    # Crear movimiento contrario (si era salida, crear entrada)
+                    reverse_quantity = inventory_movement.quantity * -1  # Cambiar signo
+                    
+                    # Crear nuevo movimiento de inventario (entrada)
+                    reverse_movement = InventoryMovementModel(
+                        inventory_id=inventory_movement.inventory_id,
+                        lot_item_id=inventory_movement.lot_item_id,
+                        movement_type_id=1,  # Tipo entrada
+                        quantity=reverse_quantity,
+                        unit_cost=inventory_movement.unit_cost,
+                        reason="Reversa de venta",
+                        added_date=datetime.now()
+                    )
+                    self.db.add(reverse_movement)
+                    self.db.commit()
 
-                lot_items = self.db.query(LotItemModel).filter(LotItemModel.id == sales_product.lot_item_id).first()
-                lot_items.quantity = int(lot_items.quantity) + int(sales_product.quantity)
-                lot_items.updated_date = datetime.now()
-                self.db.commit()
+                    # Actualizar kardex sumando la cantidad
+                    self.update_kardex_for_reverse(
+                        product_id=sales_product.product_id,
+                        returned_quantity=abs(inventory_movement.quantity),
+                        unit_cost=inventory_movement.unit_cost
+                    )
 
-                self.db.delete(inventory_movement)
-                self.db.commit()
+                    print(f"[REVERSE] Movimiento reverso creado para producto {sales_product.product_id}: {reverse_quantity}")
 
-            return "Inventory reject successfully"
+            return "Inventory reversed successfully"
         except Exception as e:
             self.db.rollback()
-            return "Error trying to reject inventory"
+            print(f"[REVERSE] Error: {str(e)}")
+            return f"Error trying to reverse inventory: {str(e)}"
+
+    def update_kardex_for_reverse(self, product_id, returned_quantity, unit_cost):
+        """Actualiza el kardex sumando la cantidad devuelta sin cambiar el costo promedio"""
+        try:
+            # Buscar registro existente en kardex
+            kardex_record = (
+                self.db.query(KardexValuesModel)
+                .filter(KardexValuesModel.product_id == product_id)
+                .first()
+            )
+            
+            if kardex_record:
+                # Solo sumar la cantidad devuelta, mantener el costo promedio
+                new_quantity = kardex_record.quantity + returned_quantity
+                
+                # Actualizar solo la cantidad, mantener el costo promedio
+                kardex_record.quantity = new_quantity
+                kardex_record.updated_date = datetime.now()
+                
+                print(f"[REVERSE KARDEX] Producto {product_id}: +{returned_quantity} unidades, nuevo total: {new_quantity}, costo promedio sin cambios: {kardex_record.average_cost}")
+            else:
+                # Si no existe kardex, crear uno nuevo
+                kardex_record = KardexValuesModel(
+                    product_id=product_id,
+                    quantity=returned_quantity,
+                    average_cost=unit_cost,
+                    added_date=datetime.now(),
+                    updated_date=datetime.now()
+                )
+                self.db.add(kardex_record)
+                print(f"[REVERSE KARDEX] Nuevo kardex creado para producto {product_id}: {returned_quantity} unidades")
+            
+            self.db.commit()
+            
+        except Exception as e:
+            print(f"[REVERSE KARDEX] Error actualizando kardex: {str(e)}")
+            self.db.rollback()
         
     def get(self, id):
         try:
@@ -304,6 +599,7 @@ class SaleClass:
                 SaleModel.id,
                 SaleModel.subtotal,
                 SaleModel.tax,
+                SaleModel.shipping_cost,
                 SaleModel.total,
                 SaleModel.status_id,
                 SaleModel.dte_type_id,
@@ -320,6 +616,7 @@ class SaleClass:
                     "subtotal": data_query.subtotal,
                     "tax": data_query.tax,
                     "total": data_query.total,
+                    "shipping_cost": data_query.shipping_cost,
                     "status_id": data_query.status_id,
                     "dte_type_id": data_query.dte_type_id,
                     "shipping_method_id": data_query.shipping_method_id,
@@ -344,6 +641,7 @@ class SaleClass:
                 SaleProductModel.id,
                 SaleProductModel.quantity,
                 SaleModel.subtotal,
+                SaleModel.shipping_cost,
                 SaleModel.tax,
                 SaleModel.total,
                 SaleModel.status_id,
@@ -366,6 +664,7 @@ class SaleClass:
                     "quantity": data.quantity,
                     "subtotal": data.subtotal,
                     "tax": data.tax,
+                    "shipping_cost": data.shipping_cost,
                     "total": data.total,
                     "status_id": data.status_id,
                     "dte_type_id": data.dte_type_id,
@@ -406,7 +705,7 @@ class SaleClass:
         try:
             from datetime import datetime
             
-            # Consulta para obtener ventas individuales con información de lotes
+            # Consulta para obtener ventas individuales con información de lotes y rol del usuario
             individual_sales_query = (
                 self.db.query(
                     ProductModel.id.label("product_id"),
@@ -423,7 +722,8 @@ class SaleClass:
                     LotItemModel.id.label("lot_item_id"),
                     LotModel.lot_number,
                     LotModel.arrival_date,
-                    SaleModel.added_date
+                    SaleModel.added_date,
+                    UserModel.rol_id.label("user_rol_id")
                 )
                 .join(SaleProductModel, SaleProductModel.product_id == ProductModel.id)
                 .join(SaleModel, SaleModel.id == SaleProductModel.sale_id)
@@ -432,6 +732,8 @@ class SaleClass:
                 .join(LotModel, LotModel.id == LotItemModel.lot_id)
                 .join(UnitMeasureModel, UnitMeasureModel.id == ProductModel.unit_measure_id, isouter=True)
                 .join(UnitFeatureModel, UnitFeatureModel.product_id == ProductModel.id, isouter=True)
+                .join(CustomerModel, CustomerModel.id == SaleModel.customer_id, isouter=True)
+                .join(UserModel, UserModel.rut == CustomerModel.identification_number, isouter=True)
             )
             
             # Aplicar filtros de fecha si se proporcionan
@@ -498,7 +800,6 @@ class SaleClass:
                         "private_sales": {"quantity": 0, "revenue": 0, "count": 0, "unit_measure_quantity": 0},
                         "total_revenue": 0,
                         "total_cost": 0,
-                        "lots_breakdown": {},  # Nuevo: desglose por lotes
                         "prices": {
                             "public_price_per_package": float(sale.public_sale_price) if sale.public_sale_price else 0,
                             "private_price_per_package": float(sale.private_sale_price) if sale.private_sale_price else 0,
@@ -508,34 +809,15 @@ class SaleClass:
                         }
                     }
                 
-                # Inicializar datos del lote si no existe
-                if lot_item_id not in products_data[product_id]["lots_breakdown"]:
-                    quantity_per_package = products_data[product_id]["quantity_per_package"]
-                    # El unit_cost en BD está por UNIDAD (litro), lo convertimos a por paquete
-                    cost_per_unit = float(sale.unit_cost)  # Costo por unidad (litro)
-                    cost_per_package = cost_per_unit * quantity_per_package  # Costo por paquete
-                    
-                    products_data[product_id]["lots_breakdown"][lot_item_id] = {
-                        "lot_number": sale.lot_number,
-                        "arrival_date": sale.arrival_date.strftime("%Y-%m-%d") if sale.arrival_date else None,
-                        "cost_per_package": cost_per_package,
-                        "cost_per_unit": cost_per_unit,
-                        "quantity_sold": 0,
-                        "unit_measure_quantity_sold": 0,  # Nueva: cantidad en unidad de medida
-                        "revenue": 0,
-                        "cost": 0,
-                        "public_sales": {"quantity": 0, "revenue": 0, "unit_measure_quantity": 0},
-                        "private_sales": {"quantity": 0, "revenue": 0, "unit_measure_quantity": 0}
-                    }
                 
                 # Calcular valores
                 quantity = sale.quantity
                 quantity_per_package = products_data[product_id]["quantity_per_package"]
                 unit_measure_quantity = quantity * quantity_per_package  # Cantidad en unidad de medida
                 
-                # IMPORTANTE: El unit_cost en BD está por UNIDAD (litro), lo convertimos a por paquete
-                cost_per_unit = sale.unit_cost  # Costo por unidad (litro)
-                cost_per_package = cost_per_unit * quantity_per_package  # Costo por paquete
+                # IMPORTANTE: El unit_cost en BD está por PAQUETE, lo convertimos a por unidad
+                cost_per_package = sale.unit_cost  # Costo por paquete
+                cost_per_unit = cost_per_package / quantity_per_package if quantity_per_package > 0 else cost_per_package  # Costo por unidad
                 
                 # Los precios de venta están por paquete, los convertimos a por unidad de medida
                 unit_measure_sale_price = sale.sale_price / quantity_per_package if quantity_per_package > 0 else sale.sale_price
@@ -550,20 +832,16 @@ class SaleClass:
                 products_data[product_id]["total_revenue"] += revenue
                 products_data[product_id]["total_cost"] += cost
                 
-                # Actualizar datos del lote específico
-                lot_data = products_data[product_id]["lots_breakdown"][lot_item_id]
-                lot_data["quantity_sold"] += quantity
-                lot_data["unit_measure_quantity_sold"] += unit_measure_quantity
-                lot_data["revenue"] += revenue
-                lot_data["cost"] += cost
                 
-                # Determinar tipo de precio
-                if sale.sale_price == sale.public_sale_price:
+                # Determinar tipo de venta basado en el rol_id del usuario
+                # rol_id 5 = venta pública, rol_id 1 o 2 = venta privada
+                # Si no existe usuario o rol_id es None, por defecto es pública
+                if sale.user_rol_id == 5:
                     price_type = 'public'
-                elif sale.sale_price == sale.private_sale_price:
+                elif sale.user_rol_id in [1, 2]:
                     price_type = 'private'
-                else:
-                    price_type = 'private'  # Por defecto
+                else:  # rol_id None, 0 u otros = venta pública por defecto
+                    price_type = 'public'
                 
                 # Clasificar por tipo de precio (producto)
                 if price_type == 'public':
@@ -571,19 +849,11 @@ class SaleClass:
                     products_data[product_id]["public_sales"]["unit_measure_quantity"] += unit_measure_quantity
                     products_data[product_id]["public_sales"]["revenue"] += revenue
                     products_data[product_id]["public_sales"]["count"] += 1
-                    # También para el lote
-                    lot_data["public_sales"]["quantity"] += quantity
-                    lot_data["public_sales"]["unit_measure_quantity"] += unit_measure_quantity
-                    lot_data["public_sales"]["revenue"] += revenue
                 else:  # private o otros
                     products_data[product_id]["private_sales"]["quantity"] += quantity
                     products_data[product_id]["private_sales"]["unit_measure_quantity"] += unit_measure_quantity
                     products_data[product_id]["private_sales"]["revenue"] += revenue
                     products_data[product_id]["private_sales"]["count"] += 1
-                    # También para el lote
-                    lot_data["private_sales"]["quantity"] += quantity
-                    lot_data["private_sales"]["unit_measure_quantity"] += unit_measure_quantity
-                    lot_data["private_sales"]["revenue"] += revenue
             
             # Formatear datos para respuesta
             formatted_data = []
@@ -604,40 +874,6 @@ class SaleClass:
                 public_percent = (product_data["public_sales"]["quantity"] / total_qty * 100) if total_qty > 0 else 0
                 private_percent = (product_data["private_sales"]["quantity"] / total_qty * 100) if total_qty > 0 else 0
                 
-                # Formatear desglose por lotes
-                lots_breakdown_formatted = []
-                for lot_item_id, lot_data in product_data["lots_breakdown"].items():
-                    lot_profit = lot_data["revenue"] - lot_data["cost"]
-                    lot_margin = (lot_profit / lot_data["revenue"] * 100) if lot_data["revenue"] > 0 else 0
-                    
-                    lots_breakdown_formatted.append({
-                        "lot_number": lot_data["lot_number"],
-                        "arrival_date": lot_data["arrival_date"],
-                        "cost_per_package": round(lot_data["cost_per_package"], 2),
-                        "cost_per_unit": round(lot_data["cost_per_unit"], 2),
-                        "quantity_sold": lot_data["quantity_sold"],
-                        "unit_measure_quantity_sold": round(lot_data["unit_measure_quantity_sold"], 2),
-                        "unit_measure": product_data["unit_measure"],
-                        "revenue": round(lot_data["revenue"], 2),
-                        "cost": round(lot_data["cost"], 2),
-                        "profit": round(lot_profit, 2),
-                        "profit_margin_percent": round(lot_margin, 2),
-                        "sales_by_type": {
-                            "public_sales": {
-                                "quantity": lot_data["public_sales"]["quantity"],
-                                "unit_measure_quantity": round(lot_data["public_sales"]["unit_measure_quantity"], 2),
-                                "revenue": round(lot_data["public_sales"]["revenue"], 2)
-                            },
-                            "private_sales": {
-                                "quantity": lot_data["private_sales"]["quantity"],
-                                "unit_measure_quantity": round(lot_data["private_sales"]["unit_measure_quantity"], 2),
-                                "revenue": round(lot_data["private_sales"]["revenue"], 2)
-                            }
-                        }
-                    })
-                
-                # Ordenar lotes por fecha de llegada
-                lots_breakdown_formatted.sort(key=lambda x: x["arrival_date"] or "1900-01-01")
                 
                 product_summary = {
                     "product_id": product_data["product_id"],
@@ -664,7 +900,6 @@ class SaleClass:
                             "transactions": product_data["private_sales"]["count"]
                         }
                     },
-                    "lots_breakdown": lots_breakdown_formatted,  # Nuevo: desglose por lotes
                     "totals": {
                         "total_revenue": round(product_data["total_revenue"], 2),
                         "total_cost": round(product_data["total_cost"], 2),
