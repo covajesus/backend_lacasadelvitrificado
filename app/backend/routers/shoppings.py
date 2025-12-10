@@ -97,21 +97,10 @@ async def save_inventory_quantities(
 def store(
     id: int,
     form_data: StoreCustomsCompanyDocuments = Depends(StoreCustomsCompanyDocuments.as_form),
-    customs_company_support: UploadFile = File(None),
     db: Session = Depends(get_db)
 ):
     try:
-        timestamp = datetime.now().strftime("%Y_%m_%d_%H_%M_%S")
-        unique_id = uuid.uuid4().hex[:8]  # 8 caracteres únicos
-        file_extension = customs_company_support.filename.split('.')[-1] if '.' in customs_company_support.filename else ''
-        file_category_name = 'customs_company_support'
-        unique_filename = f"{timestamp}_{unique_id}.{file_extension}" if file_extension else f"{timestamp}_{unique_id}"
-
-        support_remote_path = f"{file_category_name}_{unique_filename}"
-
-        FileClass(db).upload(customs_company_support, support_remote_path)
-
-        response = ShoppingClass(db).store_customs_company_documents(id, form_data, support_remote_path)
+        response = ShoppingClass(db).store_customs_company_documents(id, form_data)
 
         return {"message": response}
 

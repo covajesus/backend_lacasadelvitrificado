@@ -344,6 +344,8 @@ class StoreCustomsCompanyDocuments(BaseModel):
     dollar_value: str
     folder_processing: str
     valija_expenses: str
+    tax_explosive_product: str
+    commission: str
 
     @classmethod
     def as_form(cls,
@@ -358,7 +360,9 @@ class StoreCustomsCompanyDocuments(BaseModel):
                     administrative_expenses: str = Form(...),
                     dollar_value: str = Form(...),
                     folder_processing: str = Form(...),
-                    valija_expenses: str = Form(...)
+                    valija_expenses: str = Form(...),
+                    tax_explosive_product: str = Form(...),
+                    commission: str = Form(...)
                 ):
         return cls(
             maritime_freight=maritime_freight,
@@ -372,7 +376,9 @@ class StoreCustomsCompanyDocuments(BaseModel):
             administrative_expenses=administrative_expenses,
             dollar_value=dollar_value,
             folder_processing=folder_processing,
-            valija_expenses=valija_expenses
+            valija_expenses=valija_expenses,
+            tax_explosive_product=tax_explosive_product,
+            commission=commission
         )
 
 class PreInventoryItems(BaseModel):

@@ -504,7 +504,7 @@ class ShoppingClass:
         except Exception as e:
             return {"error": str(e)}
          
-    def store_customs_company_documents(self, id, form_data, support_remote_path):
+    def store_customs_company_documents(self, id, form_data):
         try:
             shopping = self.db.query(ShoppingModel).filter(ShoppingModel.id == id).first()
             if not shopping:
@@ -532,7 +532,8 @@ class ShoppingClass:
             shopping.dollar_value = form_data.dollar_value
             shopping.folder_processing = form_data.folder_processing
             shopping.valija_expenses = form_data.valija_expenses
-            shopping.customs_company_support = support_remote_path
+            shopping.tax_explosive_product = form_data.tax_explosive_product
+            shopping.commission = form_data.commission
 
             self.db.commit()
             return {"message": "Customs company documents stored successfully"}
