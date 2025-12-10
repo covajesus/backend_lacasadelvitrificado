@@ -734,6 +734,7 @@ class SaleClass:
                 .join(UnitFeatureModel, UnitFeatureModel.product_id == ProductModel.id, isouter=True)
                 .join(CustomerModel, CustomerModel.id == SaleModel.customer_id, isouter=True)
                 .join(UserModel, UserModel.rut == CustomerModel.identification_number, isouter=True)
+                .filter(SaleModel.status_id == 2)
             )
             
             # Aplicar filtros de fecha si se proporcionan
@@ -873,7 +874,6 @@ class SaleClass:
                 total_qty = product_data["total_quantity"]
                 public_percent = (product_data["public_sales"]["quantity"] / total_qty * 100) if total_qty > 0 else 0
                 private_percent = (product_data["private_sales"]["quantity"] / total_qty * 100) if total_qty > 0 else 0
-                
                 
                 product_summary = {
                     "product_id": product_data["product_id"],
