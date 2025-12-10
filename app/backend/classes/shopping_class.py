@@ -455,20 +455,13 @@ class ShoppingClass:
         
     def get(self, id):
         try:
-            data_query = self.db.query(
-                ShoppingModel.id,
-                ShoppingModel.shopping_number,
-                ShoppingModel.supplier_id,
-                ShoppingModel.status_id,
-                ShoppingModel.email,
-                ShoppingModel.total,
-                SupplierModel.supplier,
-                ShoppingModel.added_date,
-                ShoppingModel.prepaid_status_id
-            ).filter(ShoppingModel.id == id).join(SupplierModel, SupplierModel.id == ShoppingModel.supplier_id).first()
+            data_query = self.db.query(ShoppingModel).filter(ShoppingModel.id == id).first()
 
             if not data_query:
                 return {"error": "No se encontraron datos para la compra especificado."}
+            
+            # Obtener el nombre del proveedor
+            supplier = self.db.query(SupplierModel.supplier).filter(SupplierModel.id == data_query.supplier_id).first()
 
             shopping_data = {
                 "id": data_query.id,
@@ -476,10 +469,32 @@ class ShoppingClass:
                 "supplier_id": data_query.supplier_id,
                 "status_id": data_query.status_id,
                 "email": data_query.email,
-                "total": str(data_query.total),
-                "supplier": data_query.supplier,
-                "added_date": data_query.added_date.strftime("%d-%m-%Y"),
-                "prepaid_status_id": data_query.prepaid_status_id
+                "total": str(data_query.total) if data_query.total else None,
+                "supplier": supplier.supplier if supplier else None,
+                "added_date": data_query.added_date.strftime("%d-%m-%Y") if data_query.added_date else None,
+                "prepaid_status_id": data_query.prepaid_status_id,
+                "maritime_freight": data_query.maritime_freight,
+                "merchandise_insurance": data_query.merchandise_insurance,
+                "manifest_opening": data_query.manifest_opening,
+                "deconsolidation": data_query.deconsolidation,
+                "land_freight": data_query.land_freight,
+                "port_charges": data_query.port_charges,
+                "tax_explosive_product": data_query.tax_explosive_product,
+                "honoraries": data_query.honoraries,
+                "physical_assessment_expenses": data_query.physical_assessment_expenses,
+                "administrative_expenses": data_query.administrative_expenses,
+                "folder_processing": data_query.folder_processing,
+                "valija_expenses": data_query.valija_expenses,
+                "dollar_value": data_query.dollar_value,
+                "wire_transfer_amount": data_query.wire_transfer_amount,
+                "wire_transfer_date": data_query.wire_transfer_date.strftime("%Y-%m-%d") if data_query.wire_transfer_date else None,
+                "commission": data_query.commission,
+                "exchange_rate": data_query.exchange_rate,
+                "extra_expenses": data_query.extra_expenses,
+                "euro_value": data_query.euro_value,
+                "payment_support": data_query.payment_support,
+                "customs_company_support": data_query.customs_company_support,
+                "updated_date": data_query.updated_date.strftime("%d-%m-%Y %H:%M:%S") if data_query.updated_date else None
             }
 
             return {"shopping_data": shopping_data}
