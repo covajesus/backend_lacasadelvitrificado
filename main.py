@@ -21,6 +21,7 @@ from app.backend.routers.shoppings import shoppings
 from app.backend.routers.supplier_categories import supplier_categories
 from app.backend.routers.kardex import kardex
 from app.backend.routers.dtes import dtes
+from app.backend.routers.budgets import budgets
 
 app = FastAPI(root_path="/api")
 application = app
@@ -65,6 +66,7 @@ app.include_router(shoppings)
 app.include_router(supplier_categories)
 app.include_router(kardex)
 app.include_router(dtes)
+app.include_router(budgets)
 
 if __name__ == "__main__":
     uvicorn.run("main:app", port=8000, reload=True)

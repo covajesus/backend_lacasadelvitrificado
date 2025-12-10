@@ -23,6 +23,18 @@ def index(shopping_inputs: ShoppingList, db: Session = Depends(get_db)):
 
     return {"message": data}
 
+@shoppings.get("/list")
+def list_all(db: Session = Depends(get_db)):
+    data = ShoppingClass(db).get_list()
+
+    return {"message": data}
+
+@shoppings.get("/products/{shopping_id}")
+def get_shopping_products(shopping_id: int, db: Session = Depends(get_db)):
+    data = ShoppingClass(db).get_shopping_products_detail(shopping_id)
+
+    return {"message": data}
+
 @shoppings.get("/edit/{id}")
 def edit(id: int, session_user: UserLogin = Depends(get_current_active_user), db: Session = Depends(get_db)):
     data = ShoppingClass(db).get(id)

@@ -141,6 +141,39 @@ class CartItem(BaseModel):
     public_sale_price: Optional[int] = 0
     private_sale_price: Optional[int] = 0
 
+class BudgetProductItem(BaseModel):
+    product_id: int
+    quantity: int
+    sale_price: int
+    amount: int
+
+class StoreBudget(BaseModel):
+    customer_id: int
+    products: List[BudgetProductItem]
+    subtotal: int
+    shipping: Optional[int] = 0
+    tax: int
+    total: int
+
+    @validator("products")
+    def validate_products(cls, value):
+        if not value or len(value) == 0:
+            raise ValueError("At least one product is required")
+
+        for product in value:
+            if product.quantity <= 0:
+                raise ValueError("Product quantity must be greater than 0")
+            if product.sale_price < 0:
+                raise ValueError("Sale price cannot be negative")
+            if product.amount < 0:
+                raise ValueError("Amount cannot be negative")
+        return value
+
+class BudgetList(BaseModel):
+    page: int
+    identification_number: Optional[str] = None
+    social_reason: Optional[str] = None
+
 class StoreSale(BaseModel):
     rol_id: int
     customer_rut: str
@@ -285,11 +318,11 @@ class ShoppingProductInput(BaseModel):
     category_id: int
     product_id: int
     quantity: float
-    quantity_per_package: float
+    quantity_to_buy: float
     discount_percentage: float
     original_unit_cost: float
     final_unit_cost: float
-    amount: float
+    total_amount: float
     unit_measure_id: int
 
 class ShoppingList(BaseModel):

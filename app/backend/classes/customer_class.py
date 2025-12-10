@@ -1,5 +1,6 @@
 from app.backend.db.models import CustomerModel, RegionModel, CommuneModel, CustomerProductDiscountModel, SettingModel, UserModel
 from datetime import datetime
+from app.backend.auth.auth_user import generate_bcrypt_hash
 
 class CustomerClass:
     def __init__(self, db):
@@ -74,6 +75,7 @@ class CustomerClass:
                     "identification_number": customer.identification_number,
                     "address": customer.address,
                     "phone": customer.phone,
+                    "email": customer.email if customer.email else None,
                 } for customer in data]
 
                 return {
@@ -93,6 +95,7 @@ class CustomerClass:
                     "identification_number": customer.identification_number,
                     "address": customer.address,
                     "phone": customer.phone,
+                    "email": customer.email if customer.email else None,
                 } for customer in data]
 
                 return serialized_data
@@ -165,8 +168,30 @@ class CustomerClass:
             )
 
             self.db.add(new_customer)
-            self.db.commit()
+            self.db.flush()
             self.db.refresh(new_customer)
+
+            # Verificar si ya existe un usuario con este RUT
+            existing_user = (
+                self.db.query(UserModel)
+                .filter(UserModel.rut == customer_inputs.identification_number)
+                .first()
+            )
+
+            # Crear usuario solo si no existe
+            if not existing_user:
+                new_user = UserModel(
+                    rut=customer_inputs.identification_number,
+                    rol_id=5,  # Rol de cliente público
+                    full_name=customer_inputs.social_reason,
+                    hashed_password=generate_bcrypt_hash('123456'),  # Contraseña por defecto
+                    email=customer_inputs.email,
+                    phone=customer_inputs.phone,
+                    added_date=datetime.now(),
+                    updated_date=datetime.now()
+                )
+                self.db.add(new_user)
+                self.db.flush()
 
             if customer_inputs.product_discounts:
                 for product_id, discount_percentage in customer_inputs.product_discounts.items():
@@ -178,6 +203,8 @@ class CustomerClass:
                         )
                         self.db.add(discount_record)
                 
+                self.db.commit()
+            else:
                 self.db.commit()
 
             return {

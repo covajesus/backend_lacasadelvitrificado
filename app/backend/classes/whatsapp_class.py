@@ -1,7 +1,9 @@
 import requests
 import os
+import hashlib
 from dotenv import load_dotenv
 from app.backend.classes.setting_class import SettingClass
+from app.backend.db.models import UserModel
 load_dotenv() 
 
 class WhatsappClass:
@@ -185,5 +187,79 @@ class WhatsappClass:
 
         print(f"[WHATSAPP ALERT] Status: {response.status_code}")
         print(f"[WHATSAPP ALERT] Response: {response.json()}")
+        
+        return response
+
+    def review_budget(self, budget_id, customer_name, total): 
+        url = "https://graph.facebook.com/v22.0/790586727468909/messages"
+        token = os.getenv('META_TOKEN')        
+        setting_data = SettingClass(self.db).get(1)
+        admin_phone = setting_data["setting_data"]["phone"]
+
+        # Obtener usuario admin (rol_id 1 o 2)
+        admin_user = (
+            self.db.query(UserModel)
+            .filter((UserModel.rol_id == 1) | (UserModel.rol_id == 2))
+            .first()
+        )
+
+        if not admin_user:
+            print("[WHATSAPP REVIEW BUDGET] No se encontró usuario admin")
+            return None
+
+        # Generar token MD5 con budget_id y rut del admin
+        token_string = f"{budget_id}_{admin_user.rut}_{admin_user.id}"
+        token_md5 = hashlib.md5(token_string.encode()).hexdigest()
+
+        # URL base del backend (ajustar según la URL del backend)
+        login_url = f"{budget_id}"
+
+        # Formatear el número de teléfono
+        phone_str = str(admin_phone).strip()
+        if not phone_str.startswith("56"):
+            admin_phone_formatted = "56" + phone_str
+        else:
+            admin_phone_formatted = phone_str
+
+        payload = {
+            "messaging_product": "whatsapp",
+            "to": "56928783036",
+            "type": "template",
+            "template": {
+                "name": "revision_presupuesto",
+                "language": {"code": "es"},
+                "components": [
+                    {
+                        "type": "body",
+                        "parameters": [
+                            {"type": "text", "text": str(budget_id)}
+                        ]
+                    },
+                    {
+                        "type": "button",
+                        "sub_type": "url",
+                        "index": "0",
+                        "parameters": [
+                            {
+                                "type": "text",
+                                "text": login_url
+                            }
+                        ]
+                    }
+                ]
+            }
+        }
+
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json"
+        }
+
+        response = requests.post(url, json=payload, headers=headers)
+
+        print(f"[WHATSAPP REVIEW BUDGET] Status: {response.status_code}")
+        print(f"[WHATSAPP REVIEW BUDGET] Response: {response.json()}")
+        print(f"[WHATSAPP REVIEW BUDGET] Token MD5: {token_md5}")
+        print(f"[WHATSAPP REVIEW BUDGET] Login URL: {login_url}")
         
         return response

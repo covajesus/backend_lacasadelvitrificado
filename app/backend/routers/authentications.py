@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, Form, HTTPException
+from fastapi import APIRouter, Depends, Form, HTTPException, Query
 from fastapi.security import OAuth2PasswordRequestForm
 from app.backend.db.database import get_db
 from sqlalchemy.orm import Session
@@ -116,3 +116,32 @@ def refresh_token(
         "token_type": "bearer",
         "expires_in": expires_in_seconds
     }
+
+@authentications.get("/budget_login")
+def budget_login(
+    token: str = Query(..., description="Token MD5 para autenticación"),
+    budget_id: int = Query(..., description="ID del presupuesto"),
+    db: Session = Depends(get_db)
+):
+    """
+    Endpoint para login automático desde WhatsApp usando token MD5
+    """
+    try:
+        data = AuthenticationClass(db).validate_budget_token(token, budget_id)
+        rol = RolClass(db).get('id', data["rol_id"])
+        
+        return {
+            "access_token": data["access_token"],
+            "user_id": data["user_id"],
+            "rut": data["rut"],
+            "rol_id": data["rol_id"],
+            "rol": rol.rol,
+            "full_name": data["full_name"],
+            "email": data["email"],
+            "token_type": "bearer",
+            "budget_id": data["budget_id"]
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error al validar token: {str(e)}")

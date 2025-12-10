@@ -33,35 +33,34 @@ class ShoppingModel(Base):
     __tablename__ = 'shoppings'
 
     id = Column(Integer, primary_key=True)
-    shopping_number = Column(String(100))
     supplier_id = Column(Integer)
+    prepaid_status_id = Column(Integer)
     status_id = Column(Integer)
+    shopping_number = Column(Integer)
     email = Column(String(255))
-    total = Column(Numeric(10, 2)) 
-    maritime_freight = Column(Numeric(10, 2))
-    merchandise_insurance = Column(Numeric(10, 2))
-    manifest_opening = Column(Numeric(10, 2))
-    deconsolidation = Column(Numeric(10, 2))
-    land_freight = Column(Numeric(10, 2))
-    port_charges = Column(Numeric(10, 2))
-    honoraries = Column(Numeric(10, 2))
-    physical_assessment_expenses = Column(Numeric(10, 2))
-    administrative_expenses = Column(Numeric(10, 2))
-    dollar_value = Column(Numeric(10, 2))
-    folder_processing = Column(Numeric(10, 2))
-    valija_expenses = Column(Numeric(10, 2))
-    customs_company_support = Column(Text())
-    wire_transfer_amount = Column(Numeric(10, 2))
+    total = Column(Float)
+    maritime_freight = Column(Float)
+    merchandise_insurance = Column(Float)
+    manifest_opening = Column(Float)
+    deconsolidation = Column(Float)
+    land_freight = Column(Float)
+    port_charges = Column(Float)
+    tax_explosive_product = Column(Float)
+    honoraries = Column(Float)
+    physical_assessment_expenses = Column(Float)
+    administrative_expenses = Column(Float)
+    folder_processing = Column(Float)
+    valija_expenses = Column(Float)
+    dollar_value = Column(Float)
+    wire_transfer_amount = Column(Float)
     wire_transfer_date = Column(Date)
-    commission = Column(Numeric(10, 2))
+    commission = Column(Float)
     exchange_rate = Column(Integer)
-    extra_expenses = Column(Numeric(10, 2))
-    payment_support = Column(Text())
+    extra_expenses = Column(Integer)
+    payment_support = Column(String(255))
+    customs_company_support = Column(String(255))
     added_date = Column(DateTime())
     updated_date = Column(DateTime())
-
-    # Nuevos campos agregados sin modificar los anteriores
-    prepaid_status_id = Column(Integer)
 
 class ShoppingProductModel(Base):
     __tablename__ = 'shoppings_products'
@@ -71,11 +70,11 @@ class ShoppingProductModel(Base):
     product_id = Column(Integer)
     unit_measure_id = Column(Integer)
     quantity = Column(Integer)
-    quantity_per_package = Column(Numeric(10, 2))
-    original_unit_cost = Column(Numeric(10, 2))
+    quantity_to_buy = Column(Float)
+    original_unit_cost = Column(Float)
     discount_percentage = Column(Integer)
-    final_unit_cost = Column(Numeric(10, 2))
-    amount = Column(Numeric(10, 2))
+    final_unit_cost = Column(Float)
+    total_amount = Column(Float)
     added_date = Column(DateTime())
     updated_date = Column(DateTime())
 
@@ -126,6 +125,30 @@ class SaleProductModel(Base):
     lot_item_id = Column(Integer)
     quantity = Column(Integer)
     price = Column(Integer)
+
+class BudgetModel(Base):
+    __tablename__ = 'budgets'
+
+    id = Column(Integer, primary_key=True)
+    customer_id = Column(Integer)
+    status_id = Column(Integer, default=0)
+    subtotal = Column(Integer)
+    shipping = Column(Integer, default=0)
+    tax = Column(Integer)
+    total = Column(Integer)
+    added_date = Column(DateTime(), default=datetime.now)
+    updated_date = Column(DateTime(), default=datetime.now)
+
+class BudgetProductModel(Base):
+    __tablename__ = 'budgets_products'
+
+    id = Column(Integer, primary_key=True)
+    budget_id = Column(Integer)
+    product_id = Column(Integer)
+    quantity = Column(Integer)
+    total = Column(Integer)
+    added_date = Column(DateTime(), default=datetime.now)
+    updated_date = Column(DateTime(), default=datetime.now)
 
 class CustomerModel(Base):
     __tablename__ = 'customers'

@@ -80,7 +80,7 @@ def delete(id: int, session_user: UserLogin = Depends(get_current_active_user), 
     return {"message": data}
 
 @customers.get("/edit/{id}")
-def edit(id: int, session_user: UserLogin = Depends(get_current_active_user), db: Session = Depends(get_db)):
+def edit(id: int, db: Session = Depends(get_db)):
     data = CustomerClass(db).get(id)
 
     return {"message": data}
