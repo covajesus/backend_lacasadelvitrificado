@@ -376,7 +376,7 @@ class ShoppingClass:
                     ShoppingProductModel.unit_measure_id,
                     UnitMeasureModel.unit_measure,
                     ProductModel.product,
-                    ProductModel.quantity_per_package,
+                    UnitFeatureModel.quantity_per_package,
                     CategoryModel.category,
                     ProductModel.code,
                     ShoppingProductModel.original_unit_cost,
@@ -387,6 +387,7 @@ class ShoppingClass:
                 .join(ProductModel, ProductModel.id == ShoppingProductModel.product_id)
                 .join(UnitMeasureModel, UnitMeasureModel.id == ShoppingProductModel.unit_measure_id)
                 .join(CategoryModel, CategoryModel.id == ProductModel.category_id)
+                .outerjoin(UnitFeatureModel, UnitFeatureModel.product_id == ShoppingProductModel.product_id)
                 .filter(ShoppingProductModel.shopping_id == id)
                 .order_by(ShoppingProductModel.id)
             )
