@@ -1,13 +1,20 @@
 import os
+import platform
 from fastapi import HTTPException, UploadFile
 
 class FileClass:
     def __init__(self, db):
         self.db = db
-        #self.files_dir = "/var/www/api.lacasadelvitrificado.com/files"
-        #self.base_url = "https://api.lacasadelvitrificado.com/files"
-        self.files_dir = "C:/Users/jesus/OneDrive/Escritorio/backend-lacasadelvitrificado/files"
-        self.base_url = "http://127.0.0.1:8000/files"
+        
+        # Detectar sistema operativo y configurar rutas
+        if platform.system() == "Linux":
+            # Configuración para Ubuntu/Linux
+            self.files_dir = "/var/www/api.lacasadelvitrificado.com/files"
+            self.base_url = "https://api.lacasadelvitrificado.com/files"
+        else:
+            # Configuración para Windows (desarrollo local)
+            self.files_dir = "C:/Users/jesus/OneDrive/Escritorio/backend-lacasadelvitrificado/files"
+            self.base_url = "http://127.0.0.1:8000/files"
 
     def upload(self, file: UploadFile, remote_path: str) -> str:
         try:
