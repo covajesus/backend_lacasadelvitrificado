@@ -332,37 +332,37 @@ class SendCustomsCompanyInput(BaseModel):
     customs_company_email: str
 
 class StoreCustomsCompanyDocuments(BaseModel):
-    maritime_freight: str
-    merchandise_insurance: str
-    manifest_opening: str
-    deconsolidation: str
-    land_freight: str
-    port_charges: str
-    honoraries: str
-    physical_assessment_expenses: str
-    administrative_expenses: str
-    dollar_value: str
-    folder_processing: str
-    valija_expenses: str
-    tax_explosive_product: str
-    commission: str
+    maritime_freight: Optional[str] = None
+    merchandise_insurance: Optional[str] = None
+    manifest_opening: Optional[str] = None
+    deconsolidation: Optional[str] = None
+    land_freight: Optional[str] = None
+    port_charges: Optional[str] = None
+    honoraries: Optional[str] = None
+    physical_assessment_expenses: Optional[str] = None
+    administrative_expenses: Optional[str] = None
+    dollar_value: Optional[str] = None
+    folder_processing: Optional[str] = None
+    valija_expenses: Optional[str] = None
+    tax_explosive_product: Optional[str] = None
+    commission: Optional[str] = None
 
     @classmethod
     def as_form(cls,
-                    maritime_freight: str = Form(...),
-                    merchandise_insurance: str = Form(...),
-                    manifest_opening: str = Form(...),
-                    deconsolidation: str = Form(...),
-                    land_freight: str = Form(...),
-                    port_charges: str = Form(...),
-                    honoraries: str = Form(...),
-                    physical_assessment_expenses: str = Form(...),
-                    administrative_expenses: str = Form(...),
-                    dollar_value: str = Form(...),
-                    folder_processing: str = Form(...),
-                    valija_expenses: str = Form(...),
-                    tax_explosive_product: str = Form(...),
-                    commission: str = Form(...)
+                    maritime_freight: str = Form(None),
+                    merchandise_insurance: str = Form(None),
+                    manifest_opening: str = Form(None),
+                    deconsolidation: str = Form(None),
+                    land_freight: str = Form(None),
+                    port_charges: str = Form(None),
+                    honoraries: str = Form(None),
+                    physical_assessment_expenses: str = Form(None),
+                    administrative_expenses: str = Form(None),
+                    dollar_value: str = Form(None),
+                    folder_processing: str = Form(None),
+                    valija_expenses: str = Form(None),
+                    tax_explosive_product: str = Form(None),
+                    commission: str = Form(None)
                 ):
         return cls(
             maritime_freight=maritime_freight,
