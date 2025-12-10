@@ -57,6 +57,7 @@ class ShoppingModel(Base):
     commission = Column(Float)
     exchange_rate = Column(Integer)
     extra_expenses = Column(Integer)
+    euro_value = Column(Integer)
     payment_support = Column(String(255))
     customs_company_support = Column(String(255))
     added_date = Column(DateTime())

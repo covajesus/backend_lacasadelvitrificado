@@ -389,11 +389,11 @@ class PreInventoryStocks(BaseModel):
     items: List[PreInventoryItems]
 
 class StorePaymentDocuments(BaseModel):
-    euro_value: Optional[str] = None
+    euro_value: Optional[int] = None
 
     @classmethod
     def as_form(cls,
-                    euro_value: Optional[str] = Form(None)
+                    euro_value: Optional[int] = Form(None)
                 ):
         return cls(
             euro_value=euro_value
