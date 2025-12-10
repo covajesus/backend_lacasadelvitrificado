@@ -557,23 +557,9 @@ class InventoryClass:
             self.db.commit()
             self.db.refresh(new_lot)
             
-            # Calcular unit_cost automáticamente si viene de un shopping
-            calculated_unit_cost = inventory_inputs.unit_cost
+            # Actualizar el status_id del shopping a 7 si viene de un shopping
             if hasattr(inventory_inputs, 'shopping_id') and inventory_inputs.shopping_id:
-                # Importar ShoppingClass aquí para evitar importación circular
-                from app.backend.classes.shopping_class import ShoppingClass
                 from app.backend.db.models import ShoppingModel
-                shopping_class = ShoppingClass(self.db)
-                
-                # Calcular el unit_cost automáticamente
-                calculated_unit_cost = shopping_class.calculate_unit_cost_for_product(
-                    inventory_inputs.shopping_id,
-                    inventory_inputs.product_id,
-                    inventory_inputs.stock
-                )
-                print(f"Unit cost calculado automáticamente: ${calculated_unit_cost:.2f}")
-                
-                # Actualizar el status_id del shopping a 7
                 shopping = self.db.query(ShoppingModel).filter(ShoppingModel.id == inventory_inputs.shopping_id).first()
                 if shopping:
                     shopping.status_id = 7
@@ -586,7 +572,7 @@ class InventoryClass:
                 lot_id=new_lot.id,
                 product_id=inventory_inputs.product_id,
                 quantity=inventory_inputs.stock,
-                unit_cost=int(calculated_unit_cost),  # Usar el unit_cost calculado también para LotItem
+                unit_cost=inventory_inputs.unit_cost,
                 public_sale_price=inventory_inputs.public_sale_price,
                 private_sale_price=inventory_inputs.private_sale_price,
                 added_date=datetime.now(),
@@ -602,7 +588,7 @@ class InventoryClass:
             self.update_kardex_values(
                 product_id=inventory_inputs.product_id,
                 new_quantity=inventory_inputs.stock,
-                new_unit_cost=calculated_unit_cost
+                new_unit_cost=inventory_inputs.unit_cost
             )
 
             # Crear lote asociado
@@ -626,7 +612,7 @@ class InventoryClass:
                 .first()
             )
             
-            movement_unit_cost = kardex_record.average_cost if kardex_record else int(calculated_unit_cost)
+            movement_unit_cost = kardex_record.average_cost if kardex_record else inventory_inputs.unit_cost
             print(f"[+] Unit cost para movimiento: {movement_unit_cost} (del kardex: {kardex_record.average_cost if kardex_record else 'N/A'})")
 
             # Crear lote asociado
