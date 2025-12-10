@@ -71,13 +71,13 @@ class TemplateClass:
                 continue
 
             # Calcular totales por unidad de medida usando los mismos datos que el template
-            # Usar item.quantity_per_package del request
+            # Usar item.quantity_to_buy del request
             if item.unit_measure_id == 1:  # Kilogramos
-                total_kg += float(item.quantity_per_package)
+                total_kg += float(item.quantity_to_buy)
             elif item.unit_measure_id == 2:  # Litros
-                total_lts += float(item.quantity_per_package)
+                total_lts += float(item.quantity_to_buy)
             elif item.unit_measure_id == 3:  # Unidades
-                total_und += float(item.quantity_per_package)
+                total_und += float(item.quantity_to_buy)
 
             # Calcular peso total para envío usando los datos del request
             if unit_feature:
@@ -94,9 +94,9 @@ class TemplateClass:
                 })
 
             # Calcular total sin descuento usando los mismos datos que el template
-            # Usar item.final_unit_cost e item.quantity_per_package del request
-            if item.final_unit_cost and item.quantity_per_package:
-                product_amount = float(item.quantity_per_package) * float(item.final_unit_cost)
+            # Usar item.final_unit_cost e item.quantity_to_buy del request
+            if item.final_unit_cost and item.quantity_to_buy:
+                product_amount = float(item.quantity_to_buy) * float(item.final_unit_cost)
                 total_without_discount += product_amount
 
         # Calcular pallets usando el algoritmo correcto
@@ -338,10 +338,10 @@ class TemplateClass:
             <tr>
                 <td>{product_data.code}</td>
                 <td>{self.truncate_text(product_data.product)}</td>
-                <td>{self.format_number(item.quantity_per_package)} {unit}</td>
+                <td>{self.format_number(item.quantity_to_buy)} {unit}</td>
                 <td>{self.format_number(item.quantity)}</td>
                 <td>€. {self.format_currency(item.final_unit_cost)}</td>
-                <td>€. {self.format_currency(float(item.quantity_per_package) * float(item.final_unit_cost))}</td>
+                <td>€. {self.format_currency(float(item.quantity_to_buy) * float(item.final_unit_cost))}</td>
             </tr>
             """
             row_count += 1
@@ -562,10 +562,10 @@ class TemplateClass:
             <tr>
                 <td>{product_data.code}</td>
                 <td>{self.truncate_text(product_data.product)}</td>
-                <td>{self.format_number(item.quantity_per_package)} {unit}</td>
+                <td>{self.format_number(item.quantity_to_buy)} {unit}</td>
                 <td>{self.format_number(item.quantity)}</td>
                 <td>€. {self.format_currency(item.final_unit_cost)}</td>
-                <td>€. {self.format_currency(item.quantity_per_package * item.final_unit_cost)}</td>
+                <td>€. {self.format_currency(item.quantity_to_buy * item.final_unit_cost)}</td>
             </tr>
             """
             row_count += 1
@@ -782,7 +782,7 @@ class TemplateClass:
             <tr>
                 <td>{product_data.code}</td>
                 <td>{self.truncate_text(product_data.product)}</td>
-                <td>{self.format_number(item.quantity_per_package)} {unit}</td>
+                <td>{self.format_number(item.quantity_to_buy)} {unit}</td>
                 <td>{self.format_number(item.quantity)}</td>
             </tr>
             """
