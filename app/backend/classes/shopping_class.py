@@ -512,12 +512,12 @@ class ShoppingClass:
             
             print("Customs company documents:", form_data)
 
-            # Convertir valores a float para cálculos
-            dollar_value = float(form_data.dollar_value)
-            merchandise_insurance = float(form_data.merchandise_insurance)
-            
-            # Multiplicar seguro internacional por valor del dólar
-            merchandise_insurance_in_pesos = merchandise_insurance * dollar_value
+            # Calcular merchandise_insurance en pesos solo si ambos valores existen
+            merchandise_insurance_in_pesos = None
+            if form_data.merchandise_insurance and form_data.dollar_value:
+                dollar_value = float(form_data.dollar_value)
+                merchandise_insurance = float(form_data.merchandise_insurance)
+                merchandise_insurance_in_pesos = merchandise_insurance * dollar_value
 
             shopping.maritime_freight = form_data.maritime_freight
             shopping.status_id = 4
