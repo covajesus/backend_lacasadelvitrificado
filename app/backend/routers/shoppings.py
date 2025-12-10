@@ -63,21 +63,10 @@ def get_products(id: int, shopping_inputs: ShoppingList, session_user: UserLogin
 def store(
     id: int,
     form_data: StorePaymentDocuments = Depends(StorePaymentDocuments.as_form),
-    payment_support: UploadFile = File(None),
     db: Session = Depends(get_db)
 ):
     try:
-        timestamp = datetime.now().strftime("%Y_%m_%d_%H_%M_%S")
-        unique_id = uuid.uuid4().hex[:8]  # 8 caracteres únicos
-        file_extension = payment_support.filename.split('.')[-1] if '.' in payment_support.filename else ''
-        file_category_name = 'payment_support'
-        unique_filename = f"{timestamp}_{unique_id}.{file_extension}" if file_extension else f"{timestamp}_{unique_id}"
-
-        support_remote_path = f"{file_category_name}_{unique_filename}"
-
-        FileClass(db).upload(payment_support, support_remote_path)
-
-        response = ShoppingClass(db).store_payment_documents(id, form_data, support_remote_path)
+        response = ShoppingClass(db).store_payment_documents(id, form_data)
 
         return {"message": response}
 

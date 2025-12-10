@@ -483,7 +483,7 @@ class ShoppingClass:
         except Exception as e:
             return {"error": str(e)}
 
-    def store_payment_documents(self, id, form_data, support_remote_path):
+    def store_payment_documents(self, id, form_data):
         try:
             shopping = self.db.query(ShoppingModel).filter(ShoppingModel.id == id).first()
             if not shopping:
@@ -491,13 +491,8 @@ class ShoppingClass:
 
             print("Payment documents:", form_data)
 
-            shopping.wire_transfer_amount = form_data.wire_transfer_amount
+            shopping.euro_value = form_data.euro_value
             shopping.status_id = 5
-            shopping.wire_transfer_date = form_data.wire_transfer_date
-            shopping.commission = form_data.commission
-            shopping.exchange_rate = form_data.exchange_rate
-            shopping.extra_expenses = form_data.extra_expenses
-            shopping.payment_support = support_remote_path
 
             self.db.commit()
             return {"message": "Payment documents stored successfully"}

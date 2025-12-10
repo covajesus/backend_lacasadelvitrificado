@@ -389,26 +389,14 @@ class PreInventoryStocks(BaseModel):
     items: List[PreInventoryItems]
 
 class StorePaymentDocuments(BaseModel):
-    wire_transfer_amount: str
-    wire_transfer_date: str
-    commission: str
-    exchange_rate: str
-    extra_expenses: Optional[str] = None
+    euro_value: Optional[str] = None
 
     @classmethod
     def as_form(cls,
-                    wire_transfer_amount: str = Form(...),
-                    wire_transfer_date: str = Form(...),
-                    commission: str = Form(...),
-                    exchange_rate: str = Form(...),
-                    extra_expenses: Optional[str] = Form(None)
+                    euro_value: Optional[str] = Form(None)
                 ):
         return cls(
-            wire_transfer_amount=wire_transfer_amount,
-            wire_transfer_date=wire_transfer_date,
-            commission=commission,
-            exchange_rate=exchange_rate,
-            extra_expenses=extra_expenses
+            euro_value=euro_value
         )
     
 class ShoppingCreateInput(BaseModel):
