@@ -531,8 +531,11 @@ class ShoppingClass:
             # Calcular merchandise_insurance en pesos solo si ambos valores existen
             merchandise_insurance_in_pesos = None
             if form_data.merchandise_insurance and form_data.dollar_value:
-                dollar_value = float(form_data.dollar_value)
-                merchandise_insurance = float(form_data.merchandise_insurance)
+                # Reemplazar coma por punto para manejar formato decimal europeo/latinoamericano
+                dollar_value_str = str(form_data.dollar_value).replace(',', '.')
+                merchandise_insurance_str = str(form_data.merchandise_insurance).replace(',', '.')
+                dollar_value = float(dollar_value_str)
+                merchandise_insurance = float(merchandise_insurance_str)
                 merchandise_insurance_in_pesos = merchandise_insurance * dollar_value
 
             shopping.maritime_freight = form_data.maritime_freight
