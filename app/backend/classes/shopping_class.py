@@ -480,6 +480,7 @@ class ShoppingClass:
                 "manifest_opening": data_query.manifest_opening,
                 "deconsolidation": data_query.deconsolidation,
                 "land_freight": data_query.land_freight,
+                "provision_funds": data_query.provision_funds,
                 "port_charges": data_query.port_charges,
                 "tax_explosive_product": data_query.tax_explosive_product,
                 "honoraries": data_query.honoraries,
@@ -487,7 +488,6 @@ class ShoppingClass:
                 "administrative_expenses": data_query.administrative_expenses,
                 "folder_processing": data_query.folder_processing,
                 "valija_expenses": data_query.valija_expenses,
-                "dollar_value": data_query.dollar_value,
                 "wire_transfer_amount": data_query.wire_transfer_amount,
                 "wire_transfer_date": data_query.wire_transfer_date.strftime("%Y-%m-%d") if data_query.wire_transfer_date else None,
                 "commission": data_query.commission,
@@ -496,6 +496,19 @@ class ShoppingClass:
                 "euro_value": data_query.euro_value,
                 "payment_support": data_query.payment_support,
                 "customs_company_support": data_query.customs_company_support,
+                "maritime_freight_dollar": data_query.maritime_freight_dollar,
+                "merchandise_insurance_dollar": data_query.merchandise_insurance_dollar,
+                "manifest_opening_dollar": data_query.manifest_opening_dollar,
+                "deconsolidation_dollar": data_query.deconsolidation_dollar,
+                "land_freight_dollar": data_query.land_freight_dollar,
+                "provision_funds_dollar": data_query.provision_funds_dollar,
+                "port_charges_dollar": data_query.port_charges_dollar,
+                "honoraries_dollar": data_query.honoraries_dollar,
+                "physical_assessment_expenses_dollar": data_query.physical_assessment_expenses_dollar,
+                "administrative_expenses_dollar": data_query.administrative_expenses_dollar,
+                "folder_processing_dollar": data_query.folder_processing_dollar,
+                "valija_expenses_dollar": data_query.valija_expenses_dollar,
+                "tax_explosive_product_dollar": data_query.tax_explosive_product_dollar,
                 "updated_date": data_query.updated_date.strftime("%d-%m-%Y %H:%M:%S") if data_query.updated_date else None
             }
 
@@ -543,26 +556,39 @@ class ShoppingClass:
             
             print("Customs company documents:", form_data)
 
-            # Parsear valores numéricos
-            dollar_value = self._parse_number(form_data.dollar_value)
-
-            # Calcular merchandise_insurance en pesos solo si ambos valores existen
-
+            # Parsear valores numéricos USD
             shopping.maritime_freight = self._parse_number(form_data.maritime_freight)
-            shopping.status_id = 4
             shopping.merchandise_insurance = self._parse_number(form_data.merchandise_insurance)
             shopping.manifest_opening = self._parse_number(form_data.manifest_opening)
             shopping.deconsolidation = self._parse_number(form_data.deconsolidation)
             shopping.land_freight = self._parse_number(form_data.land_freight)
+            shopping.provision_funds = self._parse_number(form_data.provision_funds)
             shopping.port_charges = self._parse_number(form_data.port_charges)
             shopping.honoraries = self._parse_number(form_data.honoraries)
             shopping.physical_assessment_expenses = self._parse_number(form_data.physical_assessment_expenses)
             shopping.administrative_expenses = self._parse_number(form_data.administrative_expenses)
-            shopping.dollar_value = dollar_value
             shopping.folder_processing = self._parse_number(form_data.folder_processing)
             shopping.valija_expenses = self._parse_number(form_data.valija_expenses)
             shopping.tax_explosive_product = self._parse_number(form_data.tax_explosive_product)
             shopping.commission = self._parse_number(form_data.commission)
+
+            # Parsear valores de dólar específicos
+            shopping.maritime_freight_dollar = self._parse_number(form_data.maritime_freight_dollar)
+            shopping.merchandise_insurance_dollar = self._parse_number(form_data.merchandise_insurance_dollar)
+            shopping.manifest_opening_dollar = self._parse_number(form_data.manifest_opening_dollar)
+            shopping.deconsolidation_dollar = self._parse_number(form_data.deconsolidation_dollar)
+            shopping.land_freight_dollar = self._parse_number(form_data.land_freight_dollar)
+            shopping.provision_funds_dollar = self._parse_number(form_data.provision_funds_dollar)
+            shopping.port_charges_dollar = self._parse_number(form_data.port_charges_dollar)
+            shopping.honoraries_dollar = self._parse_number(form_data.honoraries_dollar)
+            shopping.physical_assessment_expenses_dollar = self._parse_number(form_data.physical_assessment_expenses_dollar)
+            shopping.administrative_expenses_dollar = self._parse_number(form_data.administrative_expenses_dollar)
+            shopping.folder_processing_dollar = self._parse_number(form_data.folder_processing_dollar)
+            shopping.valija_expenses_dollar = self._parse_number(form_data.valija_expenses_dollar)
+            shopping.tax_explosive_product_dollar = self._parse_number(form_data.tax_explosive_product_dollar)
+
+            # Actualizar status
+            shopping.status_id = 4
 
             self.db.commit()
             return {"message": "Customs company documents stored successfully"}

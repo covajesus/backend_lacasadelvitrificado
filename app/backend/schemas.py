@@ -333,51 +333,90 @@ class SendCustomsCompanyInput(BaseModel):
 
 class StoreCustomsCompanyDocuments(BaseModel):
     maritime_freight: Optional[str] = None
+    maritime_freight_dollar: Optional[str] = None
     merchandise_insurance: Optional[str] = None
+    merchandise_insurance_dollar: Optional[str] = None
     manifest_opening: Optional[str] = None
+    manifest_opening_dollar: Optional[str] = None
     deconsolidation: Optional[str] = None
+    deconsolidation_dollar: Optional[str] = None
     land_freight: Optional[str] = None
+    land_freight_dollar: Optional[str] = None
+    provision_funds: Optional[str] = None
+    provision_funds_dollar: Optional[str] = None
     port_charges: Optional[str] = None
+    port_charges_dollar: Optional[str] = None
     honoraries: Optional[str] = None
+    honoraries_dollar: Optional[str] = None
     physical_assessment_expenses: Optional[str] = None
+    physical_assessment_expenses_dollar: Optional[str] = None
     administrative_expenses: Optional[str] = None
-    dollar_value: Optional[str] = None
+    administrative_expenses_dollar: Optional[str] = None
     folder_processing: Optional[str] = None
+    folder_processing_dollar: Optional[str] = None
     valija_expenses: Optional[str] = None
+    valija_expenses_dollar: Optional[str] = None
     tax_explosive_product: Optional[str] = None
+    tax_explosive_product_dollar: Optional[str] = None
     commission: Optional[str] = None
 
     @classmethod
     def as_form(cls,
                     maritime_freight: str = Form(None),
+                    maritime_freight_dollar: str = Form(None),
                     merchandise_insurance: str = Form(None),
+                    merchandise_insurance_dollar: str = Form(None),
                     manifest_opening: str = Form(None),
+                    manifest_opening_dollar: str = Form(None),
                     deconsolidation: str = Form(None),
+                    deconsolidation_dollar: str = Form(None),
                     land_freight: str = Form(None),
+                    land_freight_dollar: str = Form(None),
+                    provision_funds: str = Form(None),
+                    provision_funds_dollar: str = Form(None),
                     port_charges: str = Form(None),
+                    port_charges_dollar: str = Form(None),
                     honoraries: str = Form(None),
+                    honoraries_dollar: str = Form(None),
                     physical_assessment_expenses: str = Form(None),
+                    physical_assessment_expenses_dollar: str = Form(None),
                     administrative_expenses: str = Form(None),
-                    dollar_value: str = Form(None),
+                    administrative_expenses_dollar: str = Form(None),
                     folder_processing: str = Form(None),
+                    folder_processing_dollar: str = Form(None),
                     valija_expenses: str = Form(None),
+                    valija_expenses_dollar: str = Form(None),
                     tax_explosive_product: str = Form(None),
+                    tax_explosive_product_dollar: str = Form(None),
                     commission: str = Form(None)
                 ):
         return cls(
             maritime_freight=maritime_freight,
+            maritime_freight_dollar=maritime_freight_dollar,
             merchandise_insurance=merchandise_insurance,
+            merchandise_insurance_dollar=merchandise_insurance_dollar,
             manifest_opening=manifest_opening,
+            manifest_opening_dollar=manifest_opening_dollar,
             deconsolidation=deconsolidation,
+            deconsolidation_dollar=deconsolidation_dollar,
             land_freight=land_freight,
+            land_freight_dollar=land_freight_dollar,
+            provision_funds=provision_funds,
+            provision_funds_dollar=provision_funds_dollar,
             port_charges=port_charges,
+            port_charges_dollar=port_charges_dollar,
             honoraries=honoraries,
+            honoraries_dollar=honoraries_dollar,
             physical_assessment_expenses=physical_assessment_expenses,
+            physical_assessment_expenses_dollar=physical_assessment_expenses_dollar,
             administrative_expenses=administrative_expenses,
-            dollar_value=dollar_value,
+            administrative_expenses_dollar=administrative_expenses_dollar,
             folder_processing=folder_processing,
+            folder_processing_dollar=folder_processing_dollar,
             valija_expenses=valija_expenses,
+            valija_expenses_dollar=valija_expenses_dollar,
             tax_explosive_product=tax_explosive_product,
+            tax_explosive_product_dollar=tax_explosive_product_dollar,
             commission=commission
         )
 

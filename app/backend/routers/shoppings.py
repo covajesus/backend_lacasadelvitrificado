@@ -5,12 +5,9 @@ from app.backend.schemas import UserLogin, PreInventoryStocks, ShoppingCreateInp
 from app.backend.db.models import ShoppingModel, SettingModel
 from app.backend.classes.shopping_class import ShoppingClass
 from app.backend.classes.template_class import TemplateClass
-from app.backend.classes.file_class import FileClass
 from app.backend.classes.email_class import EmailClass
 from app.backend.auth.auth_user import get_current_active_user
-from fastapi import File, UploadFile, HTTPException
-from datetime import datetime
-import uuid
+from fastapi import HTTPException
 
 shoppings = APIRouter(
     prefix="/shoppings",
