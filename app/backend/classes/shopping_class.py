@@ -520,6 +520,21 @@ class ShoppingClass:
         except Exception as e:
             return {"error": str(e)}
          
+    def _parse_number(self, value):
+        """
+        Convierte un valor con formato europeo/latinoamericano a float.
+        - Quita puntos de miles (20.000 -> 20000)
+        - Reemplaza coma decimal por punto (930,89 -> 930.89)
+        """
+        if value is None or value == '':
+            return None
+        value_str = str(value)
+        # Quitar puntos de miles
+        value_str = value_str.replace('.', '')
+        # Reemplazar coma decimal por punto
+        value_str = value_str.replace(',', '.')
+        return float(value_str) if value_str else None
+
     def store_customs_company_documents(self, id, form_data):
         try:
             shopping = self.db.query(ShoppingModel).filter(ShoppingModel.id == id).first()
@@ -528,31 +543,30 @@ class ShoppingClass:
             
             print("Customs company documents:", form_data)
 
+            # Parsear valores numéricos
+            dollar_value = self._parse_number(form_data.dollar_value)
+            merchandise_insurance = self._parse_number(form_data.merchandise_insurance)
+
             # Calcular merchandise_insurance en pesos solo si ambos valores existen
             merchandise_insurance_in_pesos = None
-            if form_data.merchandise_insurance and form_data.dollar_value:
-                # Reemplazar coma por punto para manejar formato decimal europeo/latinoamericano
-                dollar_value_str = str(form_data.dollar_value).replace(',', '.')
-                merchandise_insurance_str = str(form_data.merchandise_insurance).replace(',', '.')
-                dollar_value = float(dollar_value_str)
-                merchandise_insurance = float(merchandise_insurance_str)
+            if merchandise_insurance and dollar_value:
                 merchandise_insurance_in_pesos = merchandise_insurance * dollar_value
 
-            shopping.maritime_freight = form_data.maritime_freight
+            shopping.maritime_freight = self._parse_number(form_data.maritime_freight)
             shopping.status_id = 4
             shopping.merchandise_insurance = merchandise_insurance_in_pesos
-            shopping.manifest_opening = form_data.manifest_opening
-            shopping.deconsolidation = form_data.deconsolidation
-            shopping.land_freight = form_data.land_freight
-            shopping.port_charges = form_data.port_charges
-            shopping.honoraries = form_data.honoraries
-            shopping.physical_assessment_expenses = form_data.physical_assessment_expenses
-            shopping.administrative_expenses = form_data.administrative_expenses
-            shopping.dollar_value = form_data.dollar_value
-            shopping.folder_processing = form_data.folder_processing
-            shopping.valija_expenses = form_data.valija_expenses
-            shopping.tax_explosive_product = form_data.tax_explosive_product
-            shopping.commission = form_data.commission
+            shopping.manifest_opening = self._parse_number(form_data.manifest_opening)
+            shopping.deconsolidation = self._parse_number(form_data.deconsolidation)
+            shopping.land_freight = self._parse_number(form_data.land_freight)
+            shopping.port_charges = self._parse_number(form_data.port_charges)
+            shopping.honoraries = self._parse_number(form_data.honoraries)
+            shopping.physical_assessment_expenses = self._parse_number(form_data.physical_assessment_expenses)
+            shopping.administrative_expenses = self._parse_number(form_data.administrative_expenses)
+            shopping.dollar_value = dollar_value
+            shopping.folder_processing = self._parse_number(form_data.folder_processing)
+            shopping.valija_expenses = self._parse_number(form_data.valija_expenses)
+            shopping.tax_explosive_product = self._parse_number(form_data.tax_explosive_product)
+            shopping.commission = self._parse_number(form_data.commission)
 
             self.db.commit()
             return {"message": "Customs company documents stored successfully"}
