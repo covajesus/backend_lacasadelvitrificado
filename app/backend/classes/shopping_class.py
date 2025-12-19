@@ -1,5 +1,5 @@
 from fastapi import HTTPException
-from app.backend.db.models import ShoppingModel, ShoppingProductModel, SupplierModel, LotModel, ProductModel, UnitMeasureModel, CategoryModel, PreInventoryStockModel, UnitFeatureModel, InventoryModel, LotItemModel
+from app.backend.db.models import ShoppingModel, ShoppingProductModel, SupplierModel, LotModel, ProductModel, UnitMeasureModel, CategoryModel, PreInventoryStockModel, UnitFeatureModel, InventoryModel, LotItemModel, SettingModel
 from app.backend.schemas import ShoppingCreateInput
 from app.backend.classes.product_class import ProductClass
 from datetime import datetime
@@ -279,6 +279,18 @@ class ShoppingClass:
     
     def get_pre_inventory_products(self, id, page=0, items_per_page=10000):
         try:
+            # Obtener el shopping para verificar si tiene prepago
+            shopping = self.db.query(ShoppingModel).filter(ShoppingModel.id == id).first()
+            if not shopping:
+                return {"status": "error", "message": "Shopping not found"}
+            
+            # Verificar si tiene prepago (prepaid_status_id == 1)
+            has_prepaid = shopping.prepaid_status_id == 1 if shopping.prepaid_status_id else False
+            
+            # Obtener porcentaje de descuento desde settings
+            settings = self.db.query(SettingModel).first()
+            prepaid_discount_percentage = float(settings.prepaid_discount) if settings and settings.prepaid_discount and has_prepaid else 0.0
+            
             query = (
                 self.db.query(
                     ShoppingProductModel.product_id,
@@ -317,22 +329,31 @@ class ShoppingClass:
                 if not data:
                     return {"status": "error", "message": "No data found"}
 
-                serialized_data = [{
-                    "product_id": shopping_product.product_id,
-                    "quantity": shopping_product.quantity,
-                    "unit_measure_id": shopping_product.unit_measure_id,
-                    "unit_measure": shopping_product.unit_measure,
-                    "product": shopping_product.product,
-                    "code": shopping_product.code,
-                    "original_unit_cost": shopping_product.original_unit_cost,
-                    "final_unit_cost": shopping_product.final_unit_cost,
-                    "quantity_to_buy": shopping_product.quantity_to_buy,
-                    "category": shopping_product.category,
-                    "discount_percentage": shopping_product.discount_percentage,
-                    "total_amount": shopping_product.total_amount,
-                    "stock": shopping_product.stock,
-                    "lot_number": shopping_product.lot_number
-                } for shopping_product in data]
+                serialized_data = []
+                for shopping_product in data:
+                    # Calcular final_unit_cost considerando descuento de prepago
+                    final_unit_cost = shopping_product.final_unit_cost or 0
+                    if has_prepaid and prepaid_discount_percentage > 0:
+                        final_unit_cost = final_unit_cost * (1 - prepaid_discount_percentage / 100)
+                    # Redondear a 2 decimales
+                    final_unit_cost = round(final_unit_cost, 2)
+                    
+                    serialized_data.append({
+                        "product_id": shopping_product.product_id,
+                        "quantity": shopping_product.quantity,
+                        "unit_measure_id": shopping_product.unit_measure_id,
+                        "unit_measure": shopping_product.unit_measure,
+                        "product": shopping_product.product,
+                        "code": shopping_product.code,
+                        "original_unit_cost": shopping_product.original_unit_cost,
+                        "final_unit_cost": final_unit_cost,
+                        "quantity_to_buy": shopping_product.quantity_to_buy,
+                        "category": shopping_product.category,
+                        "discount_percentage": shopping_product.discount_percentage,
+                        "total_amount": shopping_product.total_amount,
+                        "stock": shopping_product.stock,
+                        "lot_number": shopping_product.lot_number
+                    })
 
                 return {
                     "total_items": total_items,
@@ -345,22 +366,31 @@ class ShoppingClass:
             else:
                 data = query.all()
 
-                serialized_data = [{
-                    "product_id": shopping_product.product_id,
-                    "quantity": shopping_product.quantity,
-                    "unit_measure_id": shopping_product.unit_measure_id,
-                    "unit_measure": shopping_product.unit_measure,
-                    "product": shopping_product.product,
-                    "code": shopping_product.code,
-                    "original_unit_cost": shopping_product.original_unit_cost,
-                    "quantity_to_buy": shopping_product.quantity_to_buy,
-                    "category": shopping_product.category,
-                    "discount_percentage": shopping_product.discount_percentage,
-                    "total_amount": shopping_product.total_amount,
-                    "final_unit_cost": shopping_product.final_unit_cost,
-                    "stock": shopping_product.stock,
-                    "lot_number": shopping_product.lot_number
-                } for shopping_product in data]
+                serialized_data = []
+                for shopping_product in data:
+                    # Calcular final_unit_cost considerando descuento de prepago
+                    final_unit_cost = shopping_product.final_unit_cost or 0
+                    if has_prepaid and prepaid_discount_percentage > 0:
+                        final_unit_cost = final_unit_cost * (1 - prepaid_discount_percentage / 100)
+                    # Redondear a 2 decimales
+                    final_unit_cost = round(final_unit_cost, 2)
+                    
+                    serialized_data.append({
+                        "product_id": shopping_product.product_id,
+                        "quantity": shopping_product.quantity,
+                        "unit_measure_id": shopping_product.unit_measure_id,
+                        "unit_measure": shopping_product.unit_measure,
+                        "product": shopping_product.product,
+                        "code": shopping_product.code,
+                        "original_unit_cost": shopping_product.original_unit_cost,
+                        "quantity_to_buy": shopping_product.quantity_to_buy,
+                        "category": shopping_product.category,
+                        "discount_percentage": shopping_product.discount_percentage,
+                        "total_amount": shopping_product.total_amount,
+                        "final_unit_cost": final_unit_cost,
+                        "stock": shopping_product.stock,
+                        "lot_number": shopping_product.lot_number
+                    })
 
                 return serialized_data
 
@@ -536,17 +566,41 @@ class ShoppingClass:
     def _parse_number(self, value):
         """
         Convierte un valor con formato europeo/latinoamericano a float.
-        - Quita puntos de miles (20.000 -> 20000)
-        - Reemplaza coma decimal por punto (930,89 -> 930.89)
+        Maneja diferentes formatos:
+        - Formato europeo: 930,89 -> 930.89
+        - Formato con miles: 1.234,56 -> 1234.56
+        - Formato inglés: 930.89 -> 930.89
         """
         if value is None or value == '':
             return None
-        value_str = str(value)
-        # Quitar puntos de miles
-        value_str = value_str.replace('.', '')
-        # Reemplazar coma decimal por punto
-        value_str = value_str.replace(',', '.')
-        return float(value_str) if value_str else None
+        
+        value_str = str(value).strip()
+        
+        # Si está vacío después de quitar espacios
+        if not value_str:
+            return None
+        
+        # Detectar el último separador para saber cuál es el decimal
+        last_comma_pos = value_str.rfind(',')
+        last_dot_pos = value_str.rfind('.')
+        
+        if last_comma_pos > last_dot_pos:
+            # La coma es el separador decimal (formato europeo: 930,89 o 1.234,56)
+            # Quitar todos los puntos (separadores de miles) y reemplazar coma por punto
+            value_str = value_str.replace('.', '').replace(',', '.')
+        elif last_dot_pos > last_comma_pos:
+            # El punto es el separador decimal (formato inglés: 930.89 o 1,234.89)
+            # Quitar todas las comas (separadores de miles)
+            value_str = value_str.replace(',', '')
+        elif ',' in value_str:
+            # Solo tiene comas, asumir formato europeo
+            value_str = value_str.replace(',', '.')
+        # Si solo tiene puntos o no tiene separadores, usar tal cual
+        
+        try:
+            return float(value_str) if value_str else None
+        except ValueError:
+            return None
 
     def store_customs_company_documents(self, id, form_data):
         try:
