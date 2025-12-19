@@ -545,16 +545,12 @@ class ShoppingClass:
 
             # Parsear valores numéricos
             dollar_value = self._parse_number(form_data.dollar_value)
-            merchandise_insurance = self._parse_number(form_data.merchandise_insurance)
 
             # Calcular merchandise_insurance en pesos solo si ambos valores existen
-            merchandise_insurance_in_pesos = None
-            if merchandise_insurance and dollar_value:
-                merchandise_insurance_in_pesos = merchandise_insurance * dollar_value
 
             shopping.maritime_freight = self._parse_number(form_data.maritime_freight)
             shopping.status_id = 4
-            shopping.merchandise_insurance = merchandise_insurance_in_pesos
+            shopping.merchandise_insurance = self._parse_number(form_data.merchandise_insurance)
             shopping.manifest_opening = self._parse_number(form_data.manifest_opening)
             shopping.deconsolidation = self._parse_number(form_data.deconsolidation)
             shopping.land_freight = self._parse_number(form_data.land_freight)
