@@ -246,45 +246,6 @@ class BudgetClass:
             if budget.status_id == 1:
                 return {"status": "error", "message": "Budget already accepted"}
 
-            products = (
-                self.db.query(BudgetProductModel)
-                .filter(BudgetProductModel.budget_id == budget_id)
-                .all()
-            )
-
-            if not products:
-                return {"status": "error", "message": "Budget has no products to convert into sale"}
-
-            # Validar stock disponible para todos los productos antes de crear la venta
-            for product in products:
-                quantity = product.quantity if product.quantity else 0
-                if quantity <= 0:
-                    continue
-
-                product_id = product.product_id
-                
-                # Calcular stock total disponible para este producto
-                total_stock_query = (
-                    self.db.query(func.sum(LotItemModel.quantity).label("total_stock"))
-                    .join(LotModel, LotModel.id == LotItemModel.lot_id)
-                    .filter(LotItemModel.product_id == product_id)
-                    .filter(LotItemModel.quantity > 0)
-                )
-                
-                total_stock = total_stock_query.scalar() or 0
-                
-                # Verificar si hay suficiente stock
-                if total_stock < quantity:
-                    # Obtener nombre del producto para el mensaje de error
-                    product_info = (
-                        self.db.query(ProductModel.product)
-                        .filter(ProductModel.id == product_id)
-                        .first()
-                    )
-                    product_name = product_info.product if product_info else f"Producto {product_id}"
-                    return {"status": "error", "message": "Uno de los productos solicitados no tiene la cantidad"}
-            
-            # Si llegamos aquí, todos los productos tienen suficiente stock
             # Obtener el cliente para obtener su dirección
             customer = (
                 self.db.query(CustomerModel)
@@ -303,6 +264,7 @@ class BudgetClass:
                 shipping_method_id = 1
                 delivery_address = customer.address if customer.address else None
 
+            # Crear solo el SaleModel
             new_sale = SaleModel(
                 customer_id=budget.customer_id,
                 shipping_method_id=shipping_method_id,
@@ -321,124 +283,7 @@ class BudgetClass:
             self.db.add(new_sale)
             self.db.flush()
 
-            created_products = 0
-
-            for product in products:
-                quantity = product.quantity if product.quantity else 0
-                if quantity <= 0:
-                    continue
-
-                product_id = product.product_id
-                quantity_to_process = quantity
-                total_processed = 0
-
-                # Buscar lotes disponibles para este producto (FIFO)
-                available_lots = (
-                    self.db.query(LotItemModel, LotModel)
-                    .join(LotModel, LotModel.id == LotItemModel.lot_id)
-                    .filter(LotItemModel.product_id == product_id)
-                    .filter(LotItemModel.quantity > 0)
-                    .order_by(LotModel.arrival_date.asc())  # FIFO - First In, First Out
-                    .all()
-                )
-
-                if not available_lots:
-                    print(f"[!] No hay lotes disponibles para el producto {product_id}")
-                    continue
-
-                # Procesar lotes disponibles
-                for lot_item, lot in available_lots:
-                    if quantity_to_process <= 0:
-                        break
-
-                    # Calcular cantidad a procesar de este lote
-                    process_qty = min(quantity_to_process, lot_item.quantity)
-
-                    if process_qty <= 0:
-                        continue
-
-                    # Obtener inventario relacionado
-                    inventory = (
-                        self.db.query(InventoryModel)
-                        .filter(InventoryModel.product_id == product_id)
-                        .first()
-                    )
-
-                    if not inventory:
-                        print(f"[!] No se encontró inventario para el producto {product_id}")
-                        continue
-
-                    # Obtener unit_cost del kardex para el movimiento (si existe)
-                    kardex_record = (
-                        self.db.query(KardexValuesModel)
-                        .filter(KardexValuesModel.product_id == product_id)
-                        .first()
-                    )
-
-                    movement_unit_cost = kardex_record.average_cost if kardex_record else lot_item.unit_cost
-
-                    # Registrar movimiento de inventario (tipo 2 - Venta)
-                    inventory_movement = InventoryMovementModel(
-                        inventory_id=inventory.id,
-                        lot_item_id=lot_item.id,
-                        movement_type_id=2,  # Tipo de movimiento: Venta
-                        quantity=(process_qty * -1),  # Cantidad negativa para venta
-                        unit_cost=movement_unit_cost,  # Usa costo del kardex si existe
-                        reason="Venta desde presupuesto",
-                        added_date=datetime.now()
-                    )
-                    self.db.add(inventory_movement)
-                    self.db.flush()
-
-                    # Calcular precio unitario
-                    unit_price = product.total // quantity if quantity > 0 else product.total
-                    if quantity > 0 and product.total % quantity != 0:
-                        unit_price = int(round(product.total / quantity))
-
-                    # Crear registro de producto vendido (sales_products)
-                    sale_product = SaleProductModel(
-                        sale_id=new_sale.id,
-                        product_id=product_id,
-                        inventory_movement_id=inventory_movement.id,
-                        inventory_id=inventory.id,
-                        lot_item_id=lot_item.id,
-                        quantity=process_qty,  # Cantidad procesada de este lote
-                        price=unit_price
-                    )
-
-                    self.db.add(sale_product)
-                    self.db.flush()
-
-                    # Actualizar contadores
-                    quantity_to_process -= process_qty
-                    total_processed += process_qty
-
-                    if quantity_to_process <= 0:
-                        break
-
-                # Actualizar kardex con la cantidad total vendida de este producto
-                if total_processed > 0:
-                    # Obtener registro de kardex
-                    kardex_record = (
-                        self.db.query(KardexValuesModel)
-                        .filter(KardexValuesModel.product_id == product_id)
-                        .first()
-                    )
-
-                    if kardex_record:
-                        # Reducir cantidad en kardex
-                        new_quantity = max(0, kardex_record.quantity - total_processed)
-                        kardex_record.quantity = new_quantity
-                        # No actualizar average_cost, solo la cantidad
-                        kardex_record.updated_date = datetime.now()
-                        self.db.flush()
-
-                created_products += 1
-
-            if created_products == 0:
-                self.db.rollback()
-                return {"status": "error", "message": "No valid products to create sale"}
-
+            # Cambiar status del presupuesto
             budget.status_id = 1
             budget.updated_date = datetime.now()
 
