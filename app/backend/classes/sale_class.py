@@ -735,6 +735,7 @@ class SaleClass:
                     for sale_product in sale_products_unprocessed:
                         product_id = sale_product.product_id
                         quantity = sale_product.quantity
+                        product_price = sale_product.price  # Guardar precio antes de eliminar
                         
                         if quantity <= 0:
                             continue
@@ -755,6 +756,10 @@ class SaleClass:
                         if not available_lots:
                             print(f"[!] No hay lotes disponibles para el producto {product_id}")
                             continue
+
+                        # Eliminar el sale_product original ya que crearemos uno por cada lote
+                        self.db.delete(sale_product)
+                        self.db.flush()
 
                         # Procesar lotes disponibles
                         for lot_item, lot in available_lots:
@@ -800,11 +805,17 @@ class SaleClass:
                             self.db.add(inventory_movement)
                             self.db.flush()
 
-                            # Actualizar el sale_product con los IDs correctos
-                            sale_product.inventory_movement_id = inventory_movement.id
-                            sale_product.inventory_id = inventory.id
-                            sale_product.lot_item_id = lot_item.id
-                            sale_product.quantity = process_qty  # Actualizar cantidad procesada
+                            # Crear registro de producto vendido (uno por cada lote)
+                            new_sale_product = SaleProductModel(
+                                sale_id=existing_sale.id,
+                                product_id=product_id,
+                                inventory_movement_id=inventory_movement.id,
+                                inventory_id=inventory.id,
+                                lot_item_id=lot_item.id,
+                                quantity=process_qty,
+                                price=product_price
+                            )
+                            self.db.add(new_sale_product)
                             self.db.flush()
 
                             # Actualizar cantidad del lote (rebajar stock)

@@ -15,12 +15,28 @@ class DteClass:
 
     def generate_dte(self, id):
         sale = self.db.query(SaleModel).filter(SaleModel.id == id).first()
+        
+        if not sale:
+            print(f"[ERROR DTE] Venta {id} no encontrada")
+            return 0
 
         customer = self.db.query(CustomerModel).filter(CustomerModel.id == sale.customer_id).first()
+        
+        if not customer:
+            print(f"[ERROR DTE] Cliente no encontrado para la venta {id}")
+            return 0
 
         commune = self.db.query(CommuneModel).filter(CommuneModel.id == customer.commune_id).first()
-
         region = self.db.query(RegionModel).filter(RegionModel.id == customer.region_id).first()
+        
+        # Validar que commune y region existan (necesarios para facturas)
+        if not commune and sale.dte_type_id != 1:
+            print(f"[ERROR DTE] Comuna no encontrada para el cliente {customer.id}")
+            return 0
+        
+        if not region and sale.dte_type_id != 1:
+            print(f"[ERROR DTE] Región no encontrada para el cliente {customer.id}")
+            return 0
 
         validate_token = SettingClass(self.db).validate_token()
 
@@ -38,6 +54,19 @@ class DteClass:
         ).join(
             ProductModel, SaleProductModel.product_id == ProductModel.id
         ).filter(SaleProductModel.sale_id == id).all()
+
+        if not sales_products or len(sales_products) == 0:
+            print(f"[ERROR DTE] No se encontraron productos para la venta {id}")
+            print(f"[ERROR DTE] Verificando productos sin join...")
+            # Verificar si hay productos sin join para debug
+            products_check = self.db.query(SaleProductModel).filter(SaleProductModel.sale_id == id).all()
+            print(f"[ERROR DTE] Productos encontrados sin join: {len(products_check) if products_check else 0}")
+            if products_check:
+                for p in products_check:
+                    print(f"[ERROR DTE] - Producto ID: {p.product_id}, Quantity: {p.quantity}, Price: {p.price}, Inventory Movement ID: {p.inventory_movement_id}")
+            return 0
+        
+        print(f"[DEBUG DTE] Se encontraron {len(sales_products)} productos para la venta {id}")
 
         added_date_str = sale.added_date.strftime("%Y-%m-%d")
         due_date = (sale.added_date + timedelta(days=30)).strftime('%Y-%m-%d')
@@ -105,21 +134,34 @@ class DteClass:
             print(f"[DEBUG BOLETA] Response text: {response.text}")
 
             if response.status_code == 200:
-                # Obtener el folio de la respuesta
-                response_data = response.json()
-                # El folio está dentro del campo 'data'
-                data_section = response_data.get('data', {})
-                folio = data_section.get('folio', None)
-                print(f"[DEBUG BOLETA] Folio obtenido: {folio}")
-                
-                if folio:
-                    print(f"[DEBUG BOLETA] DTE generado exitosamente con folio: {folio}")
-                else:
-                    print("[DEBUG BOLETA] No se pudo obtener el folio de la respuesta")
-                
-                return folio  # Retornar el folio en lugar de 1
+                try:
+                    # Obtener el folio de la respuesta
+                    response_data = response.json()
+                    print(f"[DEBUG BOLETA] Response data completa: {response_data}")
+                    # El folio está dentro del campo 'data'
+                    data_section = response_data.get('data', {})
+                    folio = data_section.get('folio', None)
+                    print(f"[DEBUG BOLETA] Folio obtenido: {folio}")
+                    
+                    if folio:
+                        print(f"[DEBUG BOLETA] DTE generado exitosamente con folio: {folio}")
+                        return folio
+                    else:
+                        print("[DEBUG BOLETA] No se pudo obtener el folio de la respuesta")
+                        print(f"[DEBUG BOLETA] Estructura de data: {data_section}")
+                        return 0
+                except Exception as e:
+                    print(f"[ERROR BOLETA] Error parseando respuesta JSON: {str(e)}")
+                    print(f"[ERROR BOLETA] Response text: {response.text}")
+                    return 0
             else:
                 print(f"[DEBUG BOLETA] Error en la respuesta: {response.status_code}")
+                print(f"[DEBUG BOLETA] Response text: {response.text}")
+                try:
+                    error_data = response.json()
+                    print(f"[DEBUG BOLETA] Error data: {error_data}")
+                except:
+                    pass
                 return 0
         else:
             payload = {
@@ -140,11 +182,11 @@ class DteClass:
                         "Receptor": {
                             "RUTRecep": customer.identification_number,
                             "RznSocRecep": customer.social_reason,
-                            "CorreoRecep": customer.email,
-                            "DirRecep": customer.address,
-                            "GiroRecep": customer.activity,
-                            "CmnaRecep": commune.commune,
-                            "CiudadRecep": region.region
+                            "CorreoRecep": customer.email if customer.email else "",
+                            "DirRecep": customer.address if customer.address else "",
+                            "GiroRecep": customer.activity if customer.activity else "",
+                            "CmnaRecep": commune.commune if commune else "",
+                            "CiudadRecep": region.region if region else ""
                         },
                         "Totales": {
                             "MntNeto": round(subtotal),
@@ -171,21 +213,34 @@ class DteClass:
             print(f"[DEBUG FACTURA] Response text: {response.text}")
 
             if response.status_code == 200:
-                # Obtener el folio de la respuesta
-                response_data = response.json()
-                # El folio está dentro del campo 'data'
-                data_section = response_data.get('data', {})
-                folio = data_section.get('folio', None)
-                print(f"[DEBUG FACTURA] Folio obtenido: {folio}")
-                
-                if folio:
-                    print(f"[DEBUG FACTURA] DTE generado exitosamente con folio: {folio}")
-                else:
-                    print("[DEBUG FACTURA] No se pudo obtener el folio de la respuesta")
-                
-                return folio  # Retornar el folio en lugar de 1
+                try:
+                    # Obtener el folio de la respuesta
+                    response_data = response.json()
+                    print(f"[DEBUG FACTURA] Response data completa: {response_data}")
+                    # El folio está dentro del campo 'data'
+                    data_section = response_data.get('data', {})
+                    folio = data_section.get('folio', None)
+                    print(f"[DEBUG FACTURA] Folio obtenido: {folio}")
+                    
+                    if folio:
+                        print(f"[DEBUG FACTURA] DTE generado exitosamente con folio: {folio}")
+                        return folio
+                    else:
+                        print("[DEBUG FACTURA] No se pudo obtener el folio de la respuesta")
+                        print(f"[DEBUG FACTURA] Estructura de data: {data_section}")
+                        return 0
+                except Exception as e:
+                    print(f"[ERROR FACTURA] Error parseando respuesta JSON: {str(e)}")
+                    print(f"[ERROR FACTURA] Response text: {response.text}")
+                    return 0
             else:
                 print(f"[DEBUG FACTURA] Error en la respuesta: {response.status_code}")
+                print(f"[DEBUG FACTURA] Response text: {response.text}")
+                try:
+                    error_data = response.json()
+                    print(f"[DEBUG FACTURA] Error data: {error_data}")
+                except:
+                    pass
                 return 0
 
     def download(self, folio):
