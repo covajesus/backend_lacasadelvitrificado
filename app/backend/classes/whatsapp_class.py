@@ -273,3 +273,104 @@ class WhatsappClass:
         print(f"[WHATSAPP REVIEW BUDGET] Login URL: {login_url}")
         
         return response
+
+    def process_webhook(self, body):
+        """
+        Procesa los eventos recibidos del webhook de WhatsApp
+        """
+        try:
+            print(f"[WHATSAPP WEBHOOK] Received: {body}")
+            
+            # WhatsApp envía los eventos en body['entry']
+            if 'entry' in body:
+                for entry in body['entry']:
+                    if 'changes' in entry:
+                        for change in entry['changes']:
+                            if 'value' in change:
+                                value = change['value']
+                                
+                                # Procesar mensajes recibidos
+                                if 'messages' in value:
+                                    for message in value['messages']:
+                                        self.handle_message(message)
+                                
+                                # Procesar estados de mensajes
+                                if 'statuses' in value:
+                                    for status in value['statuses']:
+                                        self.handle_status(status)
+            
+            return {"status": "success", "message": "Webhook processed"}
+        except Exception as e:
+            print(f"[WHATSAPP WEBHOOK] Error: {str(e)}")
+            return {"status": "error", "message": str(e)}
+
+    def handle_message(self, message):
+        """
+        Maneja un mensaje recibido de WhatsApp
+        """
+        try:
+            message_id = message.get('id')
+            from_number = message.get('from')
+            message_type = message.get('type')
+            timestamp = message.get('timestamp')
+            
+            print(f"[WHATSAPP MESSAGE] ID: {message_id}, From: {from_number}, Type: {message_type}")
+            
+            # Aquí puedes agregar lógica para procesar diferentes tipos de mensajes
+            if message_type == 'text':
+                text_body = message.get('text', {}).get('body', '')
+                print(f"[WHATSAPP MESSAGE] Text: {text_body}")
+            elif message_type == 'image':
+                print(f"[WHATSAPP MESSAGE] Image received")
+            elif message_type == 'document':
+                print(f"[WHATSAPP MESSAGE] Document received")
+            
+            return {"status": "success"}
+        except Exception as e:
+            print(f"[WHATSAPP MESSAGE] Error handling message: {str(e)}")
+            return {"status": "error", "message": str(e)}
+
+    def handle_status(self, status):
+        """
+        Maneja el estado de un mensaje enviado
+        """
+        try:
+            message_id = status.get('id')
+            status_type = status.get('status')
+            timestamp = status.get('timestamp')
+            
+            print(f"[WHATSAPP STATUS] Message ID: {message_id}, Status: {status_type}")
+            
+            # Aquí puedes agregar lógica para actualizar el estado de los mensajes
+            # Por ejemplo, guardar en base de datos cuando un mensaje fue entregado o leído
+            
+            return {"status": "success"}
+        except Exception as e:
+            print(f"[WHATSAPP STATUS] Error handling status: {str(e)}")
+            return {"status": "error", "message": str(e)}
+
+    def verify_webhook(self, query_params):
+        """
+        Verifica el webhook cuando WhatsApp hace la verificación inicial
+        """
+        try:
+            mode = query_params.get('hub.mode')
+            token = query_params.get('hub.verify_token')
+            challenge = query_params.get('hub.challenge')
+            
+            # Obtener el verify_token desde variables de entorno
+            verify_token = os.getenv('WHATSAPP_VERIFY_TOKEN', 'your_verify_token_here')
+            
+            print(f"[WHATSAPP VERIFY] Mode: {mode}, Token: {token}, Challenge: {challenge}")
+            
+            # Verificar que el token coincida
+            if mode == 'subscribe' and token == verify_token:
+                print("[WHATSAPP VERIFY] Webhook verified successfully")
+                # Retornar el challenge (WhatsApp espera el challenge como respuesta)
+                return challenge if challenge else "OK"
+            else:
+                print("[WHATSAPP VERIFY] Webhook verification failed")
+                return {"status": "error", "message": "Verification failed"}
+        except Exception as e:
+            print(f"[WHATSAPP VERIFY] Error: {str(e)}")
+            return {"status": "error", "message": str(e)}
