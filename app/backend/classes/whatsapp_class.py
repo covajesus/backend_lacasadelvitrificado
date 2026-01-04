@@ -3,7 +3,7 @@ import os
 import hashlib
 from dotenv import load_dotenv
 from app.backend.classes.setting_class import SettingClass
-from app.backend.db.models import UserModel, BudgetModel, CustomerModel
+from app.backend.db.models import UserModel, BudgetModel, CustomerModel, BudgetProductModel, ProductModel
 load_dotenv() 
 
 class WhatsappClass:
@@ -217,12 +217,27 @@ class WhatsappClass:
 
         customer_phone = customer.phone
 
-        # Generar token MD5 con budget_id y rut del cliente
-        token_string = f"{budget_id}_{customer.identification_number}_{customer.id}"
-        token_md5 = hashlib.md5(token_string.encode()).hexdigest()
+        # Obtener productos del presupuesto
+        budget_products = (
+            self.db.query(
+                BudgetProductModel.product_id,
+                ProductModel.product.label("product_name"),
+                BudgetProductModel.quantity
+            )
+            .join(ProductModel, ProductModel.id == BudgetProductModel.product_id)
+            .filter(BudgetProductModel.budget_id == budget_id)
+            .all()
+        )
 
-        # URL dinámica asociada al presupuesto (ajustar según frontend/backend)
-        login_url = f"{budget_id}"
+        # Formatear lista de productos: "Producto1 x cantidad1, Producto2 x cantidad2"
+        products_list = []
+        for product in budget_products:
+            products_list.append(f"{product.product_name} x {product.quantity}")
+        
+        products_text = ", ".join(products_list)
+
+        # Formatear total con separador de miles y "CLP"
+        total_formatted = f"{total:,}".replace(",", ".") + " CLP"
 
         # Formatear el número de teléfono del cliente
         phone_str = str(customer_phone).strip()
@@ -242,17 +257,30 @@ class WhatsappClass:
                     {
                         "type": "body",
                         "parameters": [
-                            {"type": "text", "text": str(budget_id)}
+                            {"type": "text", "text": str(budget_id)},  # Número de presupuesto
+                            {"type": "text", "text": total_formatted},  # Total formateado
+                            {"type": "text", "text": products_text}  # Lista de productos
                         ]
                     },
                     {
                         "type": "button",
-                        "sub_type": "url",
+                        "sub_type": "quick_reply",
                         "index": "0",
                         "parameters": [
                             {
-                                "type": "text",
-                                "text": login_url
+                                "type": "payload",
+                                "payload": f"ACCEPT_{budget_id}"
+                            }
+                        ]
+                    },
+                    {
+                        "type": "button",
+                        "sub_type": "quick_reply",
+                        "index": "1",
+                        "parameters": [
+                            {
+                                "type": "payload",
+                                "payload": f"REJECT_{budget_id}"
                             }
                         ]
                     }
@@ -269,8 +297,9 @@ class WhatsappClass:
 
         print(f"[WHATSAPP REVIEW BUDGET] Status: {response.status_code}")
         print(f"[WHATSAPP REVIEW BUDGET] Response: {response.json()}")
-        print(f"[WHATSAPP REVIEW BUDGET] Token MD5: {token_md5}")
-        print(f"[WHATSAPP REVIEW BUDGET] Login URL: {login_url}")
+        print(f"[WHATSAPP REVIEW BUDGET] Budget ID: {budget_id}")
+        print(f"[WHATSAPP REVIEW BUDGET] Total: {total_formatted}")
+        print(f"[WHATSAPP REVIEW BUDGET] Products: {products_text}")
         
         return response
 
