@@ -2,12 +2,13 @@ from fastapi import APIRouter, Depends
 from app.backend.db.database import get_db
 from sqlalchemy.orm import Session
 from app.backend.schemas import UserLogin, PreInventoryStocks, ShoppingCreateInput, UpdateShopping, ShoppingList, StorePaymentDocuments, SendCustomsCompanyInput, StoreCustomsCompanyDocuments
-from app.backend.db.models import ShoppingModel, SettingModel
+from app.backend.db.models import ShoppingModel, SettingModel, ShoppingProductModel, PreInventoryStockModel, ProductModel, LotItemModel, UnitFeatureModel, LotModel
 from app.backend.classes.shopping_class import ShoppingClass
 from app.backend.classes.template_class import TemplateClass
 from app.backend.classes.email_class import EmailClass
 from app.backend.auth.auth_user import get_current_active_user
 from fastapi import HTTPException
+from datetime import datetime
 
 shoppings = APIRouter(
     prefix="/shoppings",
@@ -159,6 +160,117 @@ def store_shopping(data: ShoppingCreateInput, db: Session = Depends(get_db)):
     )
 
     return {"message": result}
+
+@shoppings.get("/test")
+def test(db: Session = Depends(get_db)):
+    shopping_class = ShoppingClass(db)
+    result = []
+    
+    # Obtener todos los productos
+    all_products = db.query(ProductModel).all()
+    total_products = len(all_products)
+    
+    products_with_lot_items = 0
+    lot_items_processed = 0
+    lot_items_skipped_no_lot = 0
+    lot_items_skipped_no_pre_stock = 0
+    
+    for product in all_products:
+        try:
+            # Obtener todos los lot_items de este producto
+            lot_items = db.query(LotItemModel).filter(
+                LotItemModel.product_id == product.id
+            ).all()
+            
+            if not lot_items:
+                continue
+            
+            products_with_lot_items += 1
+            
+            # Obtener quantity_per_package de unit_features
+            unit_feature = db.query(UnitFeatureModel).filter(
+                UnitFeatureModel.product_id == product.id
+            ).first()
+            
+            quantity_per_package = unit_feature.quantity_per_package if unit_feature and unit_feature.quantity_per_package else 1
+            
+            # Procesar cada lot_item
+            for lot_item in lot_items:
+                # Obtener el lot para encontrar el lot_number
+                lot = db.query(LotModel).filter(LotModel.id == lot_item.lot_id).first()
+                
+                if not lot:
+                    lot_items_skipped_no_lot += 1
+                    continue
+                
+                # Buscar el shopping_id desde PreInventoryStockModel usando product_id y lot_number
+                pre_stock = db.query(PreInventoryStockModel).filter(
+                    PreInventoryStockModel.product_id == product.id,
+                    PreInventoryStockModel.lot_number == lot.lot_number
+                ).first()
+                
+                if not pre_stock:
+                    # Si no encuentra por lot_number, buscar solo por product_id
+                    pre_stock = db.query(PreInventoryStockModel).filter(
+                        PreInventoryStockModel.product_id == product.id
+                    ).first()
+                
+                if not pre_stock:
+                    lot_items_skipped_no_pre_stock += 1
+                    continue
+                
+                shopping_id = pre_stock.shopping_id
+                quantity = pre_stock.stock if pre_stock else 0
+                
+                # Llamar a calculate_unit_cost_for_product para obtener precio_x_litro
+                result_calc = shopping_class.calculate_unit_cost_for_product(
+                    shopping_id=shopping_id,
+                    product_id=product.id,
+                    quantity=quantity
+                )
+                
+                precio_x_litro = result_calc.get("precio_x_litro", 0)
+                
+                # Calcular private_sale_price (precio_x_litro * quantity_per_package) y redondear
+                private_sale_price = round(precio_x_litro * quantity_per_package)
+                
+                # Actualizar el lot_item
+                lot_item.private_sale_price = private_sale_price
+                lot_item.updated_date = datetime.now()
+                
+                lot_items_processed += 1
+                
+                result.append({
+                    "product_id": product.id,
+                    "product_name": result_calc.get("product_name", product.product),
+                    "lot_item_id": lot_item.id,
+                    "precio_x_litro": precio_x_litro,
+                    "quantity_per_package": quantity_per_package,
+                    "private_sale_price": private_sale_price,
+                    "status": "updated"
+                })
+            
+            db.commit()
+            
+        except Exception as e:
+            result.append({
+                "product_id": product.id,
+                "product_name": product.product if hasattr(product, 'product') else "N/A",
+                "status": "error",
+                "error": str(e)
+            })
+    
+    return {
+        "message": result, 
+        "total_processed": len(result),
+        "summary": {
+            "total_products": total_products,
+            "products_with_lot_items": products_with_lot_items,
+            "lot_items_processed": lot_items_processed,
+            "lot_items_skipped_no_lot": lot_items_skipped_no_lot,
+            "lot_items_skipped_no_pre_stock": lot_items_skipped_no_pre_stock
+        }
+    }
 
 @shoppings.post("/update/{id}")
 def update_shopping(id: int, data: UpdateShopping, session_user: UserLogin = Depends(get_current_active_user), db: Session = Depends(get_db)):

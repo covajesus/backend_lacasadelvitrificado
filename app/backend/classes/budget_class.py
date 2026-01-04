@@ -234,15 +234,18 @@ class BudgetClass:
 
     def accept(self, budget_id, dte_type_id=None):
         try:
+            # Usar with_for_update() para bloquear la fila y prevenir race conditions
             budget = (
                 self.db.query(BudgetModel)
                 .filter(BudgetModel.id == budget_id)
+                .with_for_update()  # Bloquea la fila hasta que se complete la transacción
                 .first()
             )
 
             if not budget:
                 return {"status": "error", "message": "Budget not found"}
 
+            # Verificar estado después de bloquear la fila
             if budget.status_id == 1:
                 return {"status": "error", "message": "Budget already accepted"}
 

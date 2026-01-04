@@ -90,11 +90,14 @@ def create_inventory_from_shopping(
         for product_data in products_data:
             try:
                 # Calcular el unit_cost automáticamente
-                calculated_unit_cost = shopping_class.calculate_unit_cost_for_product(
+                result_calc = shopping_class.calculate_unit_cost_for_product(
                     shopping_id, 
                     product_data["product_id"], 
                     product_data["stock"]
                 )
+                
+                # Obtener el precio_x_litro del resultado (ahora devuelve un diccionario)
+                calculated_unit_cost = result_calc.get("precio_x_litro", 0)
                 
                 # Crear el objeto StoreInventory
                 store_inventory = StoreInventory(

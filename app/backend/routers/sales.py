@@ -149,7 +149,8 @@ def store(
     if form_data.rol_id != 2 and payment_support is not None:
         timestamp = datetime.now().strftime("%Y_%m_%d_%H_%M_%S")
         unique_id = uuid.uuid4().hex[:8]
-        extension = payment_support.filename.split('.')[-1]
+        # Manejar archivos con múltiples puntos (ej: imagen.android.jpg)
+        extension = payment_support.filename.rsplit('.', 1)[-1].lower() if '.' in payment_support.filename else ''
         filename = f"payment_{timestamp}_{unique_id}.{extension}"
         FileClass(db).upload(payment_support, filename)
         response = SaleClass(db).store(form_data, filename)
@@ -179,7 +180,8 @@ def upload_payment(
         # Generar nombre único para el archivo
         timestamp = datetime.now().strftime("%Y_%m_%d_%H_%M_%S")
         unique_id = uuid.uuid4().hex[:8]
-        extension = payment_support.filename.split('.')[-1]
+        # Manejar archivos con múltiples puntos (ej: imagen.android.jpg)
+        extension = payment_support.filename.rsplit('.', 1)[-1].lower() if '.' in payment_support.filename else ''
         filename = f"payment_{timestamp}_{unique_id}.{extension}"
         
         # Subir archivo

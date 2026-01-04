@@ -785,19 +785,22 @@ class ShoppingClass:
         """
         Calcula el unit_cost para un producto específico basado en:
         1. final_unit_cost del producto convertido de euros a pesos
-        2. Costo de envío distribuido proporcionalmente por peso
+        2. Costo de envío distribuido proporcionalmente por valor en CLP
         3. Costo final por litro/peso/unidad según la unidad de medida
+        Devuelve: {"product_name": str, "precio_x_litro": float}
         """
         try:
             # Obtener los datos del shopping con todos los costos de envío
             shopping = self.db.query(ShoppingModel).filter(ShoppingModel.id == shopping_id).first()
             if not shopping:
-                print(f"Shopping {shopping_id} no encontrado")
-                return 0
+                return {"product_name": "Error", "precio_x_litro": 0}
+
+            # Obtener el nombre del producto
+            product = self.db.query(ProductModel).filter(ProductModel.id == product_id).first()
+            product_name = product.product if product else "Producto no encontrado"
 
             # Obtener el exchange_rate para convertir euros a pesos
             exchange_rate = shopping.exchange_rate or 1
-            print(f"Exchange rate (pesos por euro): {exchange_rate}")
 
             # Obtener el producto y su final_unit_cost del shopping
             shopping_product = (
@@ -810,111 +813,262 @@ class ShoppingClass:
             )
 
             if not shopping_product:
-                print(f"Producto {product_id} no encontrado en shopping {shopping_id}")
-                return 0
+                print(f"ERROR: ShoppingProduct no encontrado para shopping_id={shopping_id}, product_id={product_id}")
+                return {"product_name": product_name, "precio_x_litro": 0}
 
-            # Convertir final_unit_cost de euros a pesos
-            final_unit_cost_euros = shopping_product.final_unit_cost or 0
-            final_unit_cost_pesos = final_unit_cost_euros * exchange_rate
+            # Obtener final_unit_cost original
+            final_unit_cost_euros_original = shopping_product.final_unit_cost or 0
+            
+            # Verificar si tiene prepago y aplicar descuento
+            has_prepaid = shopping.prepaid_status_id == 1 if shopping.prepaid_status_id else False
+            prepaid_discount_percentage = 0
+            
+            if has_prepaid:
+                # Obtener porcentaje de descuento desde settings
+                settings = self.db.query(SettingModel).first()
+                if settings and settings.prepaid_discount:
+                    prepaid_discount_percentage = float(settings.prepaid_discount)
+                    # Aplicar descuento: multiplicar por (1 - descuento/100)
+                    final_unit_cost_euros = final_unit_cost_euros_original * (1 - prepaid_discount_percentage / 100)
+                    print(f"  - Prepaid activo: descuento {prepaid_discount_percentage}% aplicado")
+                    print(f"  - final_unit_cost_euros_original: {final_unit_cost_euros_original}")
+                    print(f"  - final_unit_cost_euros con descuento: {final_unit_cost_euros}")
+                else:
+                    final_unit_cost_euros = final_unit_cost_euros_original
+            else:
+                final_unit_cost_euros = final_unit_cost_euros_original
 
-            print(f"Final unit cost del producto:")
-            print(f"  - En euros: €{final_unit_cost_euros:.2f}")
-            print(f"  - En pesos: ${final_unit_cost_pesos:.2f}")
-
-            # Calcular el total de costos de envío
+            # Obtener el exchange_rate para dólares (usar el mismo que para euros por ahora)
+            dollar_exchange_rate = exchange_rate
+            
+            # Calcular el total de costos de envío multiplicando cada campo por su valor en dólares
+            # y convirtiendo a pesos, luego sumando la comisión (que ya está en pesos)
             total_shipping_costs = (
-                (shopping.maritime_freight or 0) +
-                (shopping.merchandise_insurance or 0) +
-                (shopping.manifest_opening or 0) +
-                (shopping.deconsolidation or 0) +
-                (shopping.land_freight or 0) +
-                (shopping.port_charges or 0) +
-                (shopping.honoraries or 0) +
-                (shopping.physical_assessment_expenses or 0) +
-                (shopping.administrative_expenses or 0) +
-                (shopping.folder_processing or 0) +
-                (shopping.valija_expenses or 0) +
-                (shopping.extra_expenses or 0) +
-                (shopping.commission or 0)
+                (shopping.maritime_freight or 0) * (shopping.maritime_freight_dollar or 0) * dollar_exchange_rate +
+                (shopping.merchandise_insurance or 0) * (shopping.merchandise_insurance_dollar or 0) * dollar_exchange_rate +
+                (shopping.manifest_opening or 0) * (shopping.manifest_opening_dollar or 0) * dollar_exchange_rate +
+                (shopping.deconsolidation or 0) * (shopping.deconsolidation_dollar or 0) * dollar_exchange_rate +
+                (shopping.land_freight or 0) * (shopping.land_freight_dollar or 0) * dollar_exchange_rate +
+                (shopping.provision_funds or 0) * (shopping.provision_funds_dollar or 0) * dollar_exchange_rate +
+                (shopping.port_charges or 0) * (shopping.port_charges_dollar or 0) * dollar_exchange_rate +
+                (shopping.tax_explosive_product or 0) * (shopping.tax_explosive_product_dollar or 0) * dollar_exchange_rate +
+                (shopping.honoraries or 0) * (shopping.honoraries_dollar or 0) * dollar_exchange_rate +
+                (shopping.physical_assessment_expenses or 0) * (shopping.physical_assessment_expenses_dollar or 0) * dollar_exchange_rate +
+                (shopping.administrative_expenses or 0) * (shopping.administrative_expenses_dollar or 0) * dollar_exchange_rate +
+                (shopping.folder_processing or 0) * (shopping.folder_processing_dollar or 0) * dollar_exchange_rate +
+                (shopping.valija_expenses or 0) * (shopping.valija_expenses_dollar or 0) * dollar_exchange_rate +
+                (shopping.commission or 0)  # La comisión ya está en pesos, no se multiplica
             )
 
-            print(f"Total de costos de envío (PESOS): ${total_shipping_costs:.2f}")
+            # Obtener euro_value del shopping
+            euro_value = shopping.euro_value or 1
+            
+            # Verificar si tiene prepago y obtener descuento
+            has_prepaid = shopping.prepaid_status_id == 1 if shopping.prepaid_status_id else False
+            prepaid_discount_percentage = 0
+            if has_prepaid:
+                settings = self.db.query(SettingModel).first()
+                if settings and settings.prepaid_discount:
+                    prepaid_discount_percentage = float(settings.prepaid_discount)
 
-            # Obtener todos los productos del pre-inventario para este shopping
-            pre_inventory_products = (
-                self.db.query(
-                    PreInventoryStockModel.product_id,
-                    PreInventoryStockModel.stock,
-                    UnitFeatureModel.weight_per_unit
-                )
-                .join(UnitFeatureModel, UnitFeatureModel.product_id == PreInventoryStockModel.product_id)
+            # Recorrer pre_inventory_stocks y calcular el valor en CLP de cada producto
+            pre_inventory_stocks = (
+                self.db.query(PreInventoryStockModel)
                 .filter(PreInventoryStockModel.shopping_id == shopping_id)
                 .all()
             )
 
-            if not pre_inventory_products:
-                print(f"No se encontraron productos de pre-inventario para shopping {shopping_id}")
-                # Si no hay datos de envío, solo devolver el costo del producto convertido
-                return final_unit_cost_pesos
-
-            # Calcular el peso total de todos los productos
-            total_weight = 0
-            product_weights = {}
+            # Calcular productAmountCLP (en pesos chilenos) para cada producto y el total
+            # Fórmula: productAmountCLP = final_unit_cost * stock * euro_value
+            product_amounts_clp = {}  # {product_id: productAmountCLP}
+            total_productos_clp = 0
             
-            for item in pre_inventory_products:
-                try:
-                    weight_per_unit = float(item.weight_per_unit) if item.weight_per_unit else 0
-                    product_total_weight = item.stock * weight_per_unit
-                    total_weight += product_total_weight
-                    product_weights[item.product_id] = product_total_weight
-                    print(f"Producto {item.product_id}: {item.stock} unidades x {weight_per_unit} kg = {product_total_weight} kg")
-                except (ValueError, TypeError):
-                    print(f"Warning: weight_per_unit inválido para producto {item.product_id}: {item.weight_per_unit}")
-                    product_weights[item.product_id] = 0
-
-            print(f"Peso total de todos los productos: {total_weight} kg")
-
-            # Calcular el costo de envío proporcional POR LITRO/KG/UNIDAD
-            shipping_cost_per_unit = 0
-            if total_weight > 0:
-                product_weight = product_weights.get(product_id, 0)
+            for pre_stock in pre_inventory_stocks:
+                # Obtener el stock (cantidad de paquetes)
+                stock_quantity = pre_stock.stock or 0
                 
-                if product_weight > 0:
-                    # Aplicar la fórmula: (peso_producto * 100) / peso_total * total_costos / 100
-                    percentage = (product_weight * 100) / total_weight
-                    shipping_cost_total = (percentage * total_shipping_costs) / 100
+                # Obtener final_unit_cost de shopping_products
+                shopping_product_item = (
+                    self.db.query(ShoppingProductModel)
+                    .filter(
+                        ShoppingProductModel.shopping_id == shopping_id,
+                        ShoppingProductModel.product_id == pre_stock.product_id
+                    )
+                    .first()
+                )
+                
+                if shopping_product_item:
+                    final_unit_cost_original = shopping_product_item.final_unit_cost or 0
                     
-                    # DIVIDIR entre la cantidad total (stock) para obtener el costo por litro/kg/unidad
-                    shipping_cost_per_unit = shipping_cost_total / quantity if quantity > 0 else 0
+                    # Aplicar descuento de prepago si aplica
+                    if has_prepaid and prepaid_discount_percentage > 0:
+                        final_unit_cost = final_unit_cost_original * (1 - prepaid_discount_percentage / 100)
+                    else:
+                        final_unit_cost = final_unit_cost_original
                     
-                    print(f"Costo de envío proporcional:")
-                    print(f"  - Peso del producto: {product_weight} kg ({percentage:.2f}% del total)")
-                    print(f"  - Costo total de envío asignado: ${shipping_cost_total:.2f}")
-                    print(f"  - Cantidad total: {quantity} unidades")
-                    print(f"  - Costo de envío POR UNIDAD: ${shipping_cost_per_unit:.2f}")
+                    # Obtener quantity_per_package de UnitFeatureModel (todos los tipos de unidades usan esta tabla)
+                    quantity_per_package = 1  # Default
+                    unit_feature = self.db.query(UnitFeatureModel).filter(
+                        UnitFeatureModel.product_id == pre_stock.product_id
+                    ).first()
+                    if unit_feature:
+                        quantity_per_package = unit_feature.quantity_per_package or 1
+                    
+                    # Calcular cantidad real (stock_quantity es paquetes, multiplicar por quantity_per_package)
+                    real_quantity = stock_quantity * quantity_per_package
+                    
+                    # Multiplicar final_unit_cost * cantidad_real * euro_value (en CLP/pesos chilenos)
+                    product_amount_clp = final_unit_cost * real_quantity * euro_value
+                    print(f"  Producto {pre_stock.product_id}: product_amount_clp = final_unit_cost * real_quantity * euro_value")
+                    print(f"    stock_quantity (paquetes): {stock_quantity}")
+                    print(f"    quantity_per_package: {quantity_per_package}")
+                    print(f"    real_quantity = {stock_quantity} * {quantity_per_package} = {real_quantity}")
+                    print(f"    product_amount_clp = {final_unit_cost} * {real_quantity} * {euro_value} = {product_amount_clp}")
+                    product_amounts_clp[pre_stock.product_id] = product_amount_clp
+                    total_productos_clp += product_amount_clp
 
-            # Calcular el costo total por unidad (producto + envío)
-            total_unit_cost = final_unit_cost_pesos + shipping_cost_per_unit
+            # Calcular el porcentaje de participación de cada producto en CLP
+            # Fórmula: percentage = productAmountCLP / totalProductosCLP
+            # Ajustar el último porcentaje para que la suma sea exactamente 1.0 (100%)
+            product_percentages = {}  # {product_id: percentage}
+            product_ids_list = list(product_amounts_clp.keys())
+            
+            # Calcular porcentajes para todos excepto el último
+            for i, product_id_item in enumerate(product_ids_list):
+                product_amount_clp = product_amounts_clp[product_id_item]
+                if i < len(product_ids_list) - 1:
+                    # Calcular porcentaje normal
+                    percentage = (product_amount_clp / total_productos_clp) if total_productos_clp > 0 else 0
+                    product_percentages[product_id_item] = percentage
+                else:
+                    # Para el último producto, calcular la diferencia para que la suma sea exactamente 1.0
+                    sum_so_far = sum(product_percentages.values())
+                    percentage = 1.0 - sum_so_far
+                    product_percentages[product_id_item] = max(0, percentage)  # Asegurar que no sea negativo
 
-            # Obtener información de la unidad de medida para mostrar costo por litro/kg/unidad
-            unit_measure = (
-                self.db.query(UnitMeasureModel.unit_measure)
-                .filter(UnitMeasureModel.id == shopping_product.unit_measure_id)
+            # Calcular el precio de envío proporcional usando el porcentaje de participación en CLP
+            # Fórmula según el código Vue:
+            # 1. productAmountCLP = final_unit_cost * qty * euro_value
+            # 2. percentage = productAmountCLP / totalProductosCLP
+            # 3. precioEnvio = totalCustomsExpenses * percentage
+            # 4. envioMasMercancia = precioEnvio + productAmountCLP
+            # 5. precioXLitro = envioMasMercancia / cantidad
+            
+            # Obtener datos adicionales del producto
+            original_unit_cost = shopping_product.original_unit_cost or 0
+            discount_percentage = shopping_product.discount_percentage or 0
+            
+            print(f"\n{'='*60}")
+            print(f"PRODUCTO: {product_name} (ID: {product_id})")
+            print(f"{'='*60}")
+            print(f"  - original_unit_cost: {original_unit_cost}")
+            print(f"  - discount_percentage: {discount_percentage}%")
+            print(f"  - final_unit_cost_euros: {final_unit_cost_euros}")
+            print(f"  - quantity (parámetro): {quantity}")
+            print(f"  - euro_value: {euro_value}")
+            print(f"  - total_shipping_costs: {total_shipping_costs}")
+            print(f"  - total_productos_clp: {total_productos_clp}")
+            
+            # Obtener el stock real del pre_inventory_stocks para este producto (debe coincidir con el usado en porcentajes)
+            pre_stock_product = (
+                self.db.query(PreInventoryStockModel)
+                .filter(
+                    PreInventoryStockModel.shopping_id == shopping_id,
+                    PreInventoryStockModel.product_id == product_id
+                )
                 .first()
             )
             
-            unit_measure_name = unit_measure.unit_measure if unit_measure else "unidad"
+            # Obtener quantity_per_package de UnitFeatureModel (todos los tipos de unidades usan esta tabla)
+            quantity_per_package = 1  # Default
+            unit_feature = self.db.query(UnitFeatureModel).filter(
+                UnitFeatureModel.product_id == product_id
+            ).first()
+            if unit_feature:
+                quantity_per_package = unit_feature.quantity_per_package or 1
+            
+            # Usar el stock del pre_inventory_stocks si existe, sino usar quantity
+            stock_quantity = pre_stock_product.stock if pre_stock_product else quantity
+            print(f"  - stock_quantity (paquetes de pre_inventory_stocks): {stock_quantity}")
+            print(f"  - quantity_per_package: {quantity_per_package}")
+            
+            # Calcular cantidad real (stock_quantity es paquetes, multiplicar por quantity_per_package)
+            real_quantity = stock_quantity * quantity_per_package
+            print(f"  - real_quantity = {stock_quantity} * {quantity_per_package} = {real_quantity}")
+            
+            # Calcular valores base usando la cantidad real (debe ser el mismo usado para calcular porcentajes)
+            total_euros = final_unit_cost_euros * real_quantity
+            product_amount_clp = final_unit_cost_euros * real_quantity * euro_value
+            
+            print(f"\n  CÁLCULOS BASE:")
+            print(f"  - total_euros = final_unit_cost_euros * real_quantity")
+            print(f"    total_euros = {final_unit_cost_euros} * {real_quantity} = {total_euros}")
+            print(f"  - product_amount_clp = final_unit_cost_euros * real_quantity * euro_value")
+            print(f"    product_amount_clp = {final_unit_cost_euros} * {real_quantity} * {euro_value} = {product_amount_clp}")
+            
+            # Calcular porcentaje y precio de envío
+            percentage = 0
+            precio_envio = 0
+            envio_mas_mercancia = 0
+            precio_x_litro = 0
+            
+            if total_productos_clp > 0 and product_id in product_percentages:
+                # Obtener el porcentaje de participación del producto basado en su valor en CLP
+                percentage = product_percentages[product_id]
+                
+                print(f"\n  CÁLCULO DE PORCENTAJE Y ENVÍO:")
+                print(f"  - percentage (del diccionario): {percentage} ({percentage * 100:.2f}%)")
+                
+                # Calcular el precio de envío total del producto (totalCustomsExpenses * percentage)
+                precio_envio = total_shipping_costs * percentage
+                print(f"  - precio_envio = total_shipping_costs * percentage")
+                print(f"    precio_envio = {total_shipping_costs} * {percentage} = {precio_envio}")
+                
+                # Calcular envioMasMercancia = precioEnvio + productAmountCLP
+                envio_mas_mercancia = precio_envio + product_amount_clp
+                print(f"  - envio_mas_mercancia = precio_envio + product_amount_clp")
+                print(f"    envio_mas_mercancia = {precio_envio} + {product_amount_clp} = {envio_mas_mercancia}")
+                
+                # Calcular precioXLitro = envioMasMercancia / cantidad_real
+                precio_x_litro = envio_mas_mercancia / real_quantity if real_quantity > 0 else 0
+                print(f"  - precio_x_litro = envio_mas_mercancia / real_quantity")
+                print(f"    precio_x_litro = {envio_mas_mercancia} / {real_quantity} = {precio_x_litro}")
+            else:
+                # Si no hay datos de envío, calcular solo el costo del producto convertido por unidad
+                print(f"\n  SIN DATOS DE ENVÍO:")
+                precio_x_litro = product_amount_clp / real_quantity if real_quantity > 0 else 0
+                envio_mas_mercancia = product_amount_clp
+                print(f"  - precio_x_litro = product_amount_clp / real_quantity")
+                print(f"    precio_x_litro = {product_amount_clp} / {real_quantity} = {precio_x_litro}")
+            
+            print(f"\n  RESULTADO FINAL:")
+            print(f"  - precio_x_litro: {precio_x_litro}")
+            print(f"{'='*60}\n")
 
-            print(f"\nRESUMEN FINAL:")
-            print(f"  - Costo del producto (pesos): ${final_unit_cost_pesos:.2f}")
-            print(f"  - Costo de envío por unidad: ${shipping_cost_per_unit:.2f}")
-            print(f"  - COSTO TOTAL por {unit_measure_name}: ${total_unit_cost:.2f}")
-
-            return total_unit_cost
+            return {
+                "product_name": product_name,
+                "quantity": quantity,
+                "original_unit_cost": original_unit_cost,
+                "discount_percentage": discount_percentage,
+                "final_unit_cost": final_unit_cost_euros,
+                "total_euros": total_euros,
+                "product_amount_clp": product_amount_clp,
+                "percentage": percentage * 100,  # Convertir a porcentaje
+                "precio_envio": precio_envio,
+                "envio_mas_mercancia": envio_mas_mercancia,
+                "precio_x_litro": precio_x_litro
+            }
 
         except Exception as e:
-            print(f"Error calculando unit_cost para producto {product_id}: {e}")
-            return 0
+            import traceback
+            print(f"\n{'='*60}")
+            print(f"ERROR en calculate_unit_cost_for_product para producto {product_id}:")
+            print(f"{'='*60}")
+            print(f"Error: {str(e)}")
+            print(f"Traceback:")
+            traceback.print_exc()
+            print(f"{'='*60}\n")
+            return {"product_name": f"Error: {str(e)}", "precio_x_litro": 0}
 
     def test_calculate_unit_costs(self, shopping_id):
         """
@@ -942,16 +1096,20 @@ class ShoppingClass:
             total_calculated_cost = 0
             
             for item in pre_inventory_products:
-                unit_cost = self.calculate_unit_cost_for_product(
+                result_calc = self.calculate_unit_cost_for_product(
                     shopping_id, 
                     item.product_id, 
                     item.stock
                 )
                 
+                # Obtener el precio_x_litro del resultado (ahora devuelve un diccionario)
+                unit_cost = result_calc.get("precio_x_litro", 0)
+                product_name = result_calc.get("product_name", item.product)
+                
                 total_product_cost = unit_cost * item.stock
                 total_calculated_cost += total_product_cost
                 
-                print(f"\nRESUMEN - {item.product}:")
+                print(f"\nRESUMEN - {product_name}:")
                 print(f"  - Product ID: {item.product_id}")
                 print(f"  - Cantidad: {item.stock}")
                 print(f"  - COSTO TOTAL (producto + envío): ${unit_cost:.2f}")

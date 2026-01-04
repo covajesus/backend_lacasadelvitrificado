@@ -34,7 +34,8 @@ def store(
     try:
         timestamp = datetime.now().strftime("%Y_%m_%d_%H_%M_%S")
         unique_id = uuid.uuid4().hex[:8]  # 8 caracteres únicos
-        file_extension = photo.filename.split('.')[-1] if '.' in photo.filename else ''
+        # Manejar archivos con múltiples puntos (ej: imagen.android.jpg)
+        file_extension = photo.filename.rsplit('.', 1)[-1].lower() if '.' in photo.filename else ''
         file_category_name = 'photo'
         unique_filename = f"{timestamp}_{unique_id}.{file_extension}" if file_extension else f"{timestamp}_{unique_id}"
 
@@ -126,7 +127,8 @@ def update(
         if photo:
             timestamp = datetime.now().strftime("%Y_%m_%d_%H_%M_%S")
             unique_id = uuid.uuid4().hex[:8]
-            file_extension = photo.filename.split('.')[-1] if '.' in photo.filename else ''
+            # Manejar archivos con múltiples puntos (ej: imagen.android.jpg)
+            file_extension = photo.filename.rsplit('.', 1)[-1].lower() if '.' in photo.filename else ''
             file_category_name = 'photo'
             unique_filename = f"{timestamp}_{unique_id}.{file_extension}" if file_extension else f"{timestamp}_{unique_id}"
             photo_remote_path = f"{file_category_name}_{unique_filename}"
@@ -136,7 +138,8 @@ def update(
         if catalog:
             timestamp = datetime.now().strftime("%Y_%m_%d_%H_%M_%S")
             unique_id = uuid.uuid4().hex[:8]
-            file_extension = catalog.filename.split('.')[-1] if '.' in catalog.filename else ''
+            # Manejar archivos con múltiples puntos (ej: imagen.android.jpg)
+            file_extension = catalog.filename.rsplit('.', 1)[-1].lower() if '.' in catalog.filename else ''
             file_category_name = 'catalog'
             unique_filename = f"{timestamp}_{unique_id}.{file_extension}" if file_extension else f"{timestamp}_{unique_id}"
             catalog_remote_path = f"{file_category_name}_{unique_filename}"

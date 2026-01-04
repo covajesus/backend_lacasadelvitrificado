@@ -54,10 +54,11 @@ def store(
 
     return {"message": data}
 
-@budgets.get("/accept/{budget_id}")
+@budgets.post("/accept/{budget_id}")
 def accept_budget(
     budget_id: int,
     dte_type_id: Optional[int] = None,
+    session_user: UserLogin = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
     data = BudgetClass(db).accept(budget_id, dte_type_id)

@@ -20,8 +20,15 @@ class FileClass:
         try:
             full_path = os.path.join(self.files_dir, remote_path)
             os.makedirs(os.path.dirname(full_path), exist_ok=True)
+            
+            # Leer el contenido del archivo
+            # Resetear la posición del stream al inicio si es necesario
+            file.file.seek(0)
+            content = file.file.read()
+            file.file.seek(0)  # Resetear para posibles lecturas futuras
+            
             with open(full_path, "wb") as f:
-                f.write(file.file.read())
+                f.write(content)
             return f"Archivo subido exitosamente a {remote_path}"
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Error al subir archivo: {str(e)}")
