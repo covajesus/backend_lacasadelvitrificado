@@ -310,7 +310,6 @@ class WhatsappClass:
 
         if action == "accept":
             budget.status_id = 1
-            budget.updated_date = datetime.utcnow()
             self.db.commit()
 
             self.send_autoreply(
@@ -322,7 +321,6 @@ class WhatsappClass:
 
         elif action == "reject":
             budget.status_id = 2
-            budget.updated_date = datetime.utcnow()
             self.db.commit()
 
             self.send_autoreply(
