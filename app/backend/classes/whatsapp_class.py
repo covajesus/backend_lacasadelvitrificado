@@ -270,3 +270,29 @@ class WhatsappClass:
         }
 
         return requests.post(url, json=payload, headers=headers)
+
+
+    def handle_message(self, message):
+        print("📩 MENSAJE:", message)
+
+        if message.get("type") == "interactive":
+            reply = message.get("interactive", {}).get("button_reply")
+
+            if not reply:
+                return
+
+            payload = reply.get("id")  # ACCEPT_128
+            print("🟢 BOTÓN PRESIONADO:", payload)
+
+            if not payload or "_" not in payload:
+                return
+
+            action, budget_id = payload.split("_", 1)
+
+            if action == "ACCEPT":
+                print(f"✅ PRESUPUESTO {budget_id} ACEPTADO")
+                # actualizar BD aquí
+
+            elif action == "REJECT":
+                print(f"❌ PRESUPUESTO {budget_id} RECHAZADO")
+                # actualizar BD aquí

@@ -10,17 +10,47 @@ whatsapp = APIRouter(
 
 @whatsapp.post("/webhook")
 async def webhook(request: Request, db: Session = Depends(get_db)):
-    """
-    Recibe eventos de WhatsApp (botones, mensajes, etc.)
-    """
     print("🔥 WEBHOOK POST RECIBIDO 🔥")
+
     try:
-        body = await request.json()
+        try:
+            body = await request.json()
+        except Exception:
+            print("⚠️ Body vacío o no JSON")
+            return {"status": "ok"}
+
+        print("📦 BODY:", body)
+
         whatsapp_class = WhatsappClass(db)
-        result = whatsapp_class.process_webhook(body)
-        return {"status": "ok", "result": result}
+
+        # PROTECCIÓN TOTAL
+        if not isinstance(body, dict):
+            print("⚠️ Body no es dict")
+            return {"status": "ok"}
+
+        if "entry" not in body:
+            print("⚠️ Sin entry")
+            return {"status": "ok"}
+
+        for entry in body.get("entry", []):
+            for change in entry.get("changes", []):
+                value = change.get("value", {})
+
+                # MENSAJES (BOTONES / TEXTO)
+                for message in value.get("messages", []):
+                    whatsapp_class.handle_message(message)
+
+                # ESTADOS (DELIVERED / READ)
+                for status in value.get("statuses", []):
+                    whatsapp_class.handle_status(status)
+
+        return {"status": "ok"}
+
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        # NUNCA DEVOLVER 500 A WHATSAPP
+        print("❌ ERROR WEBHOOK:", str(e))
+        return {"status": "ok"}
+
 
 
 @whatsapp.get("/webhook")
