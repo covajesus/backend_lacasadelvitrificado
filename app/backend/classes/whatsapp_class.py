@@ -304,30 +304,41 @@ class WhatsappClass:
             return {"status": "error", "message": str(e)}
 
     def handle_message(self, message):
-        """
-        Maneja un mensaje recibido de WhatsApp
-        """
         try:
-            message_id = message.get('id')
-            from_number = message.get('from')
-            message_type = message.get('type')
-            timestamp = message.get('timestamp')
-            
-            print(f"[WHATSAPP MESSAGE] ID: {message_id}, From: {from_number}, Type: {message_type}")
-            
-            # Aquí puedes agregar lógica para procesar diferentes tipos de mensajes
-            if message_type == 'text':
-                text_body = message.get('text', {}).get('body', '')
-                print(f"[WHATSAPP MESSAGE] Text: {text_body}")
-            elif message_type == 'image':
-                print(f"[WHATSAPP MESSAGE] Image received")
-            elif message_type == 'document':
-                print(f"[WHATSAPP MESSAGE] Document received")
-            
+            from_number = message.get("from")
+            message_type = message.get("type")
+
+            print(f"[WHATSAPP MESSAGE] From: {from_number}, Type: {message_type}")
+
+            # 🔘 BOTONES (Aceptar / Rechazar)
+            if message_type == "button":
+                button_text = message.get("button", {}).get("text")
+
+                print(f"[WHATSAPP BUTTON] Action: {button_text}")
+
+                # 🔑 Obtener presupuesto asociado a ese teléfono
+                budget_id = self.get_budget_id_by_phone(from_number)
+
+                if not budget_id:
+                    print("[WHATSAPP BUTTON] No budget context found")
+                    return
+
+                if button_text == "Aceptar":
+                    self.approve_budget(budget_id)
+
+                elif button_text == "Rechazar":
+                    self.reject_budget(budget_id)
+
+            # 💬 TEXTO NORMAL
+            elif message_type == "text":
+                text_body = message.get("text", {}).get("body", "")
+                print(f"[WHATSAPP TEXT] {text_body}")
+
             return {"status": "success"}
+
         except Exception as e:
-            print(f"[WHATSAPP MESSAGE] Error handling message: {str(e)}")
-            return {"status": "error", "message": str(e)}
+            print(f"[WHATSAPP MESSAGE ERROR] {str(e)}")
+
 
     def handle_status(self, status):
         """
