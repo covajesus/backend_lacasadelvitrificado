@@ -294,10 +294,6 @@ class WhatsappClass:
         )
 
         if not budget:
-            self.send_autoreply(
-                phone,
-                "⚠️ No pudimos encontrar el presupuesto solicitado."
-            )
             return
 
         # 🔒 Ya procesado
