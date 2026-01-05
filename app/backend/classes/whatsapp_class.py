@@ -294,7 +294,8 @@ class WhatsappClass:
         )
 
         if not budget:
-            return
+            print("⚠️ Presupuesto no existe (reintento ignorado)")
+            return {"status": "ignored"}
 
         # 🔒 Ya procesado
         if budget.status_id != 0:
