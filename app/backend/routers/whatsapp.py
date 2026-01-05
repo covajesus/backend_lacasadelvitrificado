@@ -51,8 +51,6 @@ async def webhook(request: Request, db: Session = Depends(get_db)):
         print("❌ ERROR WEBHOOK:", str(e))
         return {"status": "ok"}
 
-
-
 @whatsapp.get("/webhook")
 async def webhook_verify(request: Request):
     """

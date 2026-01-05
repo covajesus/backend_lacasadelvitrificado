@@ -271,19 +271,15 @@ class WhatsappClass:
 
         return requests.post(url, json=payload, headers=headers)
 
-
     def handle_message(self, message):
         print("📩 MENSAJE:", message)
 
-        if message.get("type") != "interactive":
+        # Solo botones
+        if message.get("type") != "button":
             return
 
-        reply = message.get("interactive", {}).get("button_reply")
-        if not reply:
-            return
-
-        payload = reply.get("id")  # accept_12
-        print("🟢 BOTÓN PRESIONADO:", payload)
+        button = message.get("button", {})
+        payload = button.get("payload")  # accept_38
 
         if not payload or "_" not in payload:
             return
@@ -291,14 +287,38 @@ class WhatsappClass:
         action, budget_id = payload.split("_", 1)
         action = action.lower()
 
+        # Buscar presupuesto
+        budget = (
+            self.db
+            .query(BudgetModel)
+            .filter(BudgetModel.id == int(budget_id))
+            .first()
+        )
+
+        if not budget:
+            print("❌ Presupuesto no encontrado")
+            return
+
+        # 🔒 SOLO SI ESTÁ PENDIENTE
+        if budget.status_id != 0:
+            print(f"⚠️ Presupuesto {budget_id} ya fue procesado (status_id={budget.status_id})")
+            return
+
         if action == "accept":
+            budget.status_id = 1
             print(f"✅ PRESUPUESTO {budget_id} ACEPTADO")
-            # 👉 actualizar BD aquí
 
         elif action == "reject":
+            budget.status_id = 2
             print(f"❌ PRESUPUESTO {budget_id} RECHAZADO")
-            # 👉 actualizar BD aquí
 
+        else:
+            return
+
+        budget.updated_date = datetime.utcnow()
+        self.db.commit()
+
+        print("💾 Presupuesto actualizado correctamente")
 
     def handle_status(self, status: dict):
         """
