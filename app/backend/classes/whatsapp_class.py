@@ -274,12 +274,11 @@ class WhatsappClass:
     def handle_message(self, message):
         print("📩 MENSAJE:", message)
 
-        # Solo botones
         if message.get("type") != "button":
             return
 
-        button = message.get("button", {})
-        payload = button.get("payload")  # accept_38
+        payload = message.get("button", {}).get("payload")  # accept_38
+        phone = message.get("from")
 
         if not payload or "_" not in payload:
             return
@@ -287,7 +286,6 @@ class WhatsappClass:
         action, budget_id = payload.split("_", 1)
         action = action.lower()
 
-        # Buscar presupuesto
         budget = (
             self.db
             .query(BudgetModel)
@@ -296,28 +294,43 @@ class WhatsappClass:
         )
 
         if not budget:
-            print("❌ Presupuesto no encontrado")
+            self.send_autoreply(
+                phone,
+                "⚠️ No pudimos encontrar el presupuesto solicitado."
+            )
             return
 
-        # 🔒 SOLO SI ESTÁ PENDIENTE
+        # 🔒 Ya procesado
         if budget.status_id != 0:
-            print(f"⚠️ Presupuesto {budget_id} ya fue procesado (status_id={budget.status_id})")
+            self.send_autoreply(
+                phone,
+                "⚠️ Este presupuesto ya fue respondido anteriormente."
+            )
             return
 
         if action == "accept":
             budget.status_id = 1
-            print(f"✅ PRESUPUESTO {budget_id} ACEPTADO")
+            budget.updated_date = datetime.utcnow()
+            self.db.commit()
+
+            self.send_autoreply(
+                phone,
+                "✅ Gracias por aceptar el presupuesto.\nNos pondremos en contacto contigo a la brevedad."
+            )
+
+            print(f"✅ Presupuesto {budget_id} aceptado")
 
         elif action == "reject":
             budget.status_id = 2
-            print(f"❌ PRESUPUESTO {budget_id} RECHAZADO")
+            budget.updated_date = datetime.utcnow()
+            self.db.commit()
 
-        else:
-            return
+            self.send_autoreply(
+                phone,
+                "❌ Hemos recibido el rechazo del presupuesto.\nGracias por tu respuesta."
+            )
 
-        self.db.commit()
-
-        print("💾 Presupuesto actualizado correctamente")
+            print(f"❌ Presupuesto {budget_id} rechazado")
 
     def handle_status(self, status: dict):
         """
@@ -339,3 +352,29 @@ class WhatsappClass:
         # ejemplo:
         # if status_type == "read":
         #     marcar_mensaje_leido(message_id)
+
+    def send_autoreply(self, phone: str, text: str):
+        url = "https://graph.facebook.com/v22.0/790586727468909/messages"
+        token = os.getenv("META_TOKEN")
+
+        if not phone.startswith("56"):
+            phone = "56" + phone
+
+        payload = {
+            "messaging_product": "whatsapp",
+            "to": phone,
+            "type": "text",
+            "text": {
+                "body": text
+            }
+        }
+
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json"
+        }
+
+        response = requests.post(url, json=payload, headers=headers)
+
+        print("📨 AUTORESPONDER:", response.status_code, response.json())
+
