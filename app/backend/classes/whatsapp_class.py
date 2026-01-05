@@ -275,27 +275,30 @@ class WhatsappClass:
     def handle_message(self, message):
         print("📩 MENSAJE:", message)
 
-        if message.get("type") == "interactive":
-            reply = message.get("interactive", {}).get("button_reply")
+        if message.get("type") != "interactive":
+            return
 
-            if not reply:
-                return
+        reply = message.get("interactive", {}).get("button_reply")
+        if not reply:
+            return
 
-            payload = reply.get("id")  # ACCEPT_128
-            print("🟢 BOTÓN PRESIONADO:", payload)
+        payload = reply.get("id")  # accept_12
+        print("🟢 BOTÓN PRESIONADO:", payload)
 
-            if not payload or "_" not in payload:
-                return
+        if not payload or "_" not in payload:
+            return
 
-            action, budget_id = payload.split("_", 1)
+        action, budget_id = payload.split("_", 1)
+        action = action.lower()
 
-            if action == "ACCEPT":
-                print(f"✅ PRESUPUESTO {budget_id} ACEPTADO")
-                # actualizar BD aquí
+        if action == "accept":
+            print(f"✅ PRESUPUESTO {budget_id} ACEPTADO")
+            # 👉 actualizar BD aquí
 
-            elif action == "REJECT":
-                print(f"❌ PRESUPUESTO {budget_id} RECHAZADO")
-                # actualizar BD aquí
+        elif action == "reject":
+            print(f"❌ PRESUPUESTO {budget_id} RECHAZADO")
+            # 👉 actualizar BD aquí
+
 
     def handle_status(self, status: dict):
         """
