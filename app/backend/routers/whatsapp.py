@@ -13,6 +13,7 @@ async def webhook(request: Request, db: Session = Depends(get_db)):
     """
     Recibe eventos de WhatsApp (botones, mensajes, etc.)
     """
+    print("🔥 WEBHOOK POST RECIBIDO 🔥")
     try:
         body = await request.json()
         whatsapp_class = WhatsappClass(db)
