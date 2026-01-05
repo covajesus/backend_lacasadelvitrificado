@@ -315,7 +315,6 @@ class WhatsappClass:
         else:
             return
 
-        budget.updated_date = datetime.utcnow()
         self.db.commit()
 
         print("💾 Presupuesto actualizado correctamente")
