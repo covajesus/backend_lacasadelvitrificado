@@ -190,11 +190,11 @@ class WhatsappClass:
         
         return response
 
-    def review_budget(self, budget_id, customer_name, total): 
+    def review_budget(self, budget_id, total):
         url = "https://graph.facebook.com/v22.0/790586727468909/messages"
-        token = os.getenv('META_TOKEN')        
+        token = os.getenv("META_TOKEN")
 
-        # Buscar el presupuesto y el cliente para obtener su teléfono
+        # 1️⃣ Obtener presupuesto
         budget = (
             self.db.query(BudgetModel)
             .filter(BudgetModel.id == budget_id)
@@ -202,9 +202,10 @@ class WhatsappClass:
         )
 
         if not budget:
-            print(f"[WHATSAPP REVIEW BUDGET] No se encontró presupuesto {budget_id}")
+            print("[WHATSAPP] Presupuesto no encontrado")
             return None
 
+        # 2️⃣ Obtener cliente
         customer = (
             self.db.query(CustomerModel)
             .filter(CustomerModel.id == budget.customer_id)
@@ -212,43 +213,37 @@ class WhatsappClass:
         )
 
         if not customer or not customer.phone:
-            print(f"[WHATSAPP REVIEW BUDGET] No se encontró teléfono para el cliente {budget.customer_id}")
+            print("[WHATSAPP] Cliente sin teléfono")
             return None
 
-        customer_phone = customer.phone
-
-        # Obtener productos del presupuesto
-        budget_products = (
+        # 3️⃣ Obtener productos
+        products = (
             self.db.query(
-                BudgetProductModel.product_id,
-                ProductModel.product.label("product_name"),
+                ProductModel.product,
                 BudgetProductModel.quantity
             )
-            .join(ProductModel, ProductModel.id == BudgetProductModel.product_id)
+            .join(BudgetProductModel, BudgetProductModel.product_id == ProductModel.id)
             .filter(BudgetProductModel.budget_id == budget_id)
             .all()
         )
 
-        # Formatear lista de productos: "Producto1 x cantidad1, Producto2 x cantidad2"
-        products_list = []
-        for product in budget_products:
-            products_list.append(f"{product.product_name} x {product.quantity}")
-        
-        products_text = ", ".join(products_list)
+        # 4️⃣ Formatear productos (con saltos de línea)
+        products_text = "\n".join([
+            f"{p.product} x {p.quantity}" for p in products
+        ])
 
-        # Formatear total con separador de miles y "CLP"
+        # 5️⃣ Formatear total
         total_formatted = f"{total:,}".replace(",", ".") + " CLP"
 
-        # Formatear el número de teléfono del cliente
-        phone_str = str(customer_phone).strip()
-        if not phone_str.startswith("56"):
-            customer_phone_formatted = "56" + phone_str
-        else:
-            customer_phone_formatted = phone_str
+        # 6️⃣ Formatear teléfono (Chile)
+        phone = str(customer.phone).strip()
+        if not phone.startswith("56"):
+            phone = "56" + phone
 
+        # 7️⃣ Payload CORRECTO
         payload = {
             "messaging_product": "whatsapp",
-            "to": customer_phone_formatted,
+            "to": phone,
             "type": "template",
             "template": {
                 "name": "revision_presupuesto",
@@ -257,31 +252,9 @@ class WhatsappClass:
                     {
                         "type": "body",
                         "parameters": [
-                            {"type": "text", "text": str(budget_id)},  # Número de presupuesto
-                            {"type": "text", "text": total_formatted},  # Total formateado
-                            {"type": "text", "text": products_text}  # Lista de productos
-                        ]
-                    },
-                    {
-                        "type": "button",
-                        "sub_type": "quick_reply",
-                        "index": "0",
-                        "parameters": [
-                            {
-                                "type": "payload",
-                                "payload": f"ACCEPT_{budget_id}"
-                            }
-                        ]
-                    },
-                    {
-                        "type": "button",
-                        "sub_type": "quick_reply",
-                        "index": "1",
-                        "parameters": [
-                            {
-                                "type": "payload",
-                                "payload": f"REJECT_{budget_id}"
-                            }
+                            {"type": "text", "text": str(budget_id)},
+                            {"type": "text", "text": total_formatted},
+                            {"type": "text", "text": products_text}
                         ]
                     }
                 ]
@@ -295,12 +268,9 @@ class WhatsappClass:
 
         response = requests.post(url, json=payload, headers=headers)
 
-        print(f"[WHATSAPP REVIEW BUDGET] Status: {response.status_code}")
-        print(f"[WHATSAPP REVIEW BUDGET] Response: {response.json()}")
-        print(f"[WHATSAPP REVIEW BUDGET] Budget ID: {budget_id}")
-        print(f"[WHATSAPP REVIEW BUDGET] Total: {total_formatted}")
-        print(f"[WHATSAPP REVIEW BUDGET] Products: {products_text}")
-        
+        print("[WHATSAPP] STATUS:", response.status_code)
+        print("[WHATSAPP] RESPONSE:", response.text)
+
         return response
 
     def process_webhook(self, body):

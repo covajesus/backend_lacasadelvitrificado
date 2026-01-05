@@ -219,7 +219,6 @@ class BudgetClass:
             try:
                 WhatsappClass(self.db).review_budget(
                     budget_id=new_budget.id,
-                    customer_name=customer.social_reason,
                     total=total
                 )
             except Exception as whatsapp_error:
