@@ -296,3 +296,24 @@ class WhatsappClass:
             elif action == "REJECT":
                 print(f"❌ PRESUPUESTO {budget_id} RECHAZADO")
                 # actualizar BD aquí
+
+    def handle_status(self, status: dict):
+        """
+        Maneja estados enviados por WhatsApp:
+        sent, delivered, read, failed
+        """
+        print("📬 STATUS WHATSAPP RECIBIDO")
+        print(status)
+
+        status_type = status.get("status")
+        message_id = status.get("id")
+        recipient = status.get("recipient_id")
+
+        print(f"➡ Estado: {status_type}")
+        print(f"➡ Message ID: {message_id}")
+        print(f"➡ Destinatario: {recipient}")
+
+        # Aquí puedes guardar en BD si quieres
+        # ejemplo:
+        # if status_type == "read":
+        #     marcar_mensaje_leido(message_id)
