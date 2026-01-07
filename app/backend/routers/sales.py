@@ -45,7 +45,20 @@ def edit(db: Session = Depends(get_db)):
 @sales.get("/accept_sale_payment/{id}/{dte_type_id}/{status_id}")
 def accept_sale_payment(id: int, dte_type_id: int, status_id:int, session_user: UserLogin = Depends(get_current_active_user), db: Session = Depends(get_db)):
     if status_id == 2:
-        SaleClass(db).change_status(id, status_id)
+        try:
+            change_status_result = SaleClass(db).change_status(id, status_id)
+            
+            # Si ya está en ese estado, retornar mensaje
+            if change_status_result == "Sale already in this status":
+                return {"message": {"status": "info", "message": "La venta ya está en este estado"}}
+            
+            if change_status_result == "No data found":
+                raise HTTPException(status_code=404, detail="Venta no encontrada")
+        except Exception as e:
+            # Manejar error de bloqueo de fila
+            if "could not obtain lock" in str(e).lower() or "lock" in str(e).lower():
+                raise HTTPException(status_code=409, detail="La venta está siendo procesada. Por favor, intente nuevamente en unos segundos.")
+            raise HTTPException(status_code=500, detail=f"Error al cambiar estado de la venta: {str(e)}")
 
         dte_response = DteClass(db).generate_dte(id)
 

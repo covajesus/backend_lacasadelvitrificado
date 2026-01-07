@@ -1,4 +1,4 @@
-from app.backend.db.models import KardexValuesModel, ProductModel, InventoryModel
+from app.backend.db.models import KardexValuesModel, ProductModel, InventoryModel, InventoryMovementModel
 from datetime import datetime
 from sqlalchemy import func
 
@@ -18,20 +18,31 @@ class KardexClass:
                 .subquery()
             )
             
+            # Subconsulta de stock por inventario desde movimientos
+            stock_subq = (
+                self.db.query(
+                    InventoryMovementModel.inventory_id.label("inventory_id"),
+                    func.sum(InventoryMovementModel.quantity).label("stock_sum"),
+                )
+                .group_by(InventoryMovementModel.inventory_id)
+                .subquery()
+            )
+            
             query = (
                 self.db.query(
                     KardexValuesModel.id,
                     KardexValuesModel.product_id,
-                    KardexValuesModel.quantity,
                     KardexValuesModel.average_cost,
                     KardexValuesModel.added_date,
                     KardexValuesModel.updated_date,
                     ProductModel.product.label("product_name"),
                     ProductModel.code.label("product_code"),
-                    subquery.c.latest_inventory_id.label("inventory_id")
+                    subquery.c.latest_inventory_id.label("inventory_id"),
+                    func.coalesce(stock_subq.c.stock_sum, 0).label("quantity")
                 )
                 .join(ProductModel, ProductModel.id == KardexValuesModel.product_id, isouter=True)
                 .join(subquery, subquery.c.product_id == KardexValuesModel.product_id, isouter=True)
+                .outerjoin(stock_subq, stock_subq.c.inventory_id == subquery.c.latest_inventory_id)
                 .order_by(KardexValuesModel.updated_date.desc())
             )
 

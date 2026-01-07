@@ -38,8 +38,10 @@ class SaleClass:
                         SaleModel.shipping_cost,
                         SaleModel.total,
                         SaleModel.status_id,
-                        SaleModel.added_date,                
+                        SaleModel.added_date,
+                        CustomerModel.social_reason.label("customer_name"),
                     )
+                    .join(CustomerModel, CustomerModel.id == SaleModel.customer_id, isouter=True)
                     .order_by(SaleModel.added_date.desc())
                 )
             else:
@@ -51,8 +53,10 @@ class SaleClass:
                         SaleModel.tax,
                         SaleModel.total,
                         SaleModel.status_id,
-                        SaleModel.added_date,                
+                        SaleModel.added_date,
+                        CustomerModel.social_reason.label("customer_name"),
                     )
+                    .join(CustomerModel, CustomerModel.id == SaleModel.customer_id, isouter=True)
                     .filter(SaleModel.customer_id == customer.id if customer else None)
                     .order_by(SaleModel.added_date.desc())
                 )
@@ -76,7 +80,8 @@ class SaleClass:
                     "tax": sale.tax,
                     "total": sale.total,
                     "status_id": sale.status_id,
-                    "added_date": sale.added_date.strftime("%Y-%m-%d %H:%M:%S")
+                    "added_date": sale.added_date.strftime("%Y-%m-%d %H:%M:%S"),
+                    "customer_name": sale.customer_name
                 } for sale in data]
 
                 return {
@@ -97,7 +102,8 @@ class SaleClass:
                     "tax": sale.tax,
                     "total": sale.total,
                     "status_id": sale.status_id,
-                    "added_date": sale.added_date.strftime("%Y-%m-%d %H:%M:%S")
+                    "added_date": sale.added_date.strftime("%Y-%m-%d %H:%M:%S"),
+                    "customer_name": sale.customer_name
                 } for sale in data]
 
                 return serialized_data
@@ -680,8 +686,9 @@ class SaleClass:
                 SaleModel.payment_support,
                 SaleModel.delivery_address,
                 SaleModel.added_date,
-                ProductModel.product
-            ).join(SaleModel, SaleModel.id == SaleProductModel.sale_id, isouter=True).join(ProductModel, ProductModel.id == SaleProductModel.product_id, isouter=True).filter(SaleModel.id == id).all()
+                ProductModel.product,
+                CustomerModel.social_reason.label("customer_name")
+            ).join(SaleModel, SaleModel.id == SaleProductModel.sale_id, isouter=True).join(ProductModel, ProductModel.id == SaleProductModel.product_id, isouter=True).join(CustomerModel, CustomerModel.id == SaleModel.customer_id, isouter=True).filter(SaleModel.id == id).all()
 
             if not data_query:
                 return {"error": "No se encontraron datos para el campo especificado."}
@@ -702,7 +709,8 @@ class SaleClass:
                     "payment_support": data.payment_support,
                     "delivery_address": data.delivery_address,
                     "added_date": data.added_date.strftime("%d-%m-%Y %H:%M:%S"),
-                    "product": data.product
+                    "product": data.product,
+                    "customer_name": data.customer_name
                 }
 
                 sale_data.append(sale_details)
@@ -714,10 +722,20 @@ class SaleClass:
         
 
     def change_status(self, id, status_id):
-        existing_sale = self.db.query(SaleModel).filter(SaleModel.id == id).one_or_none()
+        # Bloquear la venta para evitar procesamiento concurrente
+        existing_sale = (
+            self.db.query(SaleModel)
+            .filter(SaleModel.id == id)
+            .with_for_update(nowait=True)
+            .one_or_none()
+        )
 
         if not existing_sale:
             return "No data found"
+
+        # Verificar si la venta ya está en el estado deseado
+        if existing_sale.status_id == status_id:
+            return "Sale already in this status"
 
         try:
             # Si se acepta el pago (status_id = 2), procesar productos
@@ -1031,13 +1049,26 @@ class SaleClass:
         except Exception as e:
             self.db.rollback()
             error_message = str(e)
+            # Si es un error de bloqueo, lanzar excepción para que el router lo maneje
+            if "could not obtain lock" in error_message.lower() or "lock" in error_message.lower() or "deadlock" in error_message.lower():
+                raise Exception(f"La venta está siendo procesada por otro proceso. Error: {error_message}")
             return {"status": "error", "message": error_message}
 
     def get_sales_report(self, start_date=None, end_date=None):
         try:
-            from datetime import datetime
+            from datetime import datetime, date
+            
+            # Si no se proporcionan fechas, usar el mes actual por defecto
+            if not start_date or not start_date.strip():
+                today = date.today()
+                start_date = today.replace(day=1).strftime("%Y-%m-%d")  # Primer día del mes actual
+            
+            if not end_date or not end_date.strip():
+                today = date.today()
+                end_date = today.strftime("%Y-%m-%d")  # Último día del mes actual (hoy)
             
             # Consulta para obtener ventas individuales con información de lotes y rol del usuario
+            # Usar COALESCE para obtener unit_cost del movimiento, kardex o lot_item como fallback
             individual_sales_query = (
                 self.db.query(
                     ProductModel.id.label("product_id"),
@@ -1050,7 +1081,12 @@ class SaleClass:
                     SaleProductModel.price.label("sale_price"),
                     LotItemModel.public_sale_price,
                     LotItemModel.private_sale_price,
-                    InventoryMovementModel.unit_cost,
+                    func.coalesce(
+                        InventoryMovementModel.unit_cost,
+                        KardexValuesModel.average_cost,
+                        LotItemModel.unit_cost,
+                        0
+                    ).label("unit_cost"),
                     LotItemModel.id.label("lot_item_id"),
                     LotModel.lot_number,
                     LotModel.arrival_date,
@@ -1059,31 +1095,30 @@ class SaleClass:
                 )
                 .join(SaleProductModel, SaleProductModel.product_id == ProductModel.id)
                 .join(SaleModel, SaleModel.id == SaleProductModel.sale_id)
-                .join(InventoryMovementModel, InventoryMovementModel.id == SaleProductModel.inventory_movement_id)
-                .join(LotItemModel, LotItemModel.id == SaleProductModel.lot_item_id)
-                .join(LotModel, LotModel.id == LotItemModel.lot_id)
+                .join(InventoryMovementModel, InventoryMovementModel.id == SaleProductModel.inventory_movement_id, isouter=True)
+                .join(LotItemModel, LotItemModel.id == SaleProductModel.lot_item_id, isouter=True)
+                .join(LotModel, LotModel.id == LotItemModel.lot_id, isouter=True)
                 .join(UnitMeasureModel, UnitMeasureModel.id == ProductModel.unit_measure_id, isouter=True)
                 .join(UnitFeatureModel, UnitFeatureModel.product_id == ProductModel.id, isouter=True)
                 .join(CustomerModel, CustomerModel.id == SaleModel.customer_id, isouter=True)
                 .join(UserModel, UserModel.rut == CustomerModel.identification_number, isouter=True)
-                .filter(SaleModel.status_id == 2)
+                .join(KardexValuesModel, KardexValuesModel.product_id == ProductModel.id, isouter=True)
+                .filter(SaleModel.status_id.in_([2, 4]))  # Incluir ventas aceptadas (2) y entregadas (4)
             )
             
-            # Aplicar filtros de fecha si se proporcionan
-            if start_date and start_date.strip():
-                try:
-                    start_datetime = datetime.strptime(start_date, "%Y-%m-%d")
-                    individual_sales_query = individual_sales_query.filter(SaleModel.added_date >= start_datetime)
-                except ValueError:
-                    return {"status": "error", "message": "Formato de fecha inválido para start_date. Use YYYY-MM-DD"}
+            # Aplicar filtros de fecha
+            try:
+                start_datetime = datetime.strptime(start_date, "%Y-%m-%d")
+                individual_sales_query = individual_sales_query.filter(SaleModel.added_date >= start_datetime)
+            except ValueError:
+                return {"status": "error", "message": "Formato de fecha inválido para start_date. Use YYYY-MM-DD"}
             
-            if end_date and end_date.strip():
-                try:
-                    end_datetime = datetime.strptime(end_date, "%Y-%m-%d")
-                    end_datetime = end_datetime.replace(hour=23, minute=59, second=59)
-                    individual_sales_query = individual_sales_query.filter(SaleModel.added_date <= end_datetime)
-                except ValueError:
-                    return {"status": "error", "message": "Formato de fecha inválido para end_date. Use YYYY-MM-DD"}
+            try:
+                end_datetime = datetime.strptime(end_date, "%Y-%m-%d")
+                end_datetime = end_datetime.replace(hour=23, minute=59, second=59)
+                individual_sales_query = individual_sales_query.filter(SaleModel.added_date <= end_datetime)
+            except ValueError:
+                return {"status": "error", "message": "Formato de fecha inválido para end_date. Use YYYY-MM-DD"}
             
             individual_sales = individual_sales_query.all()
             
@@ -1149,8 +1184,8 @@ class SaleClass:
                 unit_measure_quantity = quantity * quantity_per_package  # Cantidad en unidad de medida
                 
                 # IMPORTANTE: El unit_cost en BD está por PAQUETE, lo convertimos a por unidad
-                cost_per_package = sale.unit_cost  # Costo por paquete
-                cost_per_unit = cost_per_package / quantity_per_package if quantity_per_package > 0 else cost_per_package  # Costo por unidad
+                cost_per_package = sale.unit_cost if sale.unit_cost is not None else 0  # Costo por paquete
+                cost_per_unit = cost_per_package / quantity_per_package if quantity_per_package > 0 and cost_per_package > 0 else 0  # Costo por unidad
                 
                 # Los precios de venta están por paquete, los convertimos a por unidad de medida
                 unit_measure_sale_price = sale.sale_price / quantity_per_package if quantity_per_package > 0 else sale.sale_price
