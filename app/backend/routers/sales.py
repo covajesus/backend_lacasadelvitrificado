@@ -122,8 +122,6 @@ def accept_sale_payment(id: int, dte_type_id: int, status_id: int, dte_status_id
 def reject_sale_payment(id: int, status_id:int, session_user: UserLogin = Depends(get_current_active_user), db: Session = Depends(get_db)):
     SaleClass(db).change_status(id, status_id)
 
-    reverse_response = SaleClass(db).reverse(id)
-
     # Enviar alerta de pago rechazado por WhatsApp
     try:
         # Obtener datos de la venta y cliente
@@ -142,7 +140,29 @@ def reject_sale_payment(id: int, status_id:int, session_user: UserLogin = Depend
     except Exception as e:
         print(f"[WHATSAPP] Error enviando alerta de pago rechazado: {str(e)}")
 
-    return {"message": reverse_response}
+    return {"message": "Payment rejected successfully"}
+
+@sales.get("/reverse/{orderId}")
+def reverse_sale(orderId: int, session_user: UserLogin = Depends(get_current_active_user), db: Session = Depends(get_db)):
+    """
+    Endpoint para revertir una venta.
+    Devuelve todos los productos al inventario y rechaza la venta.
+    """
+    try:
+        # Revertir movimientos de inventario
+        reverse_response = SaleClass(db).reverse(orderId)
+        
+        # Cambiar el status de la venta a rechazado (status_id = 3)
+        change_status_result = SaleClass(db).change_status(orderId, 3)
+        
+        # Verificar si hubo error al cambiar status
+        if isinstance(change_status_result, dict) and change_status_result.get("status") == "error":
+            return {"message": {"status": "error", "message": change_status_result.get("message", "Error al cambiar estado de la venta")}}
+        
+        return {"message": {"status": "success", "message": "Venta revertida exitosamente. Productos devueltos al inventario."}}
+    except Exception as e:
+        print(f"[ERROR] Error al revertir venta {orderId}: {str(e)}")
+        return {"message": {"status": "error", "message": f"Error al revertir la venta: {str(e)}"}}
         
 @sales.get("/delivered_sale/{id}")
 def delivered_sale(id: int, session_user: UserLogin = Depends(get_current_active_user), db: Session = Depends(get_db)):
