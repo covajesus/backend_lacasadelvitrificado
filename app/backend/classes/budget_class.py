@@ -190,7 +190,6 @@ class BudgetClass:
 
             new_budget = BudgetModel(
                 customer_id=budget_inputs.customer_id,
-                dte_type_id=budget_inputs.dte_type_id if hasattr(budget_inputs, 'dte_type_id') and budget_inputs.dte_type_id else None,
                 status_id=0,
                 subtotal=subtotal,
                 shipping=shipping,
@@ -274,10 +273,13 @@ class BudgetClass:
                 delivery_address = customer.address if customer.address else None
 
             # Crear solo el SaleModel
+            # dte_type_id se obtiene del presupuesto si existe, sino None
+            budget_dte_type_id = getattr(budget, 'dte_type_id', None) if hasattr(budget, 'dte_type_id') else None
+            
             new_sale = SaleModel(
                 customer_id=budget.customer_id,
                 shipping_method_id=shipping_method_id,
-                dte_type_id=budget.dte_type_id if hasattr(budget, 'dte_type_id') else None,
+                dte_type_id=budget_dte_type_id,
                 status_id=1,
                 subtotal=budget.subtotal,
                 tax=budget.tax,
