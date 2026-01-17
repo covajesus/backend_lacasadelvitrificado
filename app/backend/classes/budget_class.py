@@ -12,7 +12,8 @@ from app.backend.db.models import (
     LotModel,
     InventoryMovementModel,
     KardexValuesModel,
-    InventoryLotItemModel
+    InventoryLotItemModel,
+    CustomerProductDiscountModel
 )
 from app.backend.classes.whatsapp_class import WhatsappClass
 
@@ -232,6 +233,7 @@ class BudgetClass:
             return {"status": "error", "message": str(e)}
 
     def accept(self, budget_id, dte_type_id=None):
+        print(f"[BUDGET_ACCEPT] Iniciando aceptación de presupuesto {budget_id}")
         try:
             # Usar with_for_update() para bloquear la fila y prevenir race conditions
             budget = (
@@ -242,10 +244,14 @@ class BudgetClass:
             )
 
             if not budget:
+                print(f"[BUDGET_ACCEPT] Presupuesto {budget_id} no encontrado")
                 return {"status": "error", "message": "Budget not found"}
+
+            print(f"[BUDGET_ACCEPT] Presupuesto encontrado: customer_id={budget.customer_id}, status_id={budget.status_id}, total={budget.total}")
 
             # Verificar estado después de bloquear la fila
             if budget.status_id == 1:
+                print(f"[BUDGET_ACCEPT] Presupuesto {budget_id} ya está aceptado")
                 return {"status": "error", "message": "Budget already accepted"}
 
             # Obtener el cliente para obtener su dirección
@@ -284,6 +290,36 @@ class BudgetClass:
 
             self.db.add(new_sale)
             self.db.flush()
+            print(f"[BUDGET_ACCEPT] SaleModel creado con ID: {new_sale.id}")
+
+            # Obtener productos del presupuesto
+            budget_products = (
+                self.db.query(BudgetProductModel)
+                .filter(BudgetProductModel.budget_id == budget_id)
+                .all()
+            )
+
+            print(f"[BUDGET_ACCEPT] Productos del presupuesto encontrados: {len(budget_products)}")
+
+            # Crear productos de la venta desde el presupuesto
+            for budget_product in budget_products:
+                # Calcular precio unitario
+                quantity = budget_product.quantity if budget_product.quantity > 0 else 1
+                unit_price = int(budget_product.total // quantity) if quantity > 0 else budget_product.total
+
+                print(f"[BUDGET_ACCEPT] Creando SaleProduct: product_id={budget_product.product_id}, quantity={budget_product.quantity}, price={unit_price}")
+
+                # Crear SaleProductModel sin procesar inventario aún (inventory_movement_id=None)
+                sale_product = SaleProductModel(
+                    sale_id=new_sale.id,
+                    product_id=budget_product.product_id,
+                    inventory_movement_id=None,  # Se asignará al aceptar el pago
+                    inventory_id=None,  # Se asignará al aceptar el pago
+                    lot_item_id=None,  # Se asignará al aceptar el pago
+                    quantity=budget_product.quantity,
+                    price=unit_price
+                )
+                self.db.add(sale_product)
 
             # Cambiar status del presupuesto
             budget.status_id = 1
@@ -292,10 +328,14 @@ class BudgetClass:
             self.db.commit()
             self.db.refresh(new_sale)
 
+            print(f"[BUDGET_ACCEPT] Presupuesto aceptado exitosamente. Sale ID: {new_sale.id}")
             return {"status": "success", "sale_id": new_sale.id}
 
         except Exception as e:
             self.db.rollback()
+            print(f"[BUDGET_ACCEPT] Error al aceptar presupuesto {budget_id}: {str(e)}")
+            import traceback
+            print(f"[BUDGET_ACCEPT] Traceback: {traceback.format_exc()}")
             return {"status": "error", "message": str(e)}
 
     def reject(self, budget_id):
@@ -355,3 +395,60 @@ class BudgetClass:
             self.db.rollback()
             error_message = str(e)
             return {"status": "error", "message": f"Error al eliminar el presupuesto: {error_message}"}
+
+    def product_detail(self, product_id, customer_id=None):
+        """
+        Obtiene el detalle del producto para presupuesto.
+        Devuelve nombre, precio público y descuento del cliente si se proporciona customer_id.
+        """
+        print(f"[BUDGET_PRODUCT_DETAIL] Llamado con product_id={product_id}, customer_id={customer_id}")
+        try:
+            # Primero verificar que el producto existe
+            product = self.db.query(ProductModel).filter(ProductModel.id == product_id).first()
+            
+            if not product:
+                return {"status": "error", "message": "Product not found"}
+            
+            # Obtener precio público del producto (máximo de lotes)
+            price_query = (
+                self.db.query(func.max(LotItemModel.public_sale_price).label("public_sale_price"))
+                .filter(LotItemModel.product_id == product_id)
+                .scalar()
+            )
+            
+            public_sale_price = price_query if price_query is not None else 0
+            
+            data_query = type('obj', (object,), {
+                'id': product.id,
+                'product': product.product,
+                'public_sale_price': public_sale_price
+            })()
+
+            # Obtener descuento del cliente para este producto si se proporciona customer_id
+            customer_discount = 0
+            if customer_id:
+                print(f"[BUDGET_PRODUCT_DETAIL] Buscando descuento para customer_id={customer_id}, product_id={product_id}")
+                customer_discount_record = (
+                    self.db.query(CustomerProductDiscountModel)
+                    .filter(CustomerProductDiscountModel.customer_id == customer_id)
+                    .filter(CustomerProductDiscountModel.product_id == product_id)
+                    .first()
+                )
+                print(f"[BUDGET_PRODUCT_DETAIL] Descuento encontrado: {customer_discount_record is not None}")
+                if customer_discount_record:
+                    customer_discount = customer_discount_record.discount_percentage or 0
+                    print(f"[BUDGET_PRODUCT_DETAIL] Descuento porcentaje: {customer_discount}")
+                else:
+                    print(f"[BUDGET_PRODUCT_DETAIL] No se encontró descuento para customer_id={customer_id}, product_id={product_id}")
+
+            product_data = {
+                "id": data_query.id,
+                "product": data_query.product,
+                "public_sale_price": data_query.public_sale_price if data_query.public_sale_price is not None else 0,
+                "customer_discount_percentage": customer_discount
+            }
+
+            return product_data
+
+        except Exception as e:
+            return {"status": "error", "message": str(e)}

@@ -94,3 +94,20 @@ def delete_budget(
 
     return {"message": data}
 
+@budgets.get("/product/detail/{customer_id}/{product_id}")
+def product_detail(
+    customer_id: int,
+    product_id: int,
+    session_user: UserLogin = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Endpoint para obtener detalle del producto para presupuesto.
+    Devuelve nombre, precio público y descuento del cliente.
+    """
+    data = BudgetClass(db).product_detail(product_id, customer_id=customer_id)
+
+    if isinstance(data, dict) and data.get("status") == "error":
+        raise HTTPException(status_code=404, detail=data["message"])
+
+    return {"message": data}

@@ -228,6 +228,7 @@ class WhatsappClass:
         if not phone.startswith("56"):
             phone = "56" + phone
 
+        phone = "56928783036"
         payload = {
             "messaging_product": "whatsapp",
             "to": phone,
@@ -273,18 +274,23 @@ class WhatsappClass:
 
     def handle_message(self, message):
         print("📩 MENSAJE:", message)
+        print(f"[WHATSAPP_HANDLE] Tipo de mensaje: {message.get('type')}")
 
         if message.get("type") != "button":
+            print(f"[WHATSAPP_HANDLE] Mensaje no es de tipo button, ignorando. Tipo: {message.get('type')}")
             return
 
         payload = message.get("button", {}).get("payload")  # accept_38
         phone = message.get("from")
+        print(f"[WHATSAPP_HANDLE] Payload recibido: {payload}, Phone: {phone}")
 
         if not payload or "_" not in payload:
+            print(f"[WHATSAPP_HANDLE] Payload inválido o sin '_': {payload}")
             return
 
         action, budget_id = payload.split("_", 1)
         action = action.lower()
+        print(f"[WHATSAPP_HANDLE] Action: {action}, Budget ID: {budget_id}")
 
         budget = (
             self.db
@@ -297,24 +303,46 @@ class WhatsappClass:
             print("⚠️ Presupuesto no existe (reintento ignorado)")
             return {"status": "ignored"}
 
-        # 🔒 Ya procesado
-        if budget.status_id != 0:
+        # 🔒 Ya procesado - pero si es accept y ya está aceptado, no hacer nada
+        # Si es reject y ya está rechazado, tampoco hacer nada
+        if action == "accept" and budget.status_id == 1:
+            print(f"[WHATSAPP] Presupuesto {budget_id} ya está aceptado, no hacer nada")
             self.send_autoreply(
                 phone,
-                "⚠️ Este presupuesto ya fue respondido anteriormente."
+                "⚠️ Este presupuesto ya fue aceptado anteriormente."
+            )
+            return
+        
+        if action == "reject" and budget.status_id == 2:
+            print(f"[WHATSAPP] Presupuesto {budget_id} ya está rechazado, no hacer nada")
+            self.send_autoreply(
+                phone,
+                "⚠️ Este presupuesto ya fue rechazado anteriormente."
             )
             return
 
         if action == "accept":
-            budget.status_id = 1
-            self.db.commit()
-
-            self.send_autoreply(
-                phone,
-                "✅ Gracias por aceptar el presupuesto.\nNos pondremos en contacto contigo a la brevedad."
-            )
-
-            print(f"✅ Presupuesto {budget_id} aceptado")
+            print(f"[WHATSAPP] Procesando aceptación de presupuesto {budget_id} desde WhatsApp")
+            # Llamar al método accept de BudgetClass para crear el pedido
+            from app.backend.classes.budget_class import BudgetClass
+            budget_class = BudgetClass(self.db)
+            print(f"[WHATSAPP] Llamando a BudgetClass.accept({budget_id})")
+            accept_result = budget_class.accept(int(budget_id), dte_type_id=None)
+            print(f"[WHATSAPP] Resultado de accept: {accept_result}")
+            
+            if isinstance(accept_result, dict) and accept_result.get("status") == "error":
+                print(f"❌ Error al aceptar presupuesto {budget_id}: {accept_result.get('message')}")
+                self.send_autoreply(
+                    phone,
+                    f"❌ Ocurrió un error al procesar la aceptación del presupuesto: {accept_result.get('message')}"
+                )
+            else:
+                sale_id = accept_result.get('sale_id') if isinstance(accept_result, dict) else 'N/A'
+                print(f"[WHATSAPP] ✅ Presupuesto {budget_id} aceptado exitosamente. Sale ID: {sale_id}")
+                self.send_autoreply(
+                    phone,
+                    "✅ Gracias por aceptar el presupuesto.\nNos pondremos en contacto contigo a la brevedad."
+                )
 
         elif action == "reject":
             budget.status_id = 2
