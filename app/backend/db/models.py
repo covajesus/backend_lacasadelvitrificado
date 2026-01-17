@@ -145,6 +145,7 @@ class BudgetModel(Base):
 
     id = Column(Integer, primary_key=True)
     customer_id = Column(Integer)
+    dte_type_id = Column(Integer)
     status_id = Column(Integer, default=0)
     subtotal = Column(Integer)
     shipping = Column(Integer, default=0)

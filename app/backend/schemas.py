@@ -149,6 +149,7 @@ class BudgetProductItem(BaseModel):
 
 class StoreBudget(BaseModel):
     customer_id: int
+    dte_type_id: Optional[int] = None
     products: List[BudgetProductItem]
     subtotal: int
     shipping: Optional[int] = 0
