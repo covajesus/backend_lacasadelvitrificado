@@ -327,7 +327,7 @@ class WhatsappClass:
             from app.backend.classes.budget_class import BudgetClass
             budget_class = BudgetClass(self.db)
             print(f"[WHATSAPP] Llamando a BudgetClass.accept({budget_id})")
-            accept_result = budget_class.accept(int(budget_id), dte_type_id=None)
+            accept_result = budget_class.accept(int(budget_id))
             print(f"[WHATSAPP] Resultado de accept: {accept_result}")
             
             if isinstance(accept_result, dict) and accept_result.get("status") == "error":

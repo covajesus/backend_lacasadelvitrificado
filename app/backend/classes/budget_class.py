@@ -233,7 +233,7 @@ class BudgetClass:
             self.db.rollback()
             return {"status": "error", "message": str(e)}
 
-    def accept(self, budget_id, dte_type_id=None):
+    def accept(self, budget_id):
         print(f"[BUDGET_ACCEPT] Iniciando aceptación de presupuesto {budget_id}")
         try:
             # Usar with_for_update() para bloquear la fila y prevenir race conditions
@@ -273,14 +273,11 @@ class BudgetClass:
                 shipping_method_id = 1
                 delivery_address = customer.address if customer.address else None
 
-            # Usar dte_type_id del parámetro o del presupuesto si existe
-            final_dte_type_id = dte_type_id if dte_type_id is not None else (budget.dte_type_id if hasattr(budget, 'dte_type_id') and budget.dte_type_id else None)
-            
             # Crear solo el SaleModel
             new_sale = SaleModel(
                 customer_id=budget.customer_id,
                 shipping_method_id=shipping_method_id,
-                dte_type_id=final_dte_type_id,
+                dte_type_id=budget.dte_type_id if hasattr(budget, 'dte_type_id') else None,
                 status_id=1,
                 subtotal=budget.subtotal,
                 tax=budget.tax,
