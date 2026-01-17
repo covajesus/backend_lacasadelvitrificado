@@ -70,6 +70,17 @@ def accept_sale_payment(id: int, dte_type_id: int, status_id: int, dte_status_id
             print(f"[ERROR] Error al aceptar pago de venta {id}: {str(e)}")
             raise HTTPException(status_code=500, detail=f"Error al cambiar estado de la venta: {str(e)}")
 
+        # Actualizar dte_type_id según si se genera DTE o no
+        # dte_type_id = 1 si se genera DTE, dte_type_id = 2 si no se genera
+        sale = db.query(SaleModel).filter(SaleModel.id == id).first()
+        if sale:
+            if dte_status_id == 1:
+                sale.dte_type_id = 1  # Con DTE
+            else:
+                sale.dte_type_id = 2  # Sin DTE
+            sale.updated_date = datetime.now()
+            db.commit()
+
         # Solo generar DTE si dte_status_id == 1
         if dte_status_id == 1:
             dte_response = DteClass(db).generate_dte(id)
