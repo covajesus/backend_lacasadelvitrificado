@@ -73,6 +73,16 @@ def edit(id: int, session_user: UserLogin = Depends(get_current_active_user), db
 
     return {"message": data}
 
+@products.get("/budget/{id}")
+def budget(id: int, customer_id: int = None, session_user: UserLogin = Depends(get_current_active_user), db: Session = Depends(get_db)):
+    """
+    Endpoint para obtener datos del producto para presupuesto.
+    Devuelve lo mismo que /edit/{id} pero con public_sale_price y discount_percentage del cliente.
+    """
+    data = ProductClass(db).budget(id, customer_id=customer_id)
+
+    return {"message": data}
+
 @products.get("/sale/data/{id}")
 def sale(id: int, session_user: UserLogin = Depends(get_current_active_user), db: Session = Depends(get_db)):
     data = ProductClass(db).sale_data(id)

@@ -1,4 +1,4 @@
-from app.backend.db.models import ProductModel, SupplierModel, UnitFeatureModel, CategoryModel, LotModel, LotItemModel, UnitMeasureModel, InventoryLotItemModel
+from app.backend.db.models import ProductModel, SupplierModel, UnitFeatureModel, CategoryModel, LotModel, LotItemModel, UnitMeasureModel, InventoryLotItemModel, CustomerProductDiscountModel
 from app.backend.classes.file_class import FileClass
 from datetime import datetime
 from sqlalchemy import func
@@ -562,6 +562,122 @@ class ProductClass:
                     }
 
             # Obtener cantidad en inventario desde inventories_lots (InventoryLotItemModel)
+            inventory_quantity = (
+                self.db.query(func.sum(InventoryLotItemModel.quantity))
+                .join(LotItemModel, LotItemModel.id == InventoryLotItemModel.lot_item_id)
+                .filter(LotItemModel.product_id == id)
+                .scalar()
+            )
+
+            product_data["inventory"] = int(inventory_quantity) if inventory_quantity else 0
+
+            return {"product_data": product_data}
+
+        except Exception as e:
+            return {"error": str(e)}
+
+    def budget(self, id, customer_id=None):
+        """
+        Obtiene los datos del producto para presupuesto.
+        Devuelve lo mismo que get() pero con public_sale_price y discount_percentage del cliente.
+        """
+        try:
+            # Obtener los mismos datos que get()
+            data_query = (
+                self.db.query(
+                    ProductModel.id,
+                    ProductModel.supplier_id,
+                    ProductModel.category_id,
+                    ProductModel.code,
+                    ProductModel.product,
+                    ProductModel.original_unit_cost,
+                    ProductModel.discount_percentage,
+                    ProductModel.final_unit_cost,
+                    ProductModel.short_description,
+                    ProductModel.description,
+                    ProductModel.unit_measure_id,
+                    ProductModel.is_compound,
+                    ProductModel.compound_product_id,
+                    ProductModel.photo,
+                    ProductModel.catalog,
+                    func.max(LotItemModel.public_sale_price).label("public_sale_price")
+                )
+                .join(LotItemModel, LotItemModel.product_id == ProductModel.id, isouter=True)
+                .filter(ProductModel.id == id)
+                .group_by(
+                    ProductModel.id,
+                    ProductModel.supplier_id,
+                    ProductModel.category_id,
+                    ProductModel.code,
+                    ProductModel.product,
+                    ProductModel.original_unit_cost,
+                    ProductModel.discount_percentage,
+                    ProductModel.final_unit_cost,
+                    ProductModel.short_description,
+                    ProductModel.description,
+                    ProductModel.unit_measure_id,
+                    ProductModel.is_compound,
+                    ProductModel.compound_product_id,
+                    ProductModel.photo,
+                    ProductModel.catalog
+                )
+                .first()
+            )
+
+            if not data_query:
+                return {"error": "No se encontraron datos para el producto especificado."}
+
+            # Obtener descuento del cliente para este producto si se proporciona customer_id
+            customer_discount = None
+            if customer_id:
+                customer_discount_record = (
+                    self.db.query(CustomerProductDiscountModel)
+                    .filter(CustomerProductDiscountModel.customer_id == customer_id)
+                    .filter(CustomerProductDiscountModel.product_id == id)
+                    .first()
+                )
+                if customer_discount_record:
+                    customer_discount = customer_discount_record.discount_percentage
+
+            # Diccionario base del producto (igual que get)
+            product_data = {
+                "id": data_query.id,
+                "supplier_id": data_query.supplier_id,
+                "category_id": data_query.category_id,
+                "code": data_query.code,
+                "original_unit_cost": data_query.original_unit_cost,
+                "final_unit_cost": data_query.final_unit_cost,
+                "discount_percentage": data_query.discount_percentage,
+                "product": data_query.product,
+                "short_description": data_query.short_description,
+                "description": data_query.description,
+                "unit_measure_id": data_query.unit_measure_id,
+                "is_compound": data_query.is_compound,
+                "compound_product_id": data_query.compound_product_id,
+                "photo": data_query.photo,
+                "catalog": data_query.catalog,
+                "public_sale_price": data_query.public_sale_price if data_query.public_sale_price is not None else 0,
+                "customer_discount_percentage": customer_discount,
+                "features": None,
+                "inventory": 0
+            }
+
+            if data_query.unit_measure_id == 1 or data_query.unit_measure_id == 2 or data_query.unit_measure_id == 3:
+                features = self.db.query(UnitFeatureModel).filter(
+                    UnitFeatureModel.product_id == id
+                ).first()
+                if features:
+                    product_data["features"] = {
+                        "product_id": features.product_id,
+                        "quantity_per_package": features.quantity_per_package,
+                        "quantity_per_pallet": features.quantity_per_pallet,
+                        "weight_per_unit": features.weight_per_unit,
+                        "weight_per_pallet": features.weight_per_pallet,
+                        "added_date": features.added_date,
+                        "updated_date": features.updated_date,
+                    }
+
+            # Obtener cantidad en inventario
             inventory_quantity = (
                 self.db.query(func.sum(InventoryLotItemModel.quantity))
                 .join(LotItemModel, LotItemModel.id == InventoryLotItemModel.lot_item_id)

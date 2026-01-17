@@ -722,13 +722,21 @@ class SaleClass:
         
 
     def change_status(self, id, status_id):
-        # Bloquear la venta para evitar procesamiento concurrente
-        existing_sale = (
-            self.db.query(SaleModel)
-            .filter(SaleModel.id == id)
-            .with_for_update(nowait=True)
-            .one_or_none()
-        )
+        try:
+            # Bloquear la venta para evitar procesamiento concurrente
+            existing_sale = (
+                self.db.query(SaleModel)
+                .filter(SaleModel.id == id)
+                .with_for_update(nowait=True)
+                .one_or_none()
+            )
+        except Exception as lock_error:
+            # Si falla el bloqueo, la venta está siendo procesada por otro proceso
+            error_msg = str(lock_error).lower()
+            if "lock" in error_msg or "wait" in error_msg or "timeout" in error_msg:
+                raise Exception("La venta está siendo procesada por otro proceso. Por favor, intente nuevamente en unos segundos.")
+            # Re-lanzar el error si no es de bloqueo
+            raise
 
         if not existing_sale:
             return "No data found"

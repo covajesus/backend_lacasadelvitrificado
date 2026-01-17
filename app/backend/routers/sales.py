@@ -48,16 +48,26 @@ def accept_sale_payment(id: int, dte_type_id: int, status_id:int, session_user: 
         try:
             change_status_result = SaleClass(db).change_status(id, status_id)
             
+            # Verificar si el resultado es un diccionario con error
+            if isinstance(change_status_result, dict) and change_status_result.get("status") == "error":
+                raise HTTPException(status_code=500, detail=change_status_result.get("message", "Error al cambiar estado de la venta"))
+            
             # Si ya está en ese estado, retornar mensaje
             if change_status_result == "Sale already in this status":
                 return {"message": {"status": "info", "message": "La venta ya está en este estado"}}
             
             if change_status_result == "No data found":
                 raise HTTPException(status_code=404, detail="Venta no encontrada")
+        except HTTPException:
+            # Re-lanzar HTTPException sin modificar
+            raise
         except Exception as e:
             # Manejar error de bloqueo de fila
-            if "could not obtain lock" in str(e).lower() or "lock" in str(e).lower():
+            error_msg = str(e).lower()
+            if "could not obtain lock" in error_msg or "lock" in error_msg or "deadlock" in error_msg or "being processed" in error_msg:
                 raise HTTPException(status_code=409, detail="La venta está siendo procesada. Por favor, intente nuevamente en unos segundos.")
+            # Log del error para debugging
+            print(f"[ERROR] Error al aceptar pago de venta {id}: {str(e)}")
             raise HTTPException(status_code=500, detail=f"Error al cambiar estado de la venta: {str(e)}")
 
         dte_response = DteClass(db).generate_dte(id)
