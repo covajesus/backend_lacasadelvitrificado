@@ -42,8 +42,8 @@ def edit(db: Session = Depends(get_db)):
 
     return {"message": data}
 
-@sales.get("/accept_sale_payment/{id}/{dte_type_id}/{status_id}")
-def accept_sale_payment(id: int, dte_type_id: int, status_id:int, session_user: UserLogin = Depends(get_current_active_user), db: Session = Depends(get_db)):
+@sales.get("/accept_sale_payment/{id}/{dte_type_id}/{status_id}/{dte_status_id}")
+def accept_sale_payment(id: int, dte_type_id: int, status_id: int, dte_status_id: int, session_user: UserLogin = Depends(get_current_active_user), db: Session = Depends(get_db)):
     if status_id == 2:
         try:
             change_status_result = SaleClass(db).change_status(id, status_id)
@@ -70,48 +70,53 @@ def accept_sale_payment(id: int, dte_type_id: int, status_id:int, session_user: 
             print(f"[ERROR] Error al aceptar pago de venta {id}: {str(e)}")
             raise HTTPException(status_code=500, detail=f"Error al cambiar estado de la venta: {str(e)}")
 
-        dte_response = DteClass(db).generate_dte(id)
+        # Solo generar DTE si dte_status_id == 1
+        if dte_status_id == 1:
+            dte_response = DteClass(db).generate_dte(id)
 
-        if dte_response and dte_response > 0:  # Si se generó el DTE y retornó un folio
-            # Actualizar el folio en la venta
-            sale = db.query(SaleModel).filter(SaleModel.id == id).first()
-            if sale:
-                sale.folio = dte_response
-                sale.updated_date = datetime.now()
-                db.commit()
-                
-                # Enviar WhatsApp con los datos del DTE
-                try:
-                    # Obtener datos del cliente
-                    customer = db.query(CustomerModel).filter(CustomerModel.id == sale.customer_id).first()
-                    if customer and customer.phone:
-                        # Determinar tipo de DTE
-                        dte_type = "Boleta Electrónica" if sale.dte_type_id == 1 else "Factura Electrónica"
-                        
-                        # Formatear fecha
-                        date_formatted = sale.added_date.strftime("%d-%m-%Y")
-                        
-                        # Enviar WhatsApp del DTE
-                        whatsapp = WhatsappClass(db)
-                        whatsapp.send_dte(
-                            customer_phone=customer.phone,
-                            dte_type=dte_type,
-                            folio=dte_response,
-                            date=date_formatted,
-                            amount=int(sale.total),
-                            dynamic_value=dte_response  # Usar el folio como valor dinámico
-                        )
-                        print(f"[WHATSAPP] Mensaje DTE enviado al cliente {customer.phone}")
-                    else:
-                        print("[WHATSAPP] Cliente no encontrado o sin teléfono")
-                except Exception as e:
-                    print(f"[WHATSAPP] Error enviando mensaje: {str(e)}")
-                
-                return {"message": f"Dte created successfully with folio: {dte_response}"}
+            if dte_response and dte_response > 0:  # Si se generó el DTE y retornó un folio
+                # Actualizar el folio en la venta
+                sale = db.query(SaleModel).filter(SaleModel.id == id).first()
+                if sale:
+                    sale.folio = dte_response
+                    sale.updated_date = datetime.now()
+                    db.commit()
+                    
+                    # Enviar WhatsApp con los datos del DTE
+                    try:
+                        # Obtener datos del cliente
+                        customer = db.query(CustomerModel).filter(CustomerModel.id == sale.customer_id).first()
+                        if customer and customer.phone:
+                            # Determinar tipo de DTE
+                            dte_type = "Boleta Electrónica" if sale.dte_type_id == 1 else "Factura Electrónica"
+                            
+                            # Formatear fecha
+                            date_formatted = sale.added_date.strftime("%d-%m-%Y")
+                            
+                            # Enviar WhatsApp del DTE
+                            whatsapp = WhatsappClass(db)
+                            whatsapp.send_dte(
+                                customer_phone=customer.phone,
+                                dte_type=dte_type,
+                                folio=dte_response,
+                                date=date_formatted,
+                                amount=int(sale.total),
+                                dynamic_value=dte_response  # Usar el folio como valor dinámico
+                            )
+                            print(f"[WHATSAPP] Mensaje DTE enviado al cliente {customer.phone}")
+                        else:
+                            print("[WHATSAPP] Cliente no encontrado o sin teléfono")
+                    except Exception as e:
+                        print(f"[WHATSAPP] Error enviando mensaje: {str(e)}")
+                    
+                    return {"message": f"Dte created successfully with folio: {dte_response}"}
+                else:
+                    return {"message": "Sale not found"}
             else:
-                return {"message": "Sale not found"}
+                return {"message": "Dte creation failed"}
         else:
-            return {"message": "Dte creation failed"}
+            # Si dte_id == 0, no generar DTE y retornar éxito
+            return {"message": "Payment accepted successfully. No DTE generated."}
 
 @sales.get("/reject_sale_payment/{id}/{status_id}")
 def reject_sale_payment(id: int, status_id:int, session_user: UserLogin = Depends(get_current_active_user), db: Session = Depends(get_db)):

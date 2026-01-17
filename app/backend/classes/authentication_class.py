@@ -16,11 +16,20 @@ class AuthenticationClass:
 
     def authenticate_shopping_login(self, identification_number):
         user = UserClass(self.db).get('rut', identification_number)
-        response_data = json.loads(user)
+        
+        # Verificar si user es un string de error en lugar de JSON
+        if not user or not isinstance(user, str) or not user.strip().startswith('{'):
+            raise HTTPException(status_code=401, detail="Could not validate credentials", headers={"WWW-Authenticate": "Bearer"})
+        
+        try:
+            response_data = json.loads(user)
+        except (json.JSONDecodeError, ValueError) as e:
+            # Si no es JSON válido, significa que no se encontró el usuario
+            raise HTTPException(status_code=401, detail="Could not validate credentials", headers={"WWW-Authenticate": "Bearer"})
 
         print(response_data)
 
-        if not user:
+        if not response_data or "user_data" not in response_data:
             raise HTTPException(status_code=401, detail="Could not validate credentials", headers={"WWW-Authenticate": "Bearer"})
 
         return response_data
