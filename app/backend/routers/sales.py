@@ -71,11 +71,12 @@ def accept_sale_payment(id: int, dte_type_id: int, status_id: int, dte_status_id
             raise HTTPException(status_code=500, detail=f"Error al cambiar estado de la venta: {str(e)}")
 
         # Actualizar dte_type_id según si se genera DTE o no
-        # dte_type_id = 1 si se genera DTE, dte_type_id = 2 si no se genera
+        # Si dte_status_id == 1: usar el dte_type_id del parámetro (1=Boleta, 2=Factura)
+        # Si dte_status_id != 1: establecer dte_type_id = 2 (Sin DTE)
         sale = db.query(SaleModel).filter(SaleModel.id == id).first()
         if sale:
             if dte_status_id == 1:
-                sale.dte_type_id = 1  # Con DTE
+                sale.dte_type_id = dte_type_id  # Usar el dte_type_id que viene del frontend
             else:
                 sale.dte_type_id = 2  # Sin DTE
             sale.updated_date = datetime.now()
