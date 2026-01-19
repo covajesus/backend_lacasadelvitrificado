@@ -88,7 +88,10 @@ class DteClass:
         else:
             subtotal = sale.subtotal
 
+        print(f"[DEBUG DTE] Generando DTE para venta {id}")
+        print(f"[DEBUG DTE] dte_type_id en venta: {sale.dte_type_id}")
         if sale.dte_type_id == 1:
+            print(f"[DEBUG DTE] Generando BOLETA (dte_type_id = 1)")
             # Armar el payload
             payload = {
                 "Documento": {
@@ -164,6 +167,7 @@ class DteClass:
                     pass
                 return 0
         else:
+            print(f"[DEBUG DTE] Generando FACTURA (dte_type_id != 1, valor: {sale.dte_type_id})")
             payload = {
                 "Documento": {
                     "Encabezado": {

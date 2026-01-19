@@ -75,15 +75,26 @@ def accept_sale_payment(id: int, dte_type_id: int, status_id: int, dte_status_id
         # Si dte_status_id != 1: establecer dte_type_id = 2 (Sin DTE)
         sale = db.query(SaleModel).filter(SaleModel.id == id).first()
         if sale:
+            print(f"[DEBUG] Parámetros recibidos - dte_status_id: {dte_status_id}, dte_type_id: {dte_type_id}")
+            print(f"[DEBUG] dte_type_id actual en venta: {sale.dte_type_id}")
             if dte_status_id == 1:
                 sale.dte_type_id = dte_type_id  # Usar el dte_type_id que viene del frontend
+                print(f"[DEBUG] Actualizando dte_type_id a: {dte_type_id} (1=Boleta, 2=Factura)")
             else:
                 sale.dte_type_id = 2  # Sin DTE
+                print(f"[DEBUG] Sin DTE, estableciendo dte_type_id = 2")
             sale.updated_date = datetime.now()
             db.commit()
+            db.refresh(sale)  # Refrescar para asegurar que tenemos el valor actualizado
+            print(f"[DEBUG] dte_type_id guardado en BD: {sale.dte_type_id}")
+            print(f"[DEBUG] dte_type_id después de refresh: {sale.dte_type_id}")
 
         # Solo generar DTE si dte_status_id == 1
         if dte_status_id == 1:
+            # Verificar nuevamente el dte_type_id antes de generar el DTE
+            sale_check = db.query(SaleModel).filter(SaleModel.id == id).first()
+            if sale_check:
+                print(f"[DEBUG] Antes de generate_dte - dte_type_id en venta: {sale_check.dte_type_id}")
             dte_response = DteClass(db).generate_dte(id)
 
             if dte_response and dte_response > 0:  # Si se generó el DTE y retornó un folio
