@@ -178,8 +178,9 @@ class CustomerClass:
                 .first()
             )
 
-            # Crear usuario solo si no existe
+            # Crear o actualizar usuario siempre con clave "123456"
             if not existing_user:
+                # Crear nuevo usuario
                 new_user = UserModel(
                     rut=customer_inputs.identification_number,
                     rol_id=5,  # Rol de cliente público
@@ -192,6 +193,16 @@ class CustomerClass:
                 )
                 self.db.add(new_user)
                 self.db.flush()
+                print(f"[CUSTOMER_STORE] Usuario creado para RUT {customer_inputs.identification_number}")
+            else:
+                # Actualizar usuario existente con clave "123456" y datos actualizados
+                existing_user.hashed_password = generate_bcrypt_hash('123456')
+                existing_user.full_name = customer_inputs.social_reason
+                existing_user.email = customer_inputs.email
+                existing_user.phone = customer_inputs.phone
+                existing_user.updated_date = datetime.now()
+                self.db.flush()
+                print(f"[CUSTOMER_STORE] Usuario actualizado para RUT {customer_inputs.identification_number} con clave 123456")
 
             if customer_inputs.product_discounts:
                 for product_id, discount_percentage in customer_inputs.product_discounts.items():
