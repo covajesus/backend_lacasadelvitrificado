@@ -586,8 +586,44 @@ class SaleClass:
                 for sp in sale_products_unprocessed:
                     print(f"[CHANGE_STATUS] Producto sin procesar - ID: {sp.product_id}, Cantidad: {sp.quantity}, inventory_movement_id: {sp.inventory_movement_id}")
 
-                # Si hay productos sin procesar, procesarlos (venta directa)
+                # Si hay productos sin procesar, validar stock ANTES de procesar
                 if sale_products_unprocessed:
+                    # Validar que todos los productos tengan stock disponible antes de procesar
+                    for sale_product in sale_products_unprocessed:
+                        product_id = sale_product.product_id
+                        quantity = sale_product.quantity
+                        
+                        if quantity <= 0:
+                            continue
+                        
+                        # Calcular stock total disponible para este producto
+                        total_stock_query = (
+                            self.db.query(func.sum(LotItemModel.quantity).label("total_stock"))
+                            .join(LotModel, LotModel.id == LotItemModel.lot_id)
+                            .filter(LotItemModel.product_id == product_id)
+                            .filter(LotItemModel.quantity > 0)
+                        )
+                        
+                        total_stock = total_stock_query.scalar() or 0
+                        
+                        if total_stock < quantity:
+                            error_msg = f"Stock insuficiente para el producto ID {product_id}. Disponible: {total_stock}, Solicitado: {quantity}"
+                            print(f"[CHANGE_STATUS] ERROR: {error_msg}")
+                            return {"status": "error", "message": error_msg}
+                        
+                        # Verificar que exista inventario para el producto
+                        inventory = (
+                            self.db.query(InventoryModel)
+                            .filter(InventoryModel.product_id == product_id)
+                            .first()
+                        )
+                        
+                        if not inventory:
+                            error_msg = f"No se encontró inventario para el producto ID {product_id}"
+                            print(f"[CHANGE_STATUS] ERROR: {error_msg}")
+                            return {"status": "error", "message": error_msg}
+                    
+                    # Si todas las validaciones pasan, procesar productos
                     print(f"[CHANGE_STATUS] Procesando {len(sale_products_unprocessed)} productos sin procesar")
                     for sale_product in sale_products_unprocessed:
                         product_id = sale_product.product_id
@@ -611,8 +647,9 @@ class SaleClass:
                         )
 
                         if not available_lots:
-                            print(f"[!] No hay lotes disponibles para el producto {product_id}")
-                            continue
+                            error_msg = f"No hay lotes disponibles para el producto ID {product_id}"
+                            print(f"[CHANGE_STATUS] ERROR: {error_msg}")
+                            return {"status": "error", "message": error_msg}
 
                         # Eliminar el sale_product original ya que crearemos uno por cada lote
                         self.db.delete(sale_product)
@@ -637,8 +674,9 @@ class SaleClass:
                             )
 
                             if not inventory:
-                                print(f"[!] No se encontró inventario para el producto {product_id}")
-                                continue
+                                error_msg = f"No se encontró inventario para el producto ID {product_id}"
+                                print(f"[CHANGE_STATUS] ERROR: {error_msg}")
+                                return {"status": "error", "message": error_msg}
 
                             # Obtener unit_cost del kardex para el movimiento (si existe)
                             kardex_record = (
@@ -772,8 +810,9 @@ class SaleClass:
                                 )
 
                                 if not available_lots:
-                                    print(f"[!] No hay lotes disponibles para el producto {product_id}")
-                                    continue
+                                    error_msg = f"No hay lotes disponibles para el producto ID {product_id}"
+                                    print(f"[CHANGE_STATUS] ERROR: {error_msg}")
+                                    return {"status": "error", "message": error_msg}
 
                                 # Procesar lotes disponibles
                                 for lot_item, lot in available_lots:
@@ -794,8 +833,9 @@ class SaleClass:
                                     )
 
                                     if not inventory:
-                                        print(f"[!] No se encontró inventario para el producto {product_id}")
-                                        continue
+                                        error_msg = f"No se encontró inventario para el producto ID {product_id}"
+                                        print(f"[CHANGE_STATUS] ERROR: {error_msg}")
+                                        return {"status": "error", "message": error_msg}
 
                                     # Obtener unit_cost del kardex para el movimiento (si existe)
                                     kardex_record = (

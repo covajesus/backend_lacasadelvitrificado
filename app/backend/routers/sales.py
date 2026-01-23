@@ -64,11 +64,23 @@ def accept_sale_payment(id: int, dte_type_id: int, status_id: int, dte_status_id
         except Exception as e:
             # Manejar error de bloqueo de fila
             error_msg = str(e).lower()
-            if "could not obtain lock" in error_msg or "lock" in error_msg or "deadlock" in error_msg or "being processed" in error_msg:
-                raise HTTPException(status_code=409, detail="La venta está siendo procesada. Por favor, intente nuevamente en unos segundos.")
+            error_msg_original = str(e)
+            
+            if "could not obtain lock" in error_msg or "lock" in error_msg or "deadlock" in error_msg or "being processed" in error_msg or "timeout" in error_msg or "wait" in error_msg:
+                print(f"[ERROR] Error de bloqueo al aceptar pago de venta {id}: {error_msg_original}")
+                raise HTTPException(status_code=409, detail="La venta está siendo procesada por otro usuario. Por favor, espere unos segundos e intente nuevamente.")
+            
+            # Verificar si es un error de stock o validación
+            if "stock" in error_msg or "insuficiente" in error_msg or "disponible" in error_msg or "lotes" in error_msg or "inventario" in error_msg:
+                print(f"[ERROR] Error de stock al aceptar pago de venta {id}: {error_msg_original}")
+                raise HTTPException(status_code=400, detail=f"Error de validación: {error_msg_original}")
+            
             # Log del error para debugging
-            print(f"[ERROR] Error al aceptar pago de venta {id}: {str(e)}")
-            raise HTTPException(status_code=500, detail=f"Error al cambiar estado de la venta: {str(e)}")
+            print(f"[ERROR] Error inesperado al aceptar pago de venta {id}: {error_msg_original}")
+            print(f"[ERROR] Tipo de error: {type(e).__name__}")
+            import traceback
+            print(f"[ERROR] Traceback: {traceback.format_exc()}")
+            raise HTTPException(status_code=500, detail=f"Error al aceptar el pago: {error_msg_original}")
 
         # Actualizar dte_type_id según si se genera DTE o no
         # Si dte_status_id == 1: usar el dte_type_id del parámetro (1=Boleta, 2=Factura)
@@ -95,51 +107,76 @@ def accept_sale_payment(id: int, dte_type_id: int, status_id: int, dte_status_id
             sale_check = db.query(SaleModel).filter(SaleModel.id == id).first()
             if sale_check:
                 print(f"[DEBUG] Antes de generate_dte - dte_type_id en venta: {sale_check.dte_type_id}")
-            dte_response = DteClass(db).generate_dte(id)
-
-            if dte_response and dte_response > 0:  # Si se generó el DTE y retornó un folio
-                # Actualizar el folio en la venta
-                sale = db.query(SaleModel).filter(SaleModel.id == id).first()
-                if sale:
-                    sale.folio = dte_response
-                    sale.updated_date = datetime.now()
-                    db.commit()
-                    
-                    # Enviar WhatsApp con los datos del DTE
-                    try:
-                        # Obtener datos del cliente
-                        customer = db.query(CustomerModel).filter(CustomerModel.id == sale.customer_id).first()
-                        if customer and customer.phone:
-                            # Determinar tipo de DTE
-                            dte_type = "Boleta Electrónica" if sale.dte_type_id == 1 else "Factura Electrónica"
-                            
-                            # Formatear fecha
-                            date_formatted = sale.added_date.strftime("%d-%m-%Y")
-                            
-                            # Enviar WhatsApp del DTE
-                            whatsapp = WhatsappClass(db)
-                            whatsapp.send_dte(
-                                customer_phone=customer.phone,
-                                dte_type=dte_type,
-                                folio=dte_response,
-                                date=date_formatted,
-                                amount=int(sale.total),
-                                dynamic_value=dte_response  # Usar el folio como valor dinámico
-                            )
-                            print(f"[WHATSAPP] Mensaje DTE enviado al cliente {customer.phone}")
-                        else:
-                            print("[WHATSAPP] Cliente no encontrado o sin teléfono")
-                    except Exception as e:
-                        print(f"[WHATSAPP] Error enviando mensaje: {str(e)}")
-                    
-                    return {"message": f"Dte created successfully with folio: {dte_response}"}
+            
+            try:
+                dte_response = DteClass(db).generate_dte(id)
+                
+                if dte_response and dte_response > 0:  # Si se generó el DTE y retornó un folio
+                    # Actualizar el folio en la venta
+                    sale = db.query(SaleModel).filter(SaleModel.id == id).first()
+                    if sale:
+                        sale.folio = dte_response
+                        sale.updated_date = datetime.now()
+                        db.commit()
+                        
+                        # Enviar WhatsApp con los datos del DTE
+                        try:
+                            # Obtener datos del cliente
+                            customer = db.query(CustomerModel).filter(CustomerModel.id == sale.customer_id).first()
+                            if customer and customer.phone:
+                                # Determinar tipo de DTE
+                                dte_type = "Boleta Electrónica" if sale.dte_type_id == 1 else "Factura Electrónica"
+                                
+                                # Formatear fecha
+                                date_formatted = sale.added_date.strftime("%d-%m-%Y")
+                                
+                                # Enviar WhatsApp del DTE
+                                whatsapp = WhatsappClass(db)
+                                whatsapp.send_dte(
+                                    customer_phone=customer.phone,
+                                    dte_type=dte_type,
+                                    folio=dte_response,
+                                    date=date_formatted,
+                                    amount=int(sale.total),
+                                    dynamic_value=dte_response  # Usar el folio como valor dinámico
+                                )
+                                print(f"[WHATSAPP] Mensaje DTE enviado al cliente {customer.phone}")
+                            else:
+                                print("[WHATSAPP] Cliente no encontrado o sin teléfono")
+                        except Exception as e:
+                            print(f"[WHATSAPP] Error enviando mensaje: {str(e)}")
+                        
+                        return {
+                            "status": "success",
+                            "message": f"Dte created properly with folio: {dte_response}",
+                            "folio": dte_response
+                        }
+                    else:
+                        return {
+                            "status": "error",
+                            "message": "Venta no encontrada después de generar DTE"
+                        }
                 else:
-                    return {"message": "Sale not found"}
-            else:
-                return {"message": "Dte creation failed"}
+                    # Si generate_dte retornó 0, significa que falló
+                    print(f"[ERROR] generate_dte retornó 0 o None para venta {id}")
+                    return {
+                        "status": "error",
+                        "message": "No se pudo generar el DTE. Verifique los logs del servidor para más detalles."
+                    }
+            except Exception as e:
+                print(f"[ERROR] Excepción al generar DTE para venta {id}: {str(e)}")
+                import traceback
+                print(f"[ERROR] Traceback: {traceback.format_exc()}")
+                return {
+                    "status": "error",
+                    "message": f"Error al generar DTE: {str(e)}"
+                }
         else:
-            # Si dte_id == 0, no generar DTE y retornar éxito
-            return {"message": "Payment accepted successfully. No DTE generated."}
+            # Si dte_status_id != 1, no generar DTE y retornar éxito
+            return {
+                "status": "success",
+                "message": "Payment accepted successfully. No DTE generated."
+            }
 
 @sales.get("/reject_sale_payment/{id}/{status_id}")
 def reject_sale_payment(id: int, status_id:int, session_user: UserLogin = Depends(get_current_active_user), db: Session = Depends(get_db)):
