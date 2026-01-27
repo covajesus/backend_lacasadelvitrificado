@@ -1,4 +1,4 @@
-from app.backend.db.models import SaleModel, CustomerModel, SettingModel, RegionModel, CommuneModel, SaleProductModel, ProductModel, InventoryModel, UnitMeasureModel, SupplierModel, CategoryModel, LotItemModel, LotModel, InventoryMovementModel, InventoryLotItemModel
+from app.backend.db.models import SaleModel, CustomerModel, SettingModel, RegionModel, CommuneModel, SaleProductModel, ProductModel, InventoryModel, UnitMeasureModel, SupplierModel, CategoryModel, LotItemModel, LotModel, InventoryMovementModel, InventoryLotItemModel, LogsModel
 from datetime import datetime, timedelta
 from app.backend.classes.setting_class import SettingClass
 from sqlalchemy import func
@@ -135,6 +135,23 @@ class DteClass:
 
             print(f"[DEBUG BOLETA] Response status: {response.status_code}")
             print(f"[DEBUG BOLETA] Response text: {response.text}")
+            
+            # Guardar log de la respuesta (truncar a 255 caracteres si es necesario)
+            try:
+                log_message = f"BOLETA - Venta ID: {id} | Status: {response.status_code} | Response: {response.text} | Payload: {json.dumps(payload)}"
+                if len(log_message) > 255:
+                    log_message = log_message[:252] + "..."
+                
+                log_entry = LogsModel(
+                    log=log_message,
+                    added_date=datetime.now(),
+                    updated_date=datetime.now()
+                )
+                self.db.add(log_entry)
+                self.db.commit()
+            except Exception as log_error:
+                print(f"[ERROR] No se pudo guardar log: {str(log_error)}")
+                self.db.rollback()
 
             if response.status_code == 200:
                 try:
@@ -215,6 +232,23 @@ class DteClass:
 
             print(f"[DEBUG FACTURA] Response status: {response.status_code}")
             print(f"[DEBUG FACTURA] Response text: {response.text}")
+            
+            # Guardar log de la respuesta (truncar a 255 caracteres si es necesario)
+            try:
+                log_message = f"FACTURA - Venta ID: {id} | Status: {response.status_code} | Response: {response.text} | Payload: {json.dumps(payload)}"
+                if len(log_message) > 255:
+                    log_message = log_message[:252] + "..."
+                
+                log_entry = LogsModel(
+                    log=log_message,
+                    added_date=datetime.now(),
+                    updated_date=datetime.now()
+                )
+                self.db.add(log_entry)
+                self.db.commit()
+            except Exception as log_error:
+                print(f"[ERROR] No se pudo guardar log: {str(log_error)}")
+                self.db.rollback()
 
             if response.status_code == 200:
                 try:

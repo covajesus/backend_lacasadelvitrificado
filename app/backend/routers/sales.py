@@ -125,6 +125,8 @@ def send_dte(db: Session = Depends(get_db)):
         # Buscar todas las ventas con status_id = 2 (aceptadas)
         sales = db.query(SaleModel).filter(SaleModel.status_id == 2).all()
         
+        print(f"[SEND_DTE] Total de ventas con status_id = 2 encontradas: {len(sales)}")
+        
         if not sales:
             return {
                 "status": "info",
@@ -146,21 +148,27 @@ def send_dte(db: Session = Depends(get_db)):
         
         for sale in sales:
             try:
+                print(f"[SEND_DTE] Procesando venta {sale.id}: status_id={sale.status_id}, dte_status_id={sale.dte_status_id}, dte_type_id={sale.dte_type_id}, folio={sale.folio}")
+                
                 # Si ya tiene folio, saltar (ya está procesada)
-                if sale.folio:
+                if sale.folio and sale.folio > 0:
                     skipped_count += 1
                     details.append({
                         "sale_id": sale.id,
                         "status": "skipped",
                         "message": f"Venta {sale.id} ya tiene folio ({sale.folio}), no requiere procesamiento"
                     })
+                    print(f"[SEND_DTE] Venta {sale.id} omitida: ya tiene folio")
                     continue
                 
                 # Si no tiene folio, revisar dte_status_id
-                if not sale.folio:
+                if not sale.folio or sale.folio == 0:
+                    print(f"[SEND_DTE] Venta {sale.id} no tiene folio. Verificando dte_status_id: {sale.dte_status_id}")
+                    
                     # Si dte_status_id == 1: quiere boleta o factura
                     if sale.dte_status_id == 1:
                         processed_count += 1
+                        print(f"[SEND_DTE] Venta {sale.id} requiere DTE (dte_status_id=1). dte_type_id={sale.dte_type_id}")
                         
                         # Verificar que la venta tenga dte_type_id configurado (debe ser 1, no 2 que significa "Sin DTE")
                         if sale.dte_type_id == 2:
@@ -170,13 +178,16 @@ def send_dte(db: Session = Depends(get_db)):
                                 "status": "skipped",
                                 "message": f"Venta {sale.id} tiene dte_status_id=1 pero dte_type_id=2 (inconsistencia)"
                             })
+                            print(f"[SEND_DTE] Venta {sale.id} omitida: inconsistencia dte_status_id=1 pero dte_type_id=2")
                             continue
                         
                         # Generar el DTE
-                        print(f"[SEND_DTE] La venta {sale.id} no tiene folio, generando DTE...")
-                        print(f"[SEND_DTE] dte_type_id en venta: {sale.dte_type_id}")
+                        print(f"[SEND_DTE] Generando DTE para venta {sale.id}...")
+                        print(f"[SEND_DTE] dte_type_id en venta: {sale.dte_type_id} (1=Boleta, 2=Factura)")
                         
                         dte_response = DteClass(db).generate_dte(sale.id)
+                        
+                        print(f"[SEND_DTE] Respuesta de generate_dte para venta {sale.id}: {dte_response} (tipo: {type(dte_response)})")
                         
                         if dte_response and dte_response > 0:  # Si se generó el DTE y retornó un folio
                             # Actualizar el folio en la venta
@@ -184,15 +195,15 @@ def send_dte(db: Session = Depends(get_db)):
                             sale.updated_date = datetime.now()
                             db.commit()
                             db.refresh(sale)
-                            print(f"[SEND_DTE] DTE generado exitosamente para venta {sale.id} con folio: {dte_response}")
+                            print(f"[SEND_DTE] ✅ DTE generado exitosamente para venta {sale.id} con folio: {dte_response}")
                         else:
                             # Si generate_dte retornó 0, significa que falló
-                            print(f"[ERROR] generate_dte retornó 0 o None para venta {sale.id}")
+                            print(f"[ERROR] ❌ generate_dte retornó 0 o None para venta {sale.id}. Respuesta: {dte_response}")
                             error_count += 1
                             details.append({
                                 "sale_id": sale.id,
                                 "status": "error",
-                                "message": f"No se pudo generar el DTE para la venta {sale.id}"
+                                "message": f"No se pudo generar el DTE para la venta {sale.id}. Respuesta: {dte_response}"
                             })
                             continue
                         

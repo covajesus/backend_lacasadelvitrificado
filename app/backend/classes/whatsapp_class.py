@@ -312,7 +312,7 @@ class WhatsappClass:
                 "⚠️ Este presupuesto ya fue aceptado anteriormente."
             )
             return
-        
+
         if action == "reject" and budget.status_id == 2:
             print(f"[WHATSAPP] Presupuesto {budget_id} ya está rechazado, no hacer nada")
             self.send_autoreply(
@@ -335,7 +335,7 @@ class WhatsappClass:
                 self.send_autoreply(
                     phone,
                     f"❌ Ocurrió un error al procesar la aceptación del presupuesto: {accept_result.get('message')}"
-                )
+            )
             else:
                 sale_id = accept_result.get('sale_id') if isinstance(accept_result, dict) else 'N/A'
                 print(f"[WHATSAPP] ✅ Presupuesto {budget_id} aceptado exitosamente. Sale ID: {sale_id}")

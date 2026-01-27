@@ -395,3 +395,11 @@ class KardexValuesModel(Base):
     average_cost = Column(Integer, default=0)
     added_date = Column(DateTime(), default=datetime.now)
     updated_date = Column(DateTime(), default=datetime.now)
+
+class LogsModel(Base):
+    __tablename__ = 'logs'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    log = Column(String(255))
+    added_date = Column(DateTime(), default=datetime.now)
+    updated_date = Column(DateTime(), default=datetime.now)
