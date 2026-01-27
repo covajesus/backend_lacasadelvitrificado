@@ -117,6 +117,7 @@ class SaleModel(Base):
     customer_id = Column(Integer)
     shipping_method_id = Column(Integer)
     dte_type_id = Column(Integer)
+    dte_status_id = Column(Integer)
     status_id = Column(Integer)
     folio = Column(Integer, default=0)
     subtotal = Column(Float)
