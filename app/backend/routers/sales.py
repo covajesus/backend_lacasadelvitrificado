@@ -114,7 +114,7 @@ def accept_sale_payment(id: int, dte_type_id: int, status_id: int, dte_status_id
         }
 
 @sales.get("/send_dte")
-def send_dte(session_user: UserLogin = Depends(get_current_active_user), db: Session = Depends(get_db)):
+def send_dte(db: Session = Depends(get_db)):
     """
     Procesa todas las ventas con status_id = 2 (aceptadas):
     - Si dte_status_id == 1: Genera DTE, envía WhatsApp y cambia status_id a 4
