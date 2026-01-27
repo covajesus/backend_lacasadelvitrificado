@@ -170,16 +170,9 @@ def send_dte(db: Session = Depends(get_db)):
                         processed_count += 1
                         print(f"[SEND_DTE] Venta {sale.id} requiere DTE (dte_status_id=1). dte_type_id={sale.dte_type_id}")
                         
-                        # Verificar que la venta tenga dte_type_id configurado (debe ser 1, no 2 que significa "Sin DTE")
-                        if sale.dte_type_id == 2:
-                            skipped_count += 1
-                            details.append({
-                                "sale_id": sale.id,
-                                "status": "skipped",
-                                "message": f"Venta {sale.id} tiene dte_status_id=1 pero dte_type_id=2 (inconsistencia)"
-                            })
-                            print(f"[SEND_DTE] Venta {sale.id} omitida: inconsistencia dte_status_id=1 pero dte_type_id=2")
-                            continue
+                        # Verificar que la venta tenga dte_type_id válido (1=Boleta, 2=Factura cuando dte_status_id=1)
+                        # Si dte_status_id=1, entonces dte_type_id debe ser 1 (Boleta) o 2 (Factura)
+                        # No hay necesidad de validar porque si dte_status_id=1, dte_type_id=2 significa Factura, no "Sin DTE"
                         
                         # Generar el DTE
                         print(f"[SEND_DTE] Generando DTE para venta {sale.id}...")
