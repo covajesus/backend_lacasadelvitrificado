@@ -116,21 +116,31 @@ def accept_sale_payment(id: int, dte_type_id: int, status_id: int, dte_status_id
 @sales.get("/send_dte")
 def send_dte(db: Session = Depends(get_db)):
     """
-    Procesa todas las ventas con status_id = 2 (aceptadas):
-    - Si NO tiene folio y dte_status_id == 1: Genera DTE, envía WhatsApp y actualiza folio
-    - Si NO tiene folio y dte_status_id != 1: No hace nada
-    - Si YA tiene folio: No hace nada (ya está procesada)
+    Procesa todas las ventas con status_id en [2, 4, 5] y folio = 0/null/vacío:
+    - Si dte_status_id == 1: Genera DTE, envía WhatsApp y actualiza folio
+    - Si dte_status_id != 1: No hace nada
     """
     try:
-        # Buscar todas las ventas con status_id = 2 (aceptadas)
-        sales = db.query(SaleModel).filter(SaleModel.status_id == 2).all()
+        from sqlalchemy import or_
         
-        print(f"[SEND_DTE] Total de ventas con status_id = 2 encontradas: {len(sales)}")
+        # Buscar todas las ventas con status_id en [2, 4, 5] y folio = 0/null/vacío
+        sales = (
+            db.query(SaleModel)
+            .filter(SaleModel.status_id.in_([2, 4, 5]))
+            .filter(or_(
+                SaleModel.folio == 0,
+                SaleModel.folio.is_(None),
+                SaleModel.folio == ""
+            ))
+            .all()
+        )
+        
+        print(f"[SEND_DTE] Total de ventas con status_id en [2,4,5] y sin folio encontradas: {len(sales)}")
         
         if not sales:
             return {
                 "status": "info",
-                "message": "No hay ventas con status_id = 2 para procesar",
+                "message": "No hay ventas con status_id en [2,4,5] y sin folio para procesar",
                 "processed": 0,
                 "success": 0,
                 "errors": 0,
@@ -150,23 +160,8 @@ def send_dte(db: Session = Depends(get_db)):
             try:
                 print(f"[SEND_DTE] Procesando venta {sale.id}: status_id={sale.status_id}, dte_status_id={sale.dte_status_id}, dte_type_id={sale.dte_type_id}, folio={sale.folio}")
                 
-                # Si ya tiene folio, saltar (ya está procesada)
-                if sale.folio and sale.folio > 0:
-                    skipped_count += 1
-                    details.append({
-                        "sale_id": sale.id,
-                        "status": "skipped",
-                        "message": f"Venta {sale.id} ya tiene folio ({sale.folio}), no requiere procesamiento"
-                    })
-                    print(f"[SEND_DTE] Venta {sale.id} omitida: ya tiene folio")
-                    continue
-                
-                # Si no tiene folio, revisar dte_status_id
-                if not sale.folio or sale.folio == 0:
-                    print(f"[SEND_DTE] Venta {sale.id} no tiene folio. Verificando dte_status_id: {sale.dte_status_id}")
-                    
-                    # Si dte_status_id == 1: quiere boleta o factura
-                    if sale.dte_status_id == 1:
+                # Si dte_status_id == 1: quiere boleta o factura
+                if sale.dte_status_id == 1:
                         processed_count += 1
                         print(f"[SEND_DTE] Venta {sale.id} requiere DTE (dte_status_id=1). dte_type_id={sale.dte_type_id}")
                         
