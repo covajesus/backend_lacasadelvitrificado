@@ -117,8 +117,9 @@ def accept_sale_payment(id: int, dte_type_id: int, status_id: int, dte_status_id
 def send_dte(db: Session = Depends(get_db)):
     """
     Procesa todas las ventas con status_id = 2 (aceptadas):
-    - Si dte_status_id == 1: Genera DTE, envía WhatsApp y cambia status_id a 4
-    - Si dte_status_id != 1: Solo cambia status_id a 4
+    - Si NO tiene folio y dte_status_id == 1: Genera DTE, envía WhatsApp y actualiza folio
+    - Si NO tiene folio y dte_status_id != 1: No hace nada
+    - Si YA tiene folio: No hace nada (ya está procesada)
     """
     try:
         # Buscar todas las ventas con status_id = 2 (aceptadas)
@@ -127,42 +128,51 @@ def send_dte(db: Session = Depends(get_db)):
         if not sales:
             return {
                 "status": "info",
-                "message": "No hay ventas aceptadas para procesar",
+                "message": "No hay ventas con status_id = 2 para procesar",
                 "processed": 0,
                 "success": 0,
                 "errors": 0,
+                "skipped": 0,
                 "details": []
             }
         
         processed_count = 0
         success_count = 0
         error_count = 0
+        skipped_count = 0
         details = []
         
         whatsapp = WhatsappClass(db)
         
         for sale in sales:
             try:
-                processed_count += 1
+                # Si ya tiene folio, saltar (ya está procesada)
+                if sale.folio:
+                    skipped_count += 1
+                    details.append({
+                        "sale_id": sale.id,
+                        "status": "skipped",
+                        "message": f"Venta {sale.id} ya tiene folio ({sale.folio}), no requiere procesamiento"
+                    })
+                    continue
                 
-                # Si dte_status_id == 1: generar DTE, enviar WhatsApp y cambiar a status_id = 4
-                if sale.dte_status_id == 1:
-                    # Verificar que la venta tenga dte_type_id configurado (debe ser 1, no 2 que significa "Sin DTE")
-                    if sale.dte_type_id == 2:
-                        # Si tiene dte_status_id = 1 pero dte_type_id = 2, es inconsistente, solo cambiar status
-                        sale.status_id = 4
-                        sale.updated_date = datetime.now()
-                        db.commit()
-                        success_count += 1
-                        details.append({
-                            "sale_id": sale.id,
-                            "status": "success",
-                            "message": f"Venta {sale.id} cambiada a entregada (status_id = 4). Inconsistencia: dte_status_id=1 pero dte_type_id=2"
-                        })
-                        continue
-                    
-                    # Si no tiene folio, generar el DTE primero
-                    if not sale.folio:
+                # Si no tiene folio, revisar dte_status_id
+                if not sale.folio:
+                    # Si dte_status_id == 1: quiere boleta o factura
+                    if sale.dte_status_id == 1:
+                        processed_count += 1
+                        
+                        # Verificar que la venta tenga dte_type_id configurado (debe ser 1, no 2 que significa "Sin DTE")
+                        if sale.dte_type_id == 2:
+                            skipped_count += 1
+                            details.append({
+                                "sale_id": sale.id,
+                                "status": "skipped",
+                                "message": f"Venta {sale.id} tiene dte_status_id=1 pero dte_type_id=2 (inconsistencia)"
+                            })
+                            continue
+                        
+                        # Generar el DTE
                         print(f"[SEND_DTE] La venta {sale.id} no tiene folio, generando DTE...")
                         print(f"[SEND_DTE] dte_type_id en venta: {sale.dte_type_id}")
                         
@@ -185,70 +195,62 @@ def send_dte(db: Session = Depends(get_db)):
                                 "message": f"No se pudo generar el DTE para la venta {sale.id}"
                             })
                             continue
-                    
-                    # Obtener datos del cliente
-                    customer = db.query(CustomerModel).filter(CustomerModel.id == sale.customer_id).first()
-                    if not customer:
-                        error_count += 1
+                        
+                        # Obtener datos del cliente
+                        customer = db.query(CustomerModel).filter(CustomerModel.id == sale.customer_id).first()
+                        if not customer:
+                            error_count += 1
+                            details.append({
+                                "sale_id": sale.id,
+                                "status": "error",
+                                "message": f"Cliente no encontrado para la venta {sale.id}"
+                            })
+                            continue
+                        
+                        if not customer.phone:
+                            error_count += 1
+                            details.append({
+                                "sale_id": sale.id,
+                                "status": "error",
+                                "message": f"El cliente {customer.id} no tiene teléfono registrado para la venta {sale.id}"
+                            })
+                            continue
+                        
+                        # Determinar tipo de DTE
+                        dte_type = "Boleta Electrónica" if sale.dte_type_id == 1 else "Factura Electrónica"
+                        
+                        # Formatear fecha
+                        date_formatted = sale.added_date.strftime("%d-%m-%Y")
+                        
+                        # Enviar WhatsApp del DTE
+                        whatsapp.send_dte(
+                            customer_phone=customer.phone,
+                            dte_type=dte_type,
+                            folio=sale.folio,
+                            date=date_formatted,
+                            amount=int(sale.total),
+                            dynamic_value=sale.folio  # Usar el folio como valor dinámico
+                        )
+                        
+                        print(f"[WHATSAPP] Mensaje DTE enviado al cliente {customer.phone} para venta {sale.id}")
+                        
+                        success_count += 1
                         details.append({
                             "sale_id": sale.id,
-                            "status": "error",
-                            "message": f"Cliente no encontrado para la venta {sale.id}"
+                            "status": "success",
+                            "message": f"DTE generado y enviado por WhatsApp al cliente {customer.phone}",
+                            "folio": sale.folio
                         })
-                        continue
                     
-                    if not customer.phone:
-                        error_count += 1
+                    else:
+                        # Si dte_status_id != 1: no quiere DTE, no hacer nada
+                        skipped_count += 1
                         details.append({
                             "sale_id": sale.id,
-                            "status": "error",
-                            "message": f"El cliente {customer.id} no tiene teléfono registrado para la venta {sale.id}"
+                            "status": "skipped",
+                            "message": f"Venta {sale.id} no requiere DTE (dte_status_id = {sale.dte_status_id})"
                         })
                         continue
-                    
-                    # Determinar tipo de DTE
-                    dte_type = "Boleta Electrónica" if sale.dte_type_id == 1 else "Factura Electrónica"
-                    
-                    # Formatear fecha
-                    date_formatted = sale.added_date.strftime("%d-%m-%Y")
-                    
-                    # Enviar WhatsApp del DTE
-                    whatsapp.send_dte(
-                        customer_phone=customer.phone,
-                        dte_type=dte_type,
-                        folio=sale.folio,
-                        date=date_formatted,
-                        amount=int(sale.total),
-                        dynamic_value=sale.folio  # Usar el folio como valor dinámico
-                    )
-                    
-                    print(f"[WHATSAPP] Mensaje DTE enviado al cliente {customer.phone} para venta {sale.id}")
-                    
-                    # Cambiar status_id a 4 (entregado) después de enviar WhatsApp
-                    sale.status_id = 4
-                    sale.updated_date = datetime.now()
-                    db.commit()
-                    
-                    success_count += 1
-                    details.append({
-                        "sale_id": sale.id,
-                        "status": "success",
-                        "message": f"DTE generado y enviado por WhatsApp al cliente {customer.phone}. Venta cambiada a entregada (status_id = 4)",
-                        "folio": sale.folio
-                    })
-                
-                else:
-                    # Si dte_status_id != 1: solo cambiar status_id a 4 (entregado)
-                    sale.status_id = 4
-                    sale.updated_date = datetime.now()
-                    db.commit()
-                    
-                    success_count += 1
-                    details.append({
-                        "sale_id": sale.id,
-                        "status": "success",
-                        "message": f"Venta {sale.id} cambiada a entregada (status_id = 4). No requiere DTE (dte_status_id = {sale.dte_status_id})"
-                    })
                 
             except Exception as e:
                 error_count += 1
@@ -263,10 +265,11 @@ def send_dte(db: Session = Depends(get_db)):
         
         return {
             "status": "success",
-            "message": f"Procesadas {processed_count} ventas. Exitosas: {success_count}, Errores: {error_count}",
+            "message": f"Procesadas {processed_count} ventas. Exitosas: {success_count}, Errores: {error_count}, Omitidas: {skipped_count}",
             "processed": processed_count,
             "success": success_count,
             "errors": error_count,
+            "skipped": skipped_count,
             "details": details
         }
         
