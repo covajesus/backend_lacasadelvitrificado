@@ -235,7 +235,6 @@ class WhatsappClass:
         if not phone.startswith("56"):
             phone = "56" + phone
 
-        phone = "56928783036"
         payload = {
             "messaging_product": "whatsapp",
             "to": phone,
