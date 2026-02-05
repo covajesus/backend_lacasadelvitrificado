@@ -858,12 +858,13 @@ class ProductClass:
         except Exception as e:
             return {"status": "error", "message": f"Error al obtener productos por proveedor: {str(e)}"}
     
-    def search(self, search_term: str):
+    def search(self, search_term: str, customer_id: int = None):
         """
         Busca productos por código o nombre usando LIKE.
         
         Args:
             search_term: Término de búsqueda que se buscará en code y product
+            customer_id: ID del cliente opcional para obtener su descuento específico
         
         Returns:
             Lista de productos que coinciden con el término de búsqueda
@@ -933,9 +934,23 @@ class ProductClass:
                     "count": 0
                 }
             
+            # Obtener descuentos del cliente si se proporciona customer_id
+            customer_discounts = {}
+            if customer_id:
+                discount_records = (
+                    self.db.query(CustomerProductDiscountModel)
+                    .filter(CustomerProductDiscountModel.customer_id == customer_id)
+                    .all()
+                )
+                for discount in discount_records:
+                    customer_discounts[discount.product_id] = discount.discount_percentage or 0
+            
             # Formatear los resultados
             formatted_data = []
             for result in results:
+                # Obtener descuento del cliente para este producto
+                customer_discount = customer_discounts.get(result.id, 0)
+                
                 formatted_data.append({
                     "id": result.id,
                     "code": result.code,
@@ -948,7 +963,8 @@ class ProductClass:
                     "supplier_name": result.supplier_name,
                     "unit_measure": result.unit_measure,
                     "public_sale_price": result.public_sale_price if result.public_sale_price is not None else 0,
-                    "private_sale_price": result.private_sale_price if result.private_sale_price is not None else 0
+                    "private_sale_price": result.private_sale_price if result.private_sale_price is not None else 0,
+                    "customer_discount_percentage": customer_discount
                 })
             
             return {

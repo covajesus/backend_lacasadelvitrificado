@@ -498,26 +498,43 @@ class BudgetClass:
         """
         print(f"[BUDGET_PRODUCT_DETAIL] Llamado con product_id={product_id}, customer_id={customer_id}")
         try:
-            # Primero verificar que el producto existe
+            # Verificar que el producto existe
             product = self.db.query(ProductModel).filter(ProductModel.id == product_id).first()
-            
             if not product:
                 return {"status": "error", "message": "Product not found"}
             
-            # Obtener precio público del producto (máximo de lotes)
+            # Verificar si hay lot_items para este producto
+            lot_items_count = (
+                self.db.query(LotItemModel)
+                .filter(LotItemModel.product_id == product_id)
+                .count()
+            )
+            print(f"[BUDGET_PRODUCT_DETAIL] Cantidad de lot_items para producto {product_id}: {lot_items_count}")
+            
+            # Obtener precio público del producto desde lot_items (máximo de todos los lot_items)
             price_query = (
                 self.db.query(func.max(LotItemModel.public_sale_price).label("public_sale_price"))
                 .filter(LotItemModel.product_id == product_id)
                 .scalar()
             )
             
-            public_sale_price = price_query if price_query is not None else 0
+            print(f"[BUDGET_PRODUCT_DETAIL] Resultado de query de precio: {price_query} (tipo: {type(price_query)})")
             
-            data_query = type('obj', (object,), {
-                'id': product.id,
-                'product': product.product,
-                'public_sale_price': public_sale_price
-            })()
+            public_sale_price = int(price_query) if price_query is not None and price_query > 0 else 0
+            print(f"[BUDGET_PRODUCT_DETAIL] Precio público final: {public_sale_price}")
+            
+            # Si no hay precio, intentar obtener directamente de lot_items
+            if public_sale_price == 0:
+                lot_item = (
+                    self.db.query(LotItemModel)
+                    .filter(LotItemModel.product_id == product_id)
+                    .filter(LotItemModel.public_sale_price.isnot(None))
+                    .filter(LotItemModel.public_sale_price > 0)
+                    .first()
+                )
+                if lot_item:
+                    public_sale_price = int(lot_item.public_sale_price)
+                    print(f"[BUDGET_PRODUCT_DETAIL] Precio encontrado directamente en lot_item: {public_sale_price}")
 
             # Obtener descuento del cliente para este producto si se proporciona customer_id
             customer_discount = 0
@@ -537,12 +554,13 @@ class BudgetClass:
                     print(f"[BUDGET_PRODUCT_DETAIL] No se encontró descuento para customer_id={customer_id}, product_id={product_id}")
 
             product_data = {
-                "id": data_query.id,
-                "product": data_query.product,
-                "public_sale_price": data_query.public_sale_price if data_query.public_sale_price is not None else 0,
+                "id": product.id,
+                "product": product.product,
+                "public_sale_price": public_sale_price,
                 "customer_discount_percentage": customer_discount
             }
 
+            print(f"[BUDGET_PRODUCT_DETAIL] Datos finales: {product_data}")
             return product_data
 
         except Exception as e:

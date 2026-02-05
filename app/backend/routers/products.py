@@ -128,12 +128,12 @@ def search(search_input: ProductSearch, session_user: UserLogin = Depends(get_cu
     Endpoint para buscar productos por código o nombre usando LIKE.
     
     Args:
-        search_input: Objeto con el término de búsqueda (q) que se buscará en el código y nombre del producto
+        search_input: Objeto con el término de búsqueda (q) y opcionalmente customer_id para obtener descuentos
     
     Returns:
-        Lista de productos que coinciden con el término de búsqueda
+        Lista de productos que coinciden con el término de búsqueda, incluyendo descuento del cliente si se proporciona customer_id
     """
-    data = ProductClass(db).search(search_input.q)
+    data = ProductClass(db).search(search_input.q, customer_id=search_input.customer_id)
     
     return {"message": data}
 

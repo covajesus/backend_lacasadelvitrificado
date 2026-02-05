@@ -83,6 +83,7 @@ class StoreLocation(BaseModel):
 
 class ProductSearch(BaseModel):
     q: str = Field(..., description="Término de búsqueda para buscar en código o nombre del producto")
+    customer_id: Optional[int] = Field(None, description="ID del cliente para obtener su descuento específico del producto")
 
 class ProductList(BaseModel):
     page: int
@@ -147,7 +148,7 @@ class CartItem(BaseModel):
 class BudgetProductItem(BaseModel):
     product_id: int
     quantity: int
-    sale_price: int
+    sale_price: float  # Cambiado a float para aceptar decimales
     amount: int
 
 class StoreBudget(BaseModel):
