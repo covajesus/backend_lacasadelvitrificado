@@ -81,6 +81,9 @@ class InventoryList(BaseModel):
 class StoreLocation(BaseModel):
     location: Union[str, None]
 
+class ProductSearch(BaseModel):
+    q: str = Field(..., description="Término de búsqueda para buscar en código o nombre del producto")
+
 class ProductList(BaseModel):
     page: int
     supplier_id: Optional[int] = None
@@ -150,6 +153,37 @@ class BudgetProductItem(BaseModel):
 class StoreBudget(BaseModel):
     customer_id: int
     dte_type_id: Optional[int] = None
+    products: List[BudgetProductItem]
+    subtotal: int
+    shipping: Optional[int] = 0
+    tax: int
+    total: int
+
+    @validator("products")
+    def validate_products(cls, value):
+        if not value or len(value) == 0:
+            raise ValueError("At least one product is required")
+
+        for product in value:
+            if product.quantity <= 0:
+                raise ValueError("Product quantity must be greater than 0")
+            if product.sale_price < 0:
+                raise ValueError("Sale price cannot be negative")
+            if product.amount < 0:
+                raise ValueError("Amount cannot be negative")
+        return value
+
+class StoreBudgetWithoutCustomer(BaseModel):
+    """
+    Schema para crear presupuesto sin guardar el cliente en la tabla customers.
+    Los datos del cliente se guardan temporalmente en el presupuesto.
+    """
+    # Datos del cliente (temporales, no se guardan en customers)
+    identification_number: str = Field(..., description="RUT del cliente")
+    social_reason: str = Field(..., description="Razón social o nombre del cliente")
+    phone: str = Field(..., description="Teléfono del cliente (necesario para WhatsApp)")
+    
+    # Datos del presupuesto
     products: List[BudgetProductItem]
     subtotal: int
     shipping: Optional[int] = 0

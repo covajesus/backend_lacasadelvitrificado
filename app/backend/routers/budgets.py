@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 from typing import Optional
 from app.backend.db.database import get_db
 from app.backend.auth.auth_user import get_current_active_user
-from app.backend.schemas import UserLogin, BudgetList, StoreBudget
+from app.backend.schemas import UserLogin, BudgetList, StoreBudget, StoreBudgetWithoutCustomer
 from app.backend.classes.budget_class import BudgetClass
 from app.backend.db.models import UserModel
 
@@ -48,6 +48,24 @@ def store(
 ):
     print(budget_inputs)
     data = BudgetClass(db).store(budget_inputs)
+
+    if isinstance(data, dict) and data.get("status") == "error":
+        raise HTTPException(status_code=400, detail=data["message"])
+
+    return {"message": data}
+
+@budgets.post("/store/without-customer")
+def store_without_customer(
+    budget_inputs: StoreBudgetWithoutCustomer,
+    session_user: UserLogin = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Crea un presupuesto sin guardar el cliente en la tabla customers.
+    Los datos del cliente se proporcionan en el request pero no se guardan permanentemente.
+    """
+    print(budget_inputs)
+    data = BudgetClass(db).store_without_customer(budget_inputs)
 
     if isinstance(data, dict) and data.get("status") == "error":
         raise HTTPException(status_code=400, detail=data["message"])

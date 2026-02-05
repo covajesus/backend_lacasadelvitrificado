@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends
 from app.backend.db.database import get_db
 from sqlalchemy.orm import Session
-from app.backend.schemas import UserLogin, ProductList, StoreProduct
+from app.backend.schemas import UserLogin, ProductList, StoreProduct, ProductSearch
 from app.backend.classes.product_class import ProductClass
 from app.backend.auth.auth_user import get_current_active_user
 from app.backend.classes.file_class import FileClass
@@ -120,6 +120,21 @@ def products_by_supplier(supplier_identifier: str, session_user: UserLogin = Dep
     """
     data = ProductClass(db).get_products_by_supplier(supplier_identifier)
 
+    return {"message": data}
+
+@products.post("/search")
+def search(search_input: ProductSearch, session_user: UserLogin = Depends(get_current_active_user), db: Session = Depends(get_db)):
+    """
+    Endpoint para buscar productos por código o nombre usando LIKE.
+    
+    Args:
+        search_input: Objeto con el término de búsqueda (q) que se buscará en el código y nombre del producto
+    
+    Returns:
+        Lista de productos que coinciden con el término de búsqueda
+    """
+    data = ProductClass(db).search(search_input.q)
+    
     return {"message": data}
 
 @products.post("/update/{id}")

@@ -195,7 +195,7 @@ class WhatsappClass:
     # ===============================
     # ENVÍO DEL MENSAJE
     # ===============================
-    def review_budget(self, budget_id: int, total: int):
+    def review_budget(self, budget_id: int, total: int, customer_phone: str = None, customer_name: str = None):
 
         url = "https://graph.facebook.com/v22.0/790586727468909/messages"
         token = os.getenv("META_TOKEN")
@@ -205,10 +205,17 @@ class WhatsappClass:
         if not budget:
             return None
 
-        # Cliente
-        customer = self.db.query(CustomerModel).filter_by(id=budget.customer_id).first()
-        if not customer or not customer.phone:
-            return None
+        # Cliente - Si se proporcionan customer_phone y customer_name, usarlos directamente
+        # Si no, buscar en la base de datos
+        if customer_phone and customer_name:
+            phone = customer_phone
+            customer_name_used = customer_name
+        else:
+            customer = self.db.query(CustomerModel).filter_by(id=budget.customer_id).first()
+            if not customer or not customer.phone:
+                return None
+            phone = customer.phone
+            customer_name_used = customer.social_reason
 
         # Productos
         products = (
@@ -224,7 +231,7 @@ class WhatsappClass:
 
         total_formatted = f"{total:,}".replace(",", ".")
 
-        phone = str(customer.phone)
+        phone = str(phone)
         if not phone.startswith("56"):
             phone = "56" + phone
 

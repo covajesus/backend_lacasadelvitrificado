@@ -232,6 +232,98 @@ class BudgetClass:
             self.db.rollback()
             return {"status": "error", "message": str(e)}
 
+    def store_without_customer(self, budget_inputs):
+        """
+        Crea un presupuesto sin guardar el cliente en la tabla customers.
+        Los datos del cliente se guardan temporalmente en el presupuesto.
+        """
+        try:
+            calculated_subtotal = 0
+            products_payload = []
+
+            for product in budget_inputs.products:
+                amount = product.amount
+                if amount is None or amount <= 0:
+                    amount = round(product.sale_price * product.quantity)
+
+                amount = int(amount)
+
+                products_payload.append({
+                    "product_id": product.product_id,
+                    "quantity": product.quantity,
+                    "total": amount
+                })
+                calculated_subtotal += amount
+
+            subtotal = int(budget_inputs.subtotal) if budget_inputs.subtotal > 0 else calculated_subtotal
+            shipping = int(budget_inputs.shipping) if budget_inputs.shipping else 0
+            tax = int(budget_inputs.tax)
+            total = int(budget_inputs.total) if budget_inputs.total > 0 else subtotal + shipping + tax
+
+            # Crear presupuesto con customer_id = -1 para indicar que no hay cliente guardado
+            # Los datos del cliente se proporcionan en el request pero no se guardan en customers
+            new_budget = BudgetModel(
+                customer_id=-1,  # Valor especial para indicar que no hay cliente guardado
+                status_id=0,
+                subtotal=subtotal,
+                shipping=shipping,
+                tax=tax,
+                total=total,
+                added_date=datetime.now(),
+                updated_date=datetime.now()
+            )
+
+            self.db.add(new_budget)
+            self.db.flush()
+
+            for product in products_payload:
+                new_product = BudgetProductModel(
+                    budget_id=new_budget.id,
+                    product_id=product["product_id"],
+                    quantity=product["quantity"],
+                    total=product["total"],
+                    added_date=datetime.now(),
+                    updated_date=datetime.now()
+                )
+                self.db.add(new_product)
+
+            self.db.commit()
+            self.db.refresh(new_budget)
+
+            # Enviar notificación de WhatsApp para revisar el presupuesto
+            # Usar los datos del cliente del input en lugar de buscar en customers
+            try:
+                # Obtener el teléfono del cliente desde budget_inputs
+                customer_phone = budget_inputs.phone if budget_inputs.phone else None
+                
+                if customer_phone:
+                    # Enviar WhatsApp con los datos del cliente temporal
+                    WhatsappClass(self.db).review_budget(
+                        budget_id=new_budget.id,
+                        total=total,
+                        customer_phone=customer_phone,
+                        customer_name=budget_inputs.social_reason
+                    )
+                else:
+                    print(f"[BUDGET_WITHOUT_CUSTOMER] No se envió WhatsApp porque no hay teléfono para presupuesto {new_budget.id}")
+            except Exception as whatsapp_error:
+                print(f"Error al enviar WhatsApp de review_budget: {str(whatsapp_error)}")
+                # No fallar el proceso si falla el WhatsApp
+
+            return {
+                "status": "success",
+                "budget_id": new_budget.id,
+                "customer_data": {
+                    "identification_number": budget_inputs.identification_number,
+                    "social_reason": budget_inputs.social_reason,
+                    "phone": budget_inputs.phone
+                }
+            }
+
+        except Exception as e:
+            self.db.rollback()
+            return {"status": "error", "message": str(e)}
+
     def accept(self, budget_id):
         print(f"[BUDGET_ACCEPT] Iniciando aceptación de presupuesto {budget_id}")
         try:

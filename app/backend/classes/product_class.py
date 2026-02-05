@@ -1,7 +1,7 @@
 from app.backend.db.models import ProductModel, SupplierModel, UnitFeatureModel, CategoryModel, LotModel, LotItemModel, UnitMeasureModel, InventoryLotItemModel, CustomerProductDiscountModel
 from app.backend.classes.file_class import FileClass
 from datetime import datetime
-from sqlalchemy import func
+from sqlalchemy import func, or_
 
 class ProductClass:
     def __init__(self, db):
@@ -497,7 +497,8 @@ class ProductClass:
                     ProductModel.compound_product_id,
                     ProductModel.photo,
                     ProductModel.catalog,
-                    func.max(LotItemModel.public_sale_price).label("public_sale_price")
+                    func.max(LotItemModel.public_sale_price).label("public_sale_price"),
+                    func.max(LotItemModel.private_sale_price).label("private_sale_price")
                 )
                 .join(LotItemModel, LotItemModel.product_id == ProductModel.id, isouter=True)
                 .filter(ProductModel.id == id)
@@ -542,6 +543,7 @@ class ProductClass:
                 "photo": data_query.photo,
                 "catalog": data_query.catalog,
                 "public_sale_price": data_query.public_sale_price if data_query.public_sale_price is not None else 0,
+                "private_sale_price": data_query.private_sale_price if data_query.private_sale_price is not None else 0,
                 "features": None,
                 "inventory": 0
             }
@@ -600,7 +602,8 @@ class ProductClass:
                     ProductModel.compound_product_id,
                     ProductModel.photo,
                     ProductModel.catalog,
-                    func.max(LotItemModel.public_sale_price).label("public_sale_price")
+                    func.max(LotItemModel.public_sale_price).label("public_sale_price"),
+                    func.max(LotItemModel.private_sale_price).label("private_sale_price")
                 )
                 .join(LotItemModel, LotItemModel.product_id == ProductModel.id, isouter=True)
                 .filter(ProductModel.id == id)
@@ -657,6 +660,7 @@ class ProductClass:
                 "photo": data_query.photo,
                 "catalog": data_query.catalog,
                 "public_sale_price": data_query.public_sale_price if data_query.public_sale_price is not None else 0,
+                "private_sale_price": data_query.private_sale_price if data_query.private_sale_price is not None else 0,
                 "customer_discount_percentage": customer_discount,
                 "features": None,
                 "inventory": 0
@@ -853,3 +857,110 @@ class ProductClass:
             
         except Exception as e:
             return {"status": "error", "message": f"Error al obtener productos por proveedor: {str(e)}"}
+    
+    def search(self, search_term: str):
+        """
+        Busca productos por código o nombre usando LIKE.
+        
+        Args:
+            search_term: Término de búsqueda que se buscará en code y product
+        
+        Returns:
+            Lista de productos que coinciden con el término de búsqueda
+        """
+        try:
+            if not search_term or not search_term.strip():
+                return {
+                    "status": "error",
+                    "message": "El término de búsqueda no puede estar vacío",
+                    "data": []
+                }
+            
+            # Limpiar el término de búsqueda
+            search_term = search_term.strip()
+            
+            # Crear el patrón LIKE con % al inicio y final para búsqueda parcial
+            search_pattern = f"%{search_term}%"
+            
+            # Buscar en code y product usando LIKE con OR
+            query = (
+                self.db.query(
+                    ProductModel.id,
+                    ProductModel.code,
+                    ProductModel.product,
+                    ProductModel.description,
+                    ProductModel.photo,
+                    ProductModel.catalog,
+                    ProductModel.category_id,
+                    SupplierModel.supplier.label("supplier_name"),
+                    CategoryModel.category.label("category_name"),
+                    UnitMeasureModel.unit_measure.label("unit_measure"),
+                    func.max(LotItemModel.public_sale_price).label("public_sale_price"),
+                    func.max(LotItemModel.private_sale_price).label("private_sale_price")
+                )
+                .join(SupplierModel, SupplierModel.id == ProductModel.supplier_id, isouter=True)
+                .join(CategoryModel, CategoryModel.id == ProductModel.category_id, isouter=True)
+                .join(UnitMeasureModel, UnitMeasureModel.id == ProductModel.unit_measure_id, isouter=True)
+                .join(LotItemModel, LotItemModel.product_id == ProductModel.id, isouter=True)
+                .filter(
+                    or_(
+                        ProductModel.code.like(search_pattern),
+                        ProductModel.product.like(search_pattern)
+                    )
+                )
+                .group_by(
+                    ProductModel.id,
+                    ProductModel.code,
+                    ProductModel.product,
+                    ProductModel.description,
+                    ProductModel.photo,
+                    ProductModel.catalog,
+                    ProductModel.category_id,
+                    SupplierModel.supplier,
+                    CategoryModel.category,
+                    UnitMeasureModel.unit_measure
+                )
+                .order_by(ProductModel.product)
+            )
+            
+            results = query.all()
+            
+            if not results:
+                return {
+                    "status": "success",
+                    "message": f"No se encontraron productos que coincidan con '{search_term}'",
+                    "data": [],
+                    "count": 0
+                }
+            
+            # Formatear los resultados
+            formatted_data = []
+            for result in results:
+                formatted_data.append({
+                    "id": result.id,
+                    "code": result.code,
+                    "product": result.product,
+                    "description": result.description,
+                    "photo": result.photo,
+                    "catalog": result.catalog,
+                    "category_id": result.category_id,
+                    "category": result.category_name,
+                    "supplier_name": result.supplier_name,
+                    "unit_measure": result.unit_measure,
+                    "public_sale_price": result.public_sale_price if result.public_sale_price is not None else 0,
+                    "private_sale_price": result.private_sale_price if result.private_sale_price is not None else 0
+                })
+            
+            return {
+                "status": "success",
+                "message": f"Se encontraron {len(formatted_data)} productos que coinciden con '{search_term}'",
+                "data": formatted_data,
+                "count": len(formatted_data)
+            }
+            
+        except Exception as e:
+            return {
+                "status": "error",
+                "message": f"Error al buscar productos: {str(e)}",
+                "data": []
+            }
