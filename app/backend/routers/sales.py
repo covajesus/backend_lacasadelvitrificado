@@ -461,6 +461,22 @@ def sales_report(
 
     return {"message": data}
 
+@sales.get("/top_customers")
+def top_customers(
+    session_user: UserLogin = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Endpoint que muestra los 10 clientes que más han comprado, ordenados de mayor a menor.
+    Retorna el cliente y su cantidad de compras.
+    """
+    data = SaleClass(db).get_top_customers(limit=10)
+    
+    return {
+        "status": "success",
+        "message": data
+    }
+
 @sales.delete("/delete/{sale_id}")
 def delete_sale(
     sale_id: int,

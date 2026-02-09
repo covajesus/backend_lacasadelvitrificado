@@ -1220,3 +1220,57 @@ class SaleClass:
         except Exception as e:
             self.db.rollback()
             return {"status": "error", "message": f"Error al eliminar la venta: {str(e)}"}
+
+    def get_top_customers(self, limit=10):
+        """
+        Obtiene los clientes que más han comprado, ordenados de mayor a menor.
+        
+        Args:
+            limit: Número de clientes a retornar (default: 10)
+        
+        Returns:
+            Lista de diccionarios con información del cliente y cantidad de compras
+        """
+        try:
+            # Contar ventas por cliente, hacer JOIN con CustomerModel y ordenar por cantidad descendente
+            top_customers = (
+                self.db.query(
+                    CustomerModel.id,
+                    CustomerModel.social_reason,
+                    CustomerModel.identification_number,
+                    CustomerModel.phone,
+                    CustomerModel.email,
+                    func.count(SaleModel.id).label('total_purchases')
+                )
+                .join(SaleModel, CustomerModel.id == SaleModel.customer_id)
+                .group_by(
+                    CustomerModel.id,
+                    CustomerModel.social_reason,
+                    CustomerModel.identification_number,
+                    CustomerModel.phone,
+                    CustomerModel.email
+                )
+                .order_by(func.count(SaleModel.id).desc())
+                .limit(limit)
+                .all()
+            )
+            
+            # Formatear los resultados
+            result = []
+            for customer in top_customers:
+                result.append({
+                    "customer_id": customer.id,
+                    "social_reason": customer.social_reason,
+                    "identification_number": customer.identification_number,
+                    "phone": customer.phone,
+                    "email": customer.email,
+                    "total_purchases": customer.total_purchases
+                })
+            
+            return result
+            
+        except Exception as e:
+            print(f"[ERROR] Error al obtener top clientes: {str(e)}")
+            import traceback
+            print(f"[ERROR] Traceback: {traceback.format_exc()}")
+            return []

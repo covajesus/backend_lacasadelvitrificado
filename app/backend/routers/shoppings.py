@@ -332,3 +332,18 @@ def get_inventories_by_shopping_id(
     data = ShoppingClass(db).get_inventories_by_shopping_id(shopping_id)
 
     return {"message": data}
+
+@shoppings.delete("/delete/{id}")
+def delete_shopping(id: int, session_user: UserLogin = Depends(get_current_active_user), db: Session = Depends(get_db)):
+    """
+    Elimina un shopping y todos sus registros relacionados:
+    - Productos del shopping (ShoppingProductModel)
+    - Stocks pre-inventario (PreInventoryStockModel)
+    - El shopping mismo (ShoppingModel)
+    """
+    data = ShoppingClass(db).delete(id)
+    
+    if isinstance(data, dict) and data.get("status") == "error":
+        raise HTTPException(status_code=400, detail=data["message"])
+    
+    return {"message": data}

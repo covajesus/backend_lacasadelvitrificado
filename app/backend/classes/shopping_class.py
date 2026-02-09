@@ -3,6 +3,7 @@ from app.backend.db.models import ShoppingModel, ShoppingProductModel, SupplierM
 from app.backend.schemas import ShoppingCreateInput
 from app.backend.classes.product_class import ProductClass
 from datetime import datetime
+from sqlalchemy import or_
 
 class ShoppingClass:
     def __init__(self, db):
@@ -1185,3 +1186,74 @@ class ShoppingClass:
             
         except Exception as e:
             return {"status": "error", "message": f"Error al obtener inventarios: {str(e)}"}
+
+    def delete(self, id):
+        """
+        Elimina un shopping y todos sus registros relacionados:
+        - ShoppingProductModel (productos del shopping)
+        - PreInventoryStockModel (stocks pre-inventario asociados)
+        - ShoppingModel (el shopping mismo)
+        
+        IMPORTANTE: Si no se puede eliminar (porque ya fue procesado o tiene lotes creados),
+        cambia el status_id a 8 (finalizado) en lugar de retornar error.
+        """
+        try:
+            # Verificar que el shopping existe
+            shopping = self.db.query(ShoppingModel).filter(ShoppingModel.id == id).first()
+            if not shopping:
+                return {"status": "error", "message": "Shopping not found"}
+
+            # Verificar si el shopping ya fue procesado (status_id = 7 significa que ya se creó inventario)
+            if shopping.status_id == 7:
+                # Ya está en estado 7, no hacer nada
+                return {
+                    "status": "info", 
+                    "message": "El shopping ya está en estado 7 (procesado). No se puede eliminar."
+                }
+
+            # Obtener todos los pre-inventory stocks relacionados
+            pre_inventory_stocks = self.db.query(PreInventoryStockModel).filter(
+                PreInventoryStockModel.shopping_id == id
+            ).all()
+
+            # Verificar si hay lotes creados desde estos pre-inventory stocks
+            # Los lotes se crean usando el lot_number del PreInventoryStock
+            for pre_stock in pre_inventory_stocks:
+                # Buscar si existe un lote con el mismo lot_number (convertido a string)
+                lot_exists = self.db.query(LotModel).filter(
+                    LotModel.lot_number == str(pre_stock.lot_number)
+                ).first()
+                
+                if lot_exists:
+                    # Cambiar a estado finalizado (7) en lugar de eliminar
+                    shopping.status_id = 7
+                    shopping.updated_date = datetime.utcnow()
+                    self.db.commit()
+                    return {
+                        "status": "info",
+                        "message": f"No se puede eliminar el shopping porque ya existen lotes creados desde este shopping (lot_number: {pre_stock.lot_number}). Se cambió el status_id a 7 (finalizado)."
+                    }
+
+            # Si llegamos aquí, es seguro eliminar
+            # Eliminar todos los productos del shopping
+            shopping_products = self.db.query(ShoppingProductModel).filter(
+                ShoppingProductModel.shopping_id == id
+            ).all()
+            
+            for product in shopping_products:
+                self.db.delete(product)
+
+            # Eliminar todos los pre-inventory stocks relacionados
+            for stock in pre_inventory_stocks:
+                self.db.delete(stock)
+
+            # Eliminar el shopping
+            self.db.delete(shopping)
+            self.db.commit()
+
+            return {"status": "success", "message": "Shopping deleted successfully"}
+
+        except Exception as e:
+            self.db.rollback()
+            error_message = str(e)
+            return {"status": "error", "message": f"Error deleting shopping: {error_message}"}
