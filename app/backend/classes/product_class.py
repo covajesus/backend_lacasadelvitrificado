@@ -857,7 +857,7 @@ class ProductClass:
             
         except Exception as e:
             return {"status": "error", "message": f"Error al obtener productos por proveedor: {str(e)}"}
-    
+
     def search(self, search_term: str, customer_id: int = None):
         """
         Busca productos por código o nombre usando LIKE.

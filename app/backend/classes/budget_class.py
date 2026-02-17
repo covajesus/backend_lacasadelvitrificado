@@ -324,8 +324,8 @@ class BudgetClass:
             self.db.rollback()
             return {"status": "error", "message": str(e)}
 
-    def accept(self, budget_id):
-        print(f"[BUDGET_ACCEPT] Iniciando aceptación de presupuesto {budget_id}")
+    def accept(self, budget_id, dte_type_id=None, dte_status_id=None):
+        print(f"[BUDGET_ACCEPT] Iniciando aceptación de presupuesto {budget_id}, dte_type_id={dte_type_id}, dte_status_id={dte_status_id}")
         try:
             # Usar with_for_update() para bloquear la fila y prevenir race conditions
             budget = (
@@ -364,14 +364,27 @@ class BudgetClass:
                 shipping_method_id = 1
                 delivery_address = customer.address if customer.address else None
 
-            # Crear solo el SaleModel
-            # dte_type_id se obtiene del presupuesto si existe, sino None
-            budget_dte_type_id = getattr(budget, 'dte_type_id', None) if hasattr(budget, 'dte_type_id') else None
+            # Determinar dte_type_id y dte_status_id
+            # Si se pasan por parámetro, usar esos valores
+            # Si no, intentar obtener del presupuesto
+            final_dte_type_id = dte_type_id
+            final_dte_status_id = dte_status_id
+            
+            if final_dte_type_id is None:
+                budget_dte_type_id = getattr(budget, 'dte_type_id', None) if hasattr(budget, 'dte_type_id') else None
+                final_dte_type_id = budget_dte_type_id
+            
+            # Si dte_status_id no se proporciona, usar None (no generar DTE)
+            if final_dte_status_id is None:
+                final_dte_status_id = None
+            
+            print(f"[BUDGET_ACCEPT] Valores DTE finales: dte_type_id={final_dte_type_id}, dte_status_id={final_dte_status_id}")
             
             new_sale = SaleModel(
                 customer_id=budget.customer_id,
                 shipping_method_id=shipping_method_id,
-                dte_type_id=budget_dte_type_id,
+                dte_type_id=final_dte_type_id,
+                dte_status_id=final_dte_status_id,
                 status_id=1,
                 subtotal=budget.subtotal,
                 tax=budget.tax,

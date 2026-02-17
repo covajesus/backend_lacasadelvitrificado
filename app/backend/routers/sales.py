@@ -47,7 +47,7 @@ def accept_sale_payment(id: int, dte_type_id: int, status_id: int, dte_status_id
     if status_id == 2:
         try:
             change_status_result = SaleClass(db).change_status(id, status_id)
-            
+
             # Verificar si el resultado es un diccionario con error
             if isinstance(change_status_result, dict) and change_status_result.get("status") == "error":
                 raise HTTPException(status_code=500, detail=change_status_result.get("message", "Error al cambiar estado de la venta"))
@@ -169,7 +169,7 @@ def send_dte(db: Session = Depends(get_db)):
                 dte_response = DteClass(db).generate_dte(sale.id)
                 
                 print(f"[SEND_DTE] Respuesta de generate_dte para venta {sale.id}: {dte_response} (tipo: {type(dte_response)})")
-                
+
                 if dte_response and dte_response > 0:  # Si se generó el DTE y retornó un folio
                     # Actualizar el folio en la venta
                     sale.folio = dte_response
@@ -177,6 +177,52 @@ def send_dte(db: Session = Depends(get_db)):
                     db.commit()
                     db.refresh(sale)
                     print(f"[SEND_DTE] ✅ DTE generado exitosamente para venta {sale.id} con folio: {dte_response}")
+                    
+                    # Obtener datos del cliente
+                    customer = db.query(CustomerModel).filter(CustomerModel.id == sale.customer_id).first()
+                    if not customer:
+                        error_count += 1
+                        details.append({
+                            "sale_id": sale.id,
+                            "status": "error",
+                            "message": f"Cliente no encontrado para la venta {sale.id}"
+                        })
+                        continue
+                    
+                    if not customer.phone:
+                        error_count += 1
+                        details.append({
+                            "sale_id": sale.id,
+                            "status": "error",
+                            "message": f"El cliente {customer.id} no tiene teléfono registrado para la venta {sale.id}"
+                        })
+                        continue
+                    
+                    # Determinar tipo de DTE
+                    dte_type = "Boleta Electrónica" if sale.dte_type_id == 1 else "Factura Electrónica"
+                    
+                    # Formatear fecha
+                    date_formatted = sale.added_date.strftime("%d-%m-%Y")
+                    
+                    # Enviar WhatsApp del DTE
+                    whatsapp.send_dte(
+                        customer_phone=customer.phone,
+                        dte_type=dte_type,
+                        folio=sale.folio,
+                        date=date_formatted,
+                        amount=int(sale.total),
+                        dynamic_value=sale.folio  # Usar el folio como valor dinámico
+                    )
+                    
+                    print(f"[WHATSAPP] Mensaje DTE enviado al cliente {customer.phone} para venta {sale.id}")
+                    
+                    success_count += 1
+                    details.append({
+                        "sale_id": sale.id,
+                        "status": "success",
+                        "message": f"DTE generado y enviado por WhatsApp al cliente {customer.phone}",
+                        "folio": sale.folio
+                    })
                 else:
                     # Si generate_dte retornó 0, significa que falló
                     print(f"[ERROR] ❌ generate_dte retornó 0 o None para venta {sale.id}. Respuesta: {dte_response}")
@@ -187,53 +233,7 @@ def send_dte(db: Session = Depends(get_db)):
                         "message": f"No se pudo generar el DTE para la venta {sale.id}. Respuesta: {dte_response}"
                     })
                     continue
-                
-                # Obtener datos del cliente
-                customer = db.query(CustomerModel).filter(CustomerModel.id == sale.customer_id).first()
-                if not customer:
-                    error_count += 1
-                    details.append({
-                        "sale_id": sale.id,
-                        "status": "error",
-                        "message": f"Cliente no encontrado para la venta {sale.id}"
-                    })
-                    continue
-                
-                if not customer.phone:
-                    error_count += 1
-                    details.append({
-                        "sale_id": sale.id,
-                        "status": "error",
-                        "message": f"El cliente {customer.id} no tiene teléfono registrado para la venta {sale.id}"
-                    })
-                    continue
-                
-                # Determinar tipo de DTE
-                dte_type = "Boleta Electrónica" if sale.dte_type_id == 1 else "Factura Electrónica"
-                
-                # Formatear fecha
-                date_formatted = sale.added_date.strftime("%d-%m-%Y")
-                
-                # Enviar WhatsApp del DTE
-                whatsapp.send_dte(
-                    customer_phone=customer.phone,
-                    dte_type=dte_type,
-                    folio=sale.folio,
-                    date=date_formatted,
-                    amount=int(sale.total),
-                    dynamic_value=sale.folio  # Usar el folio como valor dinámico
-                )
-                
-                print(f"[WHATSAPP] Mensaje DTE enviado al cliente {customer.phone} para venta {sale.id}")
-                
-                success_count += 1
-                details.append({
-                    "sale_id": sale.id,
-                    "status": "success",
-                    "message": f"DTE generado y enviado por WhatsApp al cliente {customer.phone}",
-                    "folio": sale.folio
-                })
-                
+                    
             except Exception as e:
                 error_count += 1
                 print(f"[ERROR] Error procesando venta {sale.id}: {str(e)}")

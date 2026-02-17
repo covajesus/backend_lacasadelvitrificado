@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Header
 from sqlalchemy.orm import Session
 from typing import Optional
 from app.backend.db.database import get_db
@@ -72,13 +72,45 @@ def store_without_customer(
 
     return {"message": data}
 
+@budgets.post("/accept/{budget_id}/{dte_type_id}")
 @budgets.post("/accept/{budget_id}")
-def accept_budget(
+def accept_budget_with_dte_status(
     budget_id: int,
+    dte_type_id: int,
     session_user: UserLogin = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
-    data = BudgetClass(db).accept(budget_id)
+    """
+    Acepta un presupuesto y crea una venta con dte_status_id en la URL.
+    Parámetros:
+    - budget_id: ID del presupuesto
+    - dte_status_id: 1 para Boleta (dte_type_id=1), 2 para Factura (dte_type_id=2)
+    """
+    # Si dte_status_id es 1, dte_type_id es 1 (Boleta). Si dte_status_id es 2, dte_type_id es 2 (Factura).
+    dte_status_id = 1
+
+    data = BudgetClass(db).accept(budget_id, dte_type_id=dte_type_id, dte_status_id=dte_status_id)
+
+    if isinstance(data, dict) and data.get("status") == "error":
+        raise HTTPException(status_code=400, detail=data["message"])
+
+    return {"message": data}
+
+@budgets.post("/accept/{budget_id}")
+def accept_budget(
+    budget_id: int,
+    dte_type_id: Optional[int] = None,
+    dte_status_id: Optional[int] = None,
+    session_user: UserLogin = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Acepta un presupuesto y crea una venta.
+    Parámetros opcionales por query string:
+    - dte_type_id: 1 para Boleta, 2 para Factura
+    - dte_status_id: 1 para generar DTE, cualquier otro valor para no generar
+    """
+    data = BudgetClass(db).accept(budget_id, dte_type_id=dte_type_id, dte_status_id=dte_status_id)
 
     if isinstance(data, dict) and data.get("status") == "error":
         raise HTTPException(status_code=400, detail=data["message"])

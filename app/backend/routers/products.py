@@ -134,7 +134,7 @@ def search(search_input: ProductSearch, session_user: UserLogin = Depends(get_cu
         Lista de productos que coinciden con el término de búsqueda, incluyendo descuento del cliente si se proporciona customer_id
     """
     data = ProductClass(db).search(search_input.q, customer_id=search_input.customer_id)
-    
+
     return {"message": data}
 
 @products.post("/update/{id}")
