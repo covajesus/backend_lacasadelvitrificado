@@ -484,29 +484,76 @@ class WhatsappClass:
                 current_order = status_order.get(whatsapp_message.status, 0)
                 new_order = status_order.get(status_type, 0)
                 
+                print(f"   📊 Comparación: Estado actual '{whatsapp_message.status}' (orden: {current_order}) vs nuevo '{status_type}' (orden: {new_order})")
+                print(f"   📅 Fechas actuales - sent_date: {whatsapp_message.sent_date}, delivered_date: {whatsapp_message.delivered_date}, read_date: {whatsapp_message.read_date}")
+                print(f"   🔍 Debug: new_order > current_order = {new_order > current_order}, new_order == current_order = {new_order == current_order}, new_order < current_order = {new_order < current_order}")
+                
                 # No permitir que un estado anterior sobrescriba uno posterior
                 # Excepto para "failed" que siempre se debe actualizar
                 if status_type == "failed":
                     # Siempre actualizar si es failed
                     whatsapp_message.status = status_type
-                    whatsapp_message.updated_date = datetime.now()
+                    whatsapp_message.updated_date = datetime.utcnow()
                     whatsapp_message.error_code = str(error_code) if error_code else None
                     whatsapp_message.error_message = error_message
                     print(f"   ❌ Actualizado a failed (siempre se actualiza)")
                 elif new_order > current_order:
                     # Solo actualizar si el nuevo estado es más avanzado
+                    print(f"   ✅ Actualizando: nuevo estado es más avanzado")
                     whatsapp_message.status = status_type
-                    whatsapp_message.updated_date = datetime.now()
+                    whatsapp_message.updated_date = datetime.utcnow()
 
-                    if status_type == "sent" and not whatsapp_message.sent_date:
-                        whatsapp_message.sent_date = datetime.now()
-                        print(f"   📤 Actualizado sent_date")
-                    elif status_type == "delivered" and not whatsapp_message.delivered_date:
-                        whatsapp_message.delivered_date = datetime.now()
-                        print(f"   📬 Actualizado delivered_date")
-                    elif status_type == "read" and not whatsapp_message.read_date:
-                        whatsapp_message.read_date = datetime.now()
-                        print(f"   👁️ Actualizado read_date")
+                    if status_type == "sent":
+                        if not whatsapp_message.sent_date:
+                            whatsapp_message.sent_date = datetime.utcnow()
+                            print(f"   📤 Actualizado sent_date")
+                        else:
+                            print(f"   📤 sent_date ya existía, solo actualizando estado")
+                    elif status_type == "delivered":
+                        if not whatsapp_message.delivered_date:
+                            whatsapp_message.delivered_date = datetime.utcnow()
+                            print(f"   📬 Actualizado delivered_date")
+                        else:
+                            print(f"   📬 delivered_date ya existía, solo actualizando estado")
+                    elif status_type == "read":
+                        if not whatsapp_message.read_date:
+                            whatsapp_message.read_date = datetime.utcnow()
+                            print(f"   👁️ Actualizado read_date")
+                        else:
+                            print(f"   👁️ read_date ya existía, solo actualizando estado")
+                elif new_order == current_order:
+                    # Mismo estado, verificar si falta alguna fecha y actualizarla
+                    print(f"   ⚠️ Mismo estado, verificando fechas...")
+                    updated = False
+                    
+                    if status_type == "sent":
+                        if not whatsapp_message.sent_date:
+                            whatsapp_message.sent_date = datetime.utcnow()
+                            updated = True
+                            print(f"   📤 Actualizado sent_date (faltaba)")
+                        else:
+                            print(f"   📤 sent_date ya existe: {whatsapp_message.sent_date}")
+                    elif status_type == "delivered":
+                        if not whatsapp_message.delivered_date:
+                            whatsapp_message.delivered_date = datetime.utcnow()
+                            updated = True
+                            print(f"   📬 Actualizado delivered_date (faltaba)")
+                        else:
+                            print(f"   📬 delivered_date ya existe: {whatsapp_message.delivered_date}")
+                    elif status_type == "read":
+                        if not whatsapp_message.read_date:
+                            whatsapp_message.read_date = datetime.utcnow()
+                            updated = True
+                            print(f"   👁️ Actualizado read_date (faltaba)")
+                        else:
+                            print(f"   👁️ read_date ya existe: {whatsapp_message.read_date}")
+                    
+                    if updated:
+                        whatsapp_message.updated_date = datetime.utcnow()
+                        print(f"   ✅ Fecha actualizada aunque el estado sea el mismo")
+                    else:
+                        print(f"   ⚠️ Ignorado: Estado '{status_type}' es el mismo y todas las fechas ya existen")
+                        return
                 else:
                     print(f"   ⚠️ Ignorado: Estado '{status_type}' no es más avanzado que '{whatsapp_message.status}' (orden actual: {current_order}, nuevo: {new_order})")
                     # No hacer commit si no hay cambios
@@ -612,6 +659,9 @@ class WhatsappClass:
                     existing.budget_id = budget_id
                 if sale_id is not None:
                     existing.sale_id = sale_id
+                # Si el estado es "sent" y no tiene sent_date, actualizarlo
+                if status == "sent" and not existing.sent_date:
+                    existing.sent_date = datetime.utcnow()
             else:
                 # Crear nuevo registro
                 whatsapp_message = WhatsAppMessageModel(
@@ -622,7 +672,7 @@ class WhatsappClass:
                     budget_id=budget_id,
                     sale_id=sale_id,
                     status=status,
-                    sent_date=datetime.now()
+                    sent_date=datetime.utcnow() if status == "sent" else None
                 )
                 self.db.add(whatsapp_message)
             
