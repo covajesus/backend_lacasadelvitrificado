@@ -403,3 +403,22 @@ class LogsModel(Base):
     log = Column(String(255))
     added_date = Column(DateTime(), default=datetime.now)
     updated_date = Column(DateTime(), default=datetime.now)
+
+class WhatsAppMessageModel(Base):
+    __tablename__ = 'whatsapp_messages'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    message_id = Column(String(255), unique=True, index=True)  # ID del mensaje de WhatsApp
+    recipient_phone = Column(String(50))  # Teléfono del destinatario
+    message_type = Column(String(50))  # template, text, etc.
+    template_name = Column(String(255))  # Nombre de la plantilla si aplica
+    budget_id = Column(Integer, ForeignKey('budgets.id'), nullable=True)  # ID del presupuesto relacionado
+    sale_id = Column(Integer, ForeignKey('sales.id'), nullable=True)  # ID de la venta relacionada
+    status = Column(String(50))  # sent, delivered, read, failed
+    error_code = Column(String(50))  # Código de error si falla
+    error_message = Column(Text())  # Mensaje de error si falla
+    sent_date = Column(DateTime(), default=datetime.now)  # Cuando se envió
+    delivered_date = Column(DateTime())  # Cuando se entregó
+    read_date = Column(DateTime())  # Cuando se leyó
+    added_date = Column(DateTime(), default=datetime.now)
+    updated_date = Column(DateTime(), default=datetime.now)

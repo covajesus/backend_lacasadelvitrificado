@@ -211,7 +211,8 @@ def send_dte(db: Session = Depends(get_db)):
                         folio=sale.folio,
                         date=date_formatted,
                         amount=int(sale.total),
-                        dynamic_value=sale.folio  # Usar el folio como valor dinámico
+                        dynamic_value=sale.folio,  # Usar el folio como valor dinámico
+                        sale_id=sale.id
                     )
                     
                     print(f"[WHATSAPP] Mensaje DTE enviado al cliente {customer.phone} para venta {sale.id}")
