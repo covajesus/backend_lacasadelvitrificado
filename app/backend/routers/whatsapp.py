@@ -3,9 +3,7 @@ from sqlalchemy.orm import Session
 from typing import Optional
 from app.backend.db.database import get_db
 from app.backend.classes.whatsapp_class import WhatsappClass
-from app.backend.db.models import WhatsAppMessageModel
-from app.backend.auth.auth_user import get_current_active_user
-from app.backend.schemas import UserLogin
+from app.backend.db.models import WhatsAppMessageModel, BudgetModel, CustomerModel
 from app.backend.auth.auth_user import get_current_active_user
 from app.backend.schemas import UserLogin
 
@@ -356,3 +354,82 @@ def list_statuses(
             "total_pages": (total + items_per_page - 1) // items_per_page if items_per_page > 0 else 0
         }
     }
+
+@whatsapp.post("/resend/budget/{budget_id}")
+def resend_budget_whatsapp(
+    budget_id: int,
+    session_user: UserLogin = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Reenvía el mensaje de WhatsApp de un presupuesto al cliente.
+    """
+    try:
+        # Obtener el presupuesto
+        budget = db.query(BudgetModel).filter(BudgetModel.id == budget_id).first()
+        
+        if not budget:
+            raise HTTPException(status_code=404, detail="Presupuesto no encontrado")
+        
+        # Obtener el cliente
+        customer = None
+        customer_phone = None
+        customer_name = None
+        
+        if budget.customer_id:
+            customer = db.query(CustomerModel).filter(CustomerModel.id == budget.customer_id).first()
+            if customer:
+                customer_phone = customer.phone
+                customer_name = customer.social_reason
+        
+        # Si no hay cliente o teléfono, retornar error
+        if not customer_phone:
+            raise HTTPException(
+                status_code=400, 
+                detail="El presupuesto no tiene un cliente asociado con teléfono para enviar WhatsApp"
+            )
+        
+        # Obtener el total del presupuesto
+        total = budget.total if budget.total else 0
+        
+        # Enviar WhatsApp
+        whatsapp_class = WhatsappClass(db)
+        response = whatsapp_class.review_budget(
+            budget_id=budget_id,
+            total=int(total),
+            customer_phone=customer_phone,
+            customer_name=customer_name
+        )
+        
+        if response is None:
+            raise HTTPException(
+                status_code=500,
+                detail="Error al enviar el mensaje de WhatsApp. Verifica que el presupuesto tenga productos y cliente válido."
+            )
+        
+        response_data = response.json() if hasattr(response, 'json') else {}
+        
+        # Verificar si el envío fue exitoso
+        if response.status_code == 200:
+            return {
+                "status": "success",
+                "message": "Mensaje de WhatsApp reenviado exitosamente",
+                "budget_id": budget_id,
+                "response": response_data
+            }
+        else:
+            return {
+                "status": "error",
+                "message": f"Error al enviar WhatsApp. Código: {response.status_code}",
+                "budget_id": budget_id,
+                "response": response_data
+            }
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ Error reenviando WhatsApp del presupuesto {budget_id}: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error al reenviar el mensaje de WhatsApp: {str(e)}"
+        )
