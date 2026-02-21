@@ -138,6 +138,54 @@ def get_messages(
         "messages": result
     }
 
+@whatsapp.get("/status/budget/{budget_id}")
+def get_status_by_budget(
+    budget_id: int,
+    session_user: UserLogin = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Obtiene el estado del mensaje de WhatsApp relacionado con un presupuesto específico.
+    """
+    whatsapp_class = WhatsappClass(db)
+    messages = whatsapp_class.get_messages_by_budget(budget_id)
+    
+    if not messages:
+        return {
+            "message": {
+                "budget_id": budget_id,
+                "status": "not_found",
+                "message": "No se encontraron mensajes de WhatsApp para este presupuesto",
+                "data": None
+            }
+        }
+    
+    # Obtener el mensaje más reciente
+    latest_message = messages[0]  # Ya está ordenado por fecha descendente
+    
+    return {
+        "message": {
+            "budget_id": budget_id,
+            "status": "success",
+            "data": {
+                "id": latest_message.id,
+                "message_id": latest_message.message_id,
+                "recipient_phone": latest_message.recipient_phone,
+                "message_type": latest_message.message_type,
+                "template_name": latest_message.template_name,
+                "status": latest_message.status,
+                "error_code": latest_message.error_code,
+                "error_message": latest_message.error_message,
+                "sent_date": latest_message.sent_date.isoformat() if latest_message.sent_date else None,
+                "delivered_date": latest_message.delivered_date.isoformat() if latest_message.delivered_date else None,
+                "read_date": latest_message.read_date.isoformat() if latest_message.read_date else None,
+                "added_date": latest_message.added_date.isoformat() if latest_message.added_date else None,
+                "updated_date": latest_message.updated_date.isoformat() if latest_message.updated_date else None
+            },
+            "all_messages_count": len(messages)
+        }
+    }
+
 @whatsapp.get("/messages/budget/{budget_id}")
 def get_messages_by_budget(
     budget_id: int,
