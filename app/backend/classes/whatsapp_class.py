@@ -473,23 +473,44 @@ class WhatsappClass:
                 print(f"   Estado actual: {whatsapp_message.status}")
                 print(f"   Nuevo estado: {status_type}")
                 
-                # Actualizar el estado del mensaje
-                whatsapp_message.status = status_type
-                whatsapp_message.updated_date = datetime.now()
-
-                if status_type == "sent":
-                    whatsapp_message.sent_date = datetime.now()
-                    print(f"   📤 Actualizado sent_date")
-                elif status_type == "delivered":
-                    whatsapp_message.delivered_date = datetime.now()
-                    print(f"   📬 Actualizado delivered_date")
-                elif status_type == "read":
-                    whatsapp_message.read_date = datetime.now()
-                    print(f"   👁️ Actualizado read_date")
-                elif status_type == "failed":
+                # Definir orden de estados (mayor número = estado más avanzado)
+                status_order = {
+                    "sent": 1,
+                    "delivered": 2,
+                    "read": 3,
+                    "failed": 0  # failed puede ocurrir en cualquier momento
+                }
+                
+                current_order = status_order.get(whatsapp_message.status, 0)
+                new_order = status_order.get(status_type, 0)
+                
+                # No permitir que un estado anterior sobrescriba uno posterior
+                # Excepto para "failed" que siempre se debe actualizar
+                if status_type == "failed":
+                    # Siempre actualizar si es failed
+                    whatsapp_message.status = status_type
+                    whatsapp_message.updated_date = datetime.now()
                     whatsapp_message.error_code = str(error_code) if error_code else None
                     whatsapp_message.error_message = error_message
-                    print(f"   ❌ Actualizado error_code y error_message")
+                    print(f"   ❌ Actualizado a failed (siempre se actualiza)")
+                elif new_order > current_order:
+                    # Solo actualizar si el nuevo estado es más avanzado
+                    whatsapp_message.status = status_type
+                    whatsapp_message.updated_date = datetime.now()
+
+                    if status_type == "sent" and not whatsapp_message.sent_date:
+                        whatsapp_message.sent_date = datetime.now()
+                        print(f"   📤 Actualizado sent_date")
+                    elif status_type == "delivered" and not whatsapp_message.delivered_date:
+                        whatsapp_message.delivered_date = datetime.now()
+                        print(f"   📬 Actualizado delivered_date")
+                    elif status_type == "read" and not whatsapp_message.read_date:
+                        whatsapp_message.read_date = datetime.now()
+                        print(f"   👁️ Actualizado read_date")
+                else:
+                    print(f"   ⚠️ Ignorado: Estado '{status_type}' no es más avanzado que '{whatsapp_message.status}' (orden actual: {current_order}, nuevo: {new_order})")
+                    # No hacer commit si no hay cambios
+                    return
 
                 try:
                     self.db.commit()
