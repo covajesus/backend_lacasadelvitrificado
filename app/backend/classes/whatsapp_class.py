@@ -34,6 +34,34 @@ class WhatsappClass:
         
         return phone
 
+    def _clean_text_for_whatsapp(self, text):
+        """
+        Limpia el texto para WhatsApp:
+        - Quita saltos de línea (\n)
+        - Quita tabulaciones (\t)
+        - Reemplaza múltiples espacios consecutivos por un solo espacio
+        - Limita a máximo 4 espacios consecutivos
+        """
+        if not text:
+            return ""
+        
+        # Convertir a string
+        text = str(text)
+        
+        # Reemplazar saltos de línea y tabulaciones por espacios
+        text = text.replace("\n", " ")
+        text = text.replace("\r", " ")
+        text = text.replace("\t", " ")
+        
+        # Reemplazar múltiples espacios consecutivos por un solo espacio
+        import re
+        text = re.sub(r' +', ' ', text)
+        
+        # Limitar a máximo 4 espacios consecutivos (por si acaso)
+        text = re.sub(r' {5,}', '    ', text)
+        
+        return text.strip()
+
     def send_dte(self, customer_phone, dte_type, folio, date, amount, dynamic_value, sale_id: int = None): 
         url = "https://graph.facebook.com/v22.0/790586727468909/messages"
         token = os.getenv('META_TOKEN')
@@ -290,9 +318,14 @@ class WhatsappClass:
             .all()
         )
 
-        products_text = "\n".join([
-            f"{p.product} x {p.quantity}" for p in products
-        ])
+        # Construir texto de productos sin saltos de línea (WhatsApp no los permite)
+        # Usar coma y espacio como separador
+        products_list = []
+        for p in products:
+            product_name = self._clean_text_for_whatsapp(p.product)
+            products_list.append(f"{product_name} x {p.quantity}")
+        
+        products_text = ", ".join(products_list)
 
         total_formatted = f"{total:,}".replace(",", ".")
 
