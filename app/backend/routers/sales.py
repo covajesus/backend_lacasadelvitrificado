@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from app.backend.db.database import get_db
 from sqlalchemy.orm import Session
 from app.backend.schemas import UserLogin, StoreSale, SaleList, SalesReportFilter
@@ -11,6 +11,7 @@ from app.backend.classes.inventory_class import InventoryClass
 from app.backend.classes.whatsapp_class import WhatsappClass
 from app.backend.db.models import SaleModel, CustomerModel
 from datetime import datetime
+from typing import Optional
 import uuid
 
 sales = APIRouter(
@@ -494,3 +495,67 @@ def delete_sale(
         raise HTTPException(status_code=400, detail=data["message"])
     
     return {"message": data}
+
+@sales.get("/report")
+def sales_report(
+    desde: Optional[str] = Query(None, description="Fecha de inicio (YYYY-MM-DD)"),
+    hasta: Optional[str] = Query(None, description="Fecha de fin (YYYY-MM-DD)"),
+    session_user: UserLogin = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Genera un informe de ventas con:
+    - Total vendido por producto (cantidad y monto)
+    - Total general (subtotal, tax/IVA, total)
+    
+    Si no se proporcionan fechas, devuelve todas las ventas.
+    """
+    try:
+        # Convertir strings a datetime si se proporcionan
+        desde_date = None
+        hasta_date = None
+        
+        if desde:
+            try:
+                desde_date = datetime.strptime(desde, "%Y-%m-%d")
+            except ValueError:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Formato de fecha 'desde' inválido. Use YYYY-MM-DD"
+                )
+        
+        if hasta:
+            try:
+                hasta_date = datetime.strptime(hasta, "%Y-%m-%d")
+            except ValueError:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Formato de fecha 'hasta' inválido. Use YYYY-MM-DD"
+                )
+        
+        # Validar que 'desde' sea anterior a 'hasta'
+        if desde_date and hasta_date and desde_date > hasta_date:
+            raise HTTPException(
+                status_code=400,
+                detail="La fecha 'desde' debe ser anterior o igual a la fecha 'hasta'"
+            )
+        
+        # Generar informe
+        report = SaleClass(db).get_sales_report(desde=desde_date, hasta=hasta_date)
+        
+        if report.get("status") == "error":
+            raise HTTPException(status_code=500, detail=report.get("message", "Error al generar informe"))
+        
+        return {
+            "status": "success",
+            "message": report
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ Error en sales_report: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error al generar el informe de ventas: {str(e)}"
+        )

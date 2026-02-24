@@ -1274,3 +1274,136 @@ class SaleClass:
             import traceback
             print(f"[ERROR] Traceback: {traceback.format_exc()}")
             return []
+
+    def get_sales_report(self, desde=None, hasta=None):
+        """
+        Genera un informe de ventas con:
+        - Total vendido por producto (cantidad y monto)
+        - Total general (subtotal, tax, total)
+        
+        Args:
+            desde: Fecha de inicio (datetime o string en formato YYYY-MM-DD)
+            hasta: Fecha de fin (datetime o string en formato YYYY-MM-DD)
+        
+        Returns:
+            Diccionario con productos, totales y resumen
+        """
+        try:
+            # Construir query base para ventas
+            sales_query = self.db.query(SaleModel)
+            
+            # Aplicar filtros de fecha si se proporcionan
+            if desde:
+                if isinstance(desde, str):
+                    desde = datetime.strptime(desde, "%Y-%m-%d")
+                sales_query = sales_query.filter(SaleModel.added_date >= desde)
+            
+            if hasta:
+                if isinstance(hasta, str):
+                    hasta = datetime.strptime(hasta, "%Y-%m-%d")
+                    # Incluir todo el día hasta las 23:59:59
+                    hasta = hasta.replace(hour=23, minute=59, second=59)
+                sales_query = sales_query.filter(SaleModel.added_date <= hasta)
+            
+            # Obtener IDs de ventas filtradas
+            sale_ids = [sale.id for sale in sales_query.all()]
+            
+            if not sale_ids:
+                return {
+                    "status": "success",
+                    "products": [],
+                    "totals": {
+                        "subtotal": 0,
+                        "tax": 0,
+                        "total": 0
+                    },
+                    "summary": {
+                        "total_sales": 0,
+                        "date_from": desde.strftime("%Y-%m-%d") if desde else None,
+                        "date_to": hasta.strftime("%Y-%m-%d") if hasta else None
+                    }
+                }
+            
+            # Agrupar productos por producto_id y calcular totales
+            products_report = (
+                self.db.query(
+                    SaleProductModel.product_id,
+                    ProductModel.product.label("product_name"),
+                    ProductModel.code.label("product_code"),
+                    func.sum(SaleProductModel.quantity).label("total_quantity"),
+                    func.sum(SaleProductModel.quantity * SaleProductModel.price).label("total_amount")
+                )
+                .join(ProductModel, ProductModel.id == SaleProductModel.product_id)
+                .filter(SaleProductModel.sale_id.in_(sale_ids))
+                .group_by(
+                    SaleProductModel.product_id,
+                    ProductModel.product,
+                    ProductModel.code
+                )
+                .order_by(func.sum(SaleProductModel.quantity * SaleProductModel.price).desc())
+                .all()
+            )
+            
+            # Calcular totales generales de las ventas
+            totals_query = (
+                self.db.query(
+                    func.sum(SaleModel.subtotal).label("total_subtotal"),
+                    func.sum(SaleModel.tax).label("total_tax"),
+                    func.sum(SaleModel.total).label("total_total")
+                )
+                .filter(SaleModel.id.in_(sale_ids))
+            )
+            
+            totals_result = totals_query.first()
+            
+            # Contar total de ventas
+            total_sales = len(sale_ids)
+            
+            # Formatear productos
+            products_data = []
+            for product in products_report:
+                products_data.append({
+                    "product_id": product.product_id,
+                    "product_name": product.product_name,
+                    "product_code": product.product_code,
+                    "total_quantity": int(product.total_quantity),
+                    "total_amount": float(product.total_amount) if product.total_amount else 0
+                })
+            
+            # Preparar respuesta
+            result = {
+                "status": "success",
+                "products": products_data,
+                "totals": {
+                    "subtotal": float(totals_result.total_subtotal) if totals_result.total_subtotal else 0,
+                    "tax": float(totals_result.total_tax) if totals_result.total_tax else 0,
+                    "total": float(totals_result.total_total) if totals_result.total_total else 0
+                },
+                "summary": {
+                    "total_sales": total_sales,
+                    "date_from": desde.strftime("%Y-%m-%d") if desde else None,
+                    "date_to": hasta.strftime("%Y-%m-%d") if hasta else None
+                }
+            }
+            
+            return result
+            
+        except Exception as e:
+            print(f"[ERROR] Error al generar informe de ventas: {str(e)}")
+            import traceback
+            print(f"[ERROR] Traceback: {traceback.format_exc()}")
+            return {
+                "status": "error",
+                "message": str(e),
+                "products": [],
+                "totals": {
+                    "subtotal": 0,
+                    "tax": 0,
+                    "total": 0
+                },
+                "summary": {
+                    "total_sales": 0,
+                    "date_from": None,
+                    "date_to": None
+                }
+            }
