@@ -11,16 +11,35 @@ class WhatsappClass:
     def __init__(self, db):
         self.db = db
 
+    def _clean_phone_number(self, phone):
+        """
+        Limpia y formatea el número de teléfono:
+        - Quita espacios en blanco
+        - Quita el prefijo "+56" si existe
+        - Agrega el prefijo "56" si no existe
+        """
+        if not phone:
+            return None
+        
+        # Convertir a string y quitar espacios al inicio/final
+        phone = str(phone).strip()
+        # Quitar todos los espacios en blanco
+        phone = phone.replace(" ", "")
+        # Quitar el prefijo "+56" si existe
+        phone = phone.replace("+56", "")
+        
+        # Agregar prefijo "56" si no empieza con "56"
+        if not phone.startswith("56"):
+            phone = "56" + phone
+        
+        return phone
+
     def send_dte(self, customer_phone, dte_type, folio, date, amount, dynamic_value, sale_id: int = None): 
         url = "https://graph.facebook.com/v22.0/790586727468909/messages"
         token = os.getenv('META_TOKEN')
 
         # Formatear el número de teléfono
-        phone_str = str(customer_phone).strip()
-        if not phone_str.startswith("56"):
-            customer_phone_formatted = "56" + phone_str
-        else:
-            customer_phone_formatted = phone_str
+        customer_phone_formatted = self._clean_phone_number(customer_phone)
 
         payload = {
             "messaging_product": "whatsapp",
@@ -141,11 +160,7 @@ class WhatsappClass:
         token = os.getenv('META_TOKEN')        
 
         # Formatear el número de teléfono
-        phone_str = str(customer_phone).strip()
-        if not phone_str.startswith("56"):
-            customer_phone_formatted = "56" + phone_str
-        else:
-            customer_phone_formatted = phone_str
+        customer_phone_formatted = self._clean_phone_number(customer_phone)
 
         payload = {
             "messaging_product": "whatsapp",
@@ -195,11 +210,7 @@ class WhatsappClass:
         token = os.getenv('META_TOKEN')        
 
         # Formatear el número de teléfono
-        phone_str = str(customer_phone).strip()
-        if not phone_str.startswith("56"):
-            customer_phone_formatted = "56" + phone_str
-        else:
-            customer_phone_formatted = phone_str
+        customer_phone_formatted = self._clean_phone_number(customer_phone)
 
         payload = {
             "messaging_product": "whatsapp",
@@ -285,9 +296,8 @@ class WhatsappClass:
 
         total_formatted = f"{total:,}".replace(",", ".")
 
-        phone = str(phone)
-        if not phone.startswith("56"):
-            phone = "56" + phone
+        # Limpiar y formatear el número de teléfono
+        phone = self._clean_phone_number(phone)
 
         payload = {
             "messaging_product": "whatsapp",
