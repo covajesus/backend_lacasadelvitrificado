@@ -1330,15 +1330,20 @@ class SaleClass:
                     SaleProductModel.product_id,
                     ProductModel.product.label("product_name"),
                     ProductModel.code.label("product_code"),
+                    ProductModel.unit_measure_id,
+                    UnitMeasureModel.unit_measure.label("unit_measure_name"),
                     func.sum(SaleProductModel.quantity).label("total_quantity"),
                     func.sum(SaleProductModel.quantity * SaleProductModel.price).label("total_amount")
                 )
                 .join(ProductModel, ProductModel.id == SaleProductModel.product_id)
+                .join(UnitMeasureModel, UnitMeasureModel.id == ProductModel.unit_measure_id, isouter=True)
                 .filter(SaleProductModel.sale_id.in_(sale_ids))
                 .group_by(
                     SaleProductModel.product_id,
                     ProductModel.product,
-                    ProductModel.code
+                    ProductModel.code,
+                    ProductModel.unit_measure_id,
+                    UnitMeasureModel.unit_measure
                 )
                 .order_by(func.sum(SaleProductModel.quantity * SaleProductModel.price).desc())
                 .all()
@@ -1359,14 +1364,33 @@ class SaleClass:
             # Contar total de ventas
             total_sales = len(sale_ids)
             
-            # Formatear productos
+            # Formatear productos con información de unidad de medida y cantidad por paquete
             products_data = []
             for product in products_report:
+                # Obtener quantity_per_package del UnitFeatureModel
+                unit_feature = (
+                    self.db.query(UnitFeatureModel)
+                    .filter(UnitFeatureModel.product_id == product.product_id)
+                    .first()
+                )
+                
+                quantity_per_package = 1  # Default si no existe
+                if unit_feature and unit_feature.quantity_per_package:
+                    quantity_per_package = unit_feature.quantity_per_package
+                
+                # Calcular cantidad real (paquetes * cantidad por paquete)
+                total_quantity_packages = int(product.total_quantity)
+                total_quantity_real = total_quantity_packages * quantity_per_package
+                
                 products_data.append({
                     "product_id": product.product_id,
                     "product_name": product.product_name,
                     "product_code": product.product_code,
-                    "total_quantity": int(product.total_quantity),
+                    "unit_measure_id": product.unit_measure_id,
+                    "unit_measure_name": product.unit_measure_name or "N/A",
+                    "quantity_per_package": quantity_per_package,
+                    "total_quantity_packages": total_quantity_packages,
+                    "total_quantity_real": total_quantity_real,
                     "total_amount": float(product.total_amount) if product.total_amount else 0
                 })
             
