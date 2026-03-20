@@ -30,9 +30,8 @@ class WhatsappClass:
     def _clean_phone_number(self, phone):
         """
         Limpia y formatea el número de teléfono:
-        - Quita espacios en blanco
-        - Quita el prefijo "+56" si existe
-        - Agrega el prefijo "56" si no existe
+        - Si es internacional (empieza con + y código de país), lo deja como viene
+        - Si es chileno, normaliza a formato 56XXXXXXXXX
         """
         if not phone:
             return None
@@ -41,10 +40,22 @@ class WhatsappClass:
         phone = str(phone).strip()
         # Quitar todos los espacios en blanco
         phone = phone.replace(" ", "")
-        # Quitar el prefijo "+56" si existe
-        phone = phone.replace("+56", "")
         
-        # Agregar prefijo "56" si no empieza con "56"
+        # Si empieza con + seguido de dígitos (número internacional), dejarlo como viene
+        if phone.startswith("+"):
+            # Verificar que después del + hay al menos un dígito
+            after_plus = phone[1:].replace("-", "").replace(" ", "")
+            if after_plus and after_plus.isdigit():
+                return phone
+        
+        # Si ya tiene código de país sin + (ej: 5412345678, 3412345678), dejarlo como viene
+        # Detectamos si tiene más de 10 dígitos (probablemente incluye código de país)
+        digits_only = re.sub(r"[^\d]", "", phone)
+        if len(digits_only) > 10 and not phone.startswith("56"):
+            return phone
+        
+        # Para números chilenos: quitar +56 si existe y agregar 56 si no tiene
+        phone = phone.replace("+56", "")
         if not phone.startswith("56"):
             phone = "56" + phone
         
@@ -559,7 +570,7 @@ class WhatsappClass:
             identification_number="",
         )
 
-        res = BudgetClass(self.db).store_without_customer(budget_inputs)
+        res = BudgetClass(self.db).store_without_customer(budget_inputs, skip_whatsapp_notification=True)
         if isinstance(res, dict) and res.get("status") == "success" and res.get("budget_id"):
             return {"ok": True, "budget_id": res["budget_id"], "total": total}
         return {"ok": False, "error": str(res)}
@@ -722,30 +733,6 @@ class WhatsappClass:
                 return
             session["budget_contact_email"] = addr
             session["customer_id"] = None
-            session["step"] = "budget_choose_document"
-            subtotal, shipping_cost, tax, total = self._preview_totals_for_session(session)
-            self.send_autoreply(
-                phone,
-                f"Correo: {addr}\n"
-                "Total del presupuesto:\n"
-                f"Productos: {self._format_currency(subtotal)}\n"
-                f"Envío: {self._format_currency(shipping_cost)}\n"
-                f"IVA: {self._format_currency(tax)}\n"
-                f"Total: {self._format_currency(total)}\n\n"
-                "Tipo de documento deseado:\n1) Boleta\n2) Factura",
-            )
-            return
-
-        if step == "budget_choose_document":
-            choice = text.strip()
-            if choice == "1":
-                session["document_type_id"] = 39
-            elif choice == "2":
-                session["document_type_id"] = 33
-            else:
-                self.send_autoreply(phone, "Selecciona 1 (Boleta) o 2 (Factura).")
-                return
-
             res = self._create_budget_from_whatsapp_session(phone, session)
             if not res.get("ok"):
                 self.send_autoreply(
@@ -757,18 +744,22 @@ class WhatsappClass:
 
             bid = res["budget_id"]
             total = res.get("total", 0)
-            doc_label = "Boleta" if session.get("document_type_id") == 39 else "Factura"
             contact_email = (session.get("budget_contact_email") or "").strip()
-            send_res = self._send_budget_pdf_email(contact_email, bid, doc_label) if contact_email else "email_error"
+            send_res = self._send_budget_pdf_email(contact_email, bid, "") if contact_email else "email_error"
 
             if send_res == "ok":
+                session["pending_budget_id"] = bid
+                session["step"] = "budget_ask_accept_reject"
                 self.send_autoreply(
                     phone,
-                    "Presupuesto enviado.\n\n"
+                    "Presupuesto enviado a tu correo.\n\n"
                     f"Revisa tu correo ({contact_email}); va el PDF adjunto.\n"
-                    f"N° {bid} · {doc_label} · Total: {self._format_currency(total)}"
-                    + self._farewell_after_budget_text(),
+                    f"N° {bid} · Total: {self._format_currency(total)}\n\n"
+                    "¿Aceptas este presupuesto?\n"
+                    "1) Sí, acepto\n"
+                    "2) No, rechazo",
                 )
+                return
             elif send_res == "no_pdf":
                 self.send_autoreply(
                     phone,
@@ -786,12 +777,57 @@ class WhatsappClass:
             else:
                 self.send_autoreply(
                     phone,
-                    f"Tu presupuesto quedó registrado (N° {bid}, {doc_label}, total {self._format_currency(total)}).\n"
+                    f"Tu presupuesto quedó registrado (N° {bid}, total {self._format_currency(total)}).\n"
                     f"No se pudo enviar el correo con el PDF ({send_res}). Te contactamos por aquí."
                     + self._farewell_after_budget_text(),
                 )
             self._chat_sessions.pop(phone, None)
             return
+
+        if step == "budget_ask_accept_reject":
+            choice = text.strip()
+            bid = session.get("pending_budget_id")
+            if not bid:
+                self._chat_sessions.pop(phone, None)
+                self.send_autoreply(phone, "Sesión expirada. Escribe Hola para comenzar de nuevo.")
+                return
+
+            if choice == "1":
+                from app.backend.classes.budget_class import BudgetClass
+                budget_class = BudgetClass(self.db)
+                accept_result = budget_class.accept(int(bid))
+                
+                if isinstance(accept_result, dict) and accept_result.get("status") == "error":
+                    self.send_autoreply(
+                        phone,
+                        f"Ocurrió un error al procesar la aceptación: {accept_result.get('message')}"
+                    )
+                else:
+                    sale_id = accept_result.get('sale_id') if isinstance(accept_result, dict) else None
+                    self.send_autoreply(
+                        phone,
+                        "Gracias por aceptar el presupuesto.\n"
+                        "Nos pondremos en contacto contigo a la brevedad."
+                        + self._farewell_after_budget_text(),
+                    )
+                self._chat_sessions.pop(phone, None)
+                return
+            elif choice == "2":
+                budget = self.db.query(BudgetModel).filter(BudgetModel.id == bid).first()
+                if budget:
+                    budget.status_id = 2
+                    self.db.commit()
+                self.send_autoreply(
+                    phone,
+                    "Hemos recibido el rechazo del presupuesto.\n"
+                    "Gracias por tu respuesta."
+                    + self._farewell_after_budget_text(),
+                )
+                self._chat_sessions.pop(phone, None)
+                return
+            else:
+                self.send_autoreply(phone, "Marca 1 para aceptar el presupuesto o 2 para rechazarlo.")
+                return
 
         self.send_autoreply(phone, "Escribe Hola para comenzar de nuevo.")
         return
@@ -1218,11 +1254,7 @@ class WhatsappClass:
         admin_phone = setting_data["setting_data"]["phone"]
 
         # Formatear el número de teléfono
-        phone_str = str(admin_phone).strip()
-        if not phone_str.startswith("56"):
-            admin_phone_formatted = "56" + phone_str
-        else:
-            admin_phone_formatted = phone_str
+        admin_phone_formatted = self._clean_phone_number(admin_phone) or str(admin_phone).strip()
 
         payload = {
             "messaging_product": "whatsapp",
@@ -1735,8 +1767,8 @@ class WhatsappClass:
         url = "https://graph.facebook.com/v22.0/790586727468909/messages"
         token = os.getenv("META_TOKEN")
 
-        if not phone.startswith("56"):
-            phone = "56" + phone
+        # Normalizar número (respeta números internacionales)
+        phone = self._clean_phone_number(phone) or phone
 
         payload = {
             "messaging_product": "whatsapp",

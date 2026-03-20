@@ -232,10 +232,11 @@ class BudgetClass:
             self.db.rollback()
             return {"status": "error", "message": str(e)}
 
-    def store_without_customer(self, budget_inputs):
+    def store_without_customer(self, budget_inputs, skip_whatsapp_notification=False):
         """
         Crea un presupuesto sin guardar el cliente en la tabla customers.
         Los datos del cliente se guardan temporalmente en el presupuesto.
+        skip_whatsapp_notification: Si es True, no envía el mensaje de revisión por WhatsApp.
         """
         try:
             calculated_subtotal = 0
@@ -291,24 +292,25 @@ class BudgetClass:
             self.db.refresh(new_budget)
 
             # Enviar notificación de WhatsApp para revisar el presupuesto
-            # Usar los datos del cliente del input en lugar de buscar en customers
-            try:
-                # Obtener el teléfono del cliente desde budget_inputs
-                customer_phone = budget_inputs.phone if budget_inputs.phone else None
-                
-                if customer_phone:
-                    # Enviar WhatsApp con los datos del cliente temporal
-                    WhatsappClass(self.db).review_budget(
-                        budget_id=new_budget.id,
-                        total=total,
-                        customer_phone=customer_phone,
-                        customer_name=budget_inputs.social_reason
-                    )
-                else:
-                    print(f"[BUDGET_WITHOUT_CUSTOMER] No se envió WhatsApp porque no hay teléfono para presupuesto {new_budget.id}")
-            except Exception as whatsapp_error:
-                print(f"Error al enviar WhatsApp de review_budget: {str(whatsapp_error)}")
-                # No fallar el proceso si falla el WhatsApp
+            # Solo si no se indica que se omita (ej: cuando viene de WhatsApp y se pregunta directamente)
+            if not skip_whatsapp_notification:
+                try:
+                    # Obtener el teléfono del cliente desde budget_inputs
+                    customer_phone = budget_inputs.phone if budget_inputs.phone else None
+                    
+                    if customer_phone:
+                        # Enviar WhatsApp con los datos del cliente temporal
+                        WhatsappClass(self.db).review_budget(
+                            budget_id=new_budget.id,
+                            total=total,
+                            customer_phone=customer_phone,
+                            customer_name=budget_inputs.social_reason
+                        )
+                    else:
+                        print(f"[BUDGET_WITHOUT_CUSTOMER] No se envió WhatsApp porque no hay teléfono para presupuesto {new_budget.id}")
+                except Exception as whatsapp_error:
+                    print(f"Error al enviar WhatsApp de review_budget: {str(whatsapp_error)}")
+                    # No fallar el proceso si falla el WhatsApp
 
             return {
                 "status": "success",
