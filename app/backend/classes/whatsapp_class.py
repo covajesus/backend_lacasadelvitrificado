@@ -473,7 +473,13 @@ class WhatsappClass:
         s = (s or "").strip()
         return bool(re.match(r"^[^\s@]+@[^\s@]+\.[^\s@]+$", s))
 
-    def _send_budget_pdf_email(self, receiver_email: str, budget_id: int, document_label: str) -> str:
+    def _send_budget_pdf_email(
+        self,
+        receiver_email: str,
+        budget_id: int,
+        document_label: str,
+        delivery_address: str = None,
+    ) -> str:
         from app.backend.classes.template_class import TemplateClass
         from app.backend.classes.email_class import EmailClass
 
@@ -482,6 +488,7 @@ class WhatsappClass:
             budget_id,
             document_label=document_label or "",
             contact_email=receiver_email.strip(),
+            delivery_address=delivery_address,
         )
         if not html_pdf.strip():
             return "no_pdf"
@@ -745,7 +752,16 @@ class WhatsappClass:
             bid = res["budget_id"]
             total = res.get("total", 0)
             contact_email = (session.get("budget_contact_email") or "").strip()
-            send_res = self._send_budget_pdf_email(contact_email, bid, "") if contact_email else "email_error"
+            send_res = (
+                self._send_budget_pdf_email(
+                    contact_email,
+                    bid,
+                    "",
+                    session.get("delivery_address"),
+                )
+                if contact_email
+                else "email_error"
+            )
 
             if send_res == "ok":
                 session["pending_budget_id"] = bid

@@ -14,6 +14,7 @@ from app.backend.db.models import (
     CustomerModel,
 )
 from datetime import datetime
+import html
 import math
 
 class TemplateClass:
@@ -809,7 +810,11 @@ class TemplateClass:
         return html
 
     def generate_budget_pdf_html(
-        self, budget_id: int, document_label: str = "", contact_email: str = None
+        self,
+        budget_id: int,
+        document_label: str = "",
+        contact_email: str = None,
+        delivery_address: str = None,
     ) -> str:
         """HTML para PDF de presupuesto (misma línea visual que correos/plantillas internas: logo, tabla, totales)."""
         vitrificado_logo_url = "https://api.lacasadelvitrificado.com/public/assets/vitrificado-logo.png"
@@ -859,14 +864,19 @@ class TemplateClass:
 
         doc_note = ""
         if document_label:
-            doc_note = f"<p><strong>Documento solicitado:</strong> {document_label}</p>"
+            doc_note = f"<p><strong>Documento solicitado:</strong> {html.escape(document_label)}</p>"
+
+        addr_note = ""
+        if delivery_address and str(delivery_address).strip():
+            addr_safe = html.escape(str(delivery_address).strip())
+            addr_note = f"<p style=\"font-size: 12px;\"><strong>Envío / retiro:</strong><br/>{addr_safe}</p>"
 
         company_block = "<br>".join(company_lines) if company_lines else "VitrificadosChile"
 
         if contact_email and (not customer_name or getattr(row, "customer_id", None) == -1):
-            client_display = contact_email
+            client_display = html.escape(contact_email)
         elif customer_name:
-            client_display = customer_name
+            client_display = html.escape(str(customer_name))
         else:
             client_display = "—"
 
@@ -901,6 +911,7 @@ class TemplateClass:
             </div>
         </div>
         {doc_note}
+        {addr_note}
         <p style="font-size: 12px;"><strong>Empresa</strong><br>{company_block}</p>
         <table>
             <thead>
