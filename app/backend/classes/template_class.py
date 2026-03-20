@@ -808,7 +808,9 @@ class TemplateClass:
 
         return html
 
-    def generate_budget_pdf_html(self, budget_id: int, document_label: str = "") -> str:
+    def generate_budget_pdf_html(
+        self, budget_id: int, document_label: str = "", contact_email: str = None
+    ) -> str:
         """HTML para PDF de presupuesto (misma línea visual que correos/plantillas internas: logo, tabla, totales)."""
         vitrificado_logo_url = "https://api.lacasadelvitrificado.com/public/assets/vitrificado-logo.png"
         budget = (
@@ -861,6 +863,13 @@ class TemplateClass:
 
         company_block = "<br>".join(company_lines) if company_lines else "VitrificadosChile"
 
+        if contact_email and (not customer_name or getattr(row, "customer_id", None) == -1):
+            client_display = contact_email
+        elif customer_name:
+            client_display = customer_name
+        else:
+            client_display = "—"
+
         html = f"""
         <html>
         <head>
@@ -885,7 +894,7 @@ class TemplateClass:
         <div style="display: flex; justify-content: space-between; flex-wrap: wrap; gap: 12px;">
             <div>
                 <strong>Cliente</strong><br>
-                {customer_name or "—"}<br>
+                {client_display}<br>
             </div>
             <div style="text-align: right;">
                 <strong>Fecha</strong><br>{date_str}
