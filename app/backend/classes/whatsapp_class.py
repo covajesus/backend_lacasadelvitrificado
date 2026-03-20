@@ -461,6 +461,50 @@ class WhatsappClass:
             "Escribe Hola para un nuevo pedido o presupuesto."
         )
 
+    def _looks_like_email(self, s: str) -> bool:
+        s = (s or "").strip()
+        return bool(re.match(r"^[^\s@]+@[^\s@]+\.[^\s@]+$", s))
+
+    def _send_budget_pdf_email(self, receiver_email: str, budget_id: int, document_label: str) -> str:
+        from app.backend.classes.template_class import TemplateClass
+        from app.backend.classes.email_class import EmailClass
+
+        tpl = TemplateClass(self.db)
+        html_pdf = tpl.generate_budget_pdf_html(budget_id, document_label=document_label or "")
+        if not html_pdf.strip():
+            return "no_pdf"
+
+        try:
+            pdf_bytes = tpl.html_to_pdf_bytes(html_pdf)
+        except Exception:
+            return "pdf_error"
+
+        vitrificado_logo_url = "https://api.lacasadelvitrificado.com/public/assets/vitrificado-logo.png"
+        body_html = f"""
+        <html><head><meta charset="utf-8"></head>
+        <body style="font-family: Arial, sans-serif; font-size: 14px;">
+        <img src="{vitrificado_logo_url}" style="width:120px;" alt="VitrificadosChile" />
+        <p>Adjunto encontrarás el detalle de tu presupuesto en PDF.</p>
+        <p>Saludos,<br/>Equipo VitrificadosChile</p>
+        </body></html>
+        """
+
+        email_client = EmailClass(
+            "bergerseidle@vitrificadoschile.com",
+            "VitrificadosChile",
+            "bhva zicx wfub duxg",
+        )
+        result = email_client.send_email(
+            receiver_email=receiver_email.strip(),
+            subject=f"Presupuesto #{budget_id} — VitrificadosChile",
+            message=body_html,
+            pdf_bytes=pdf_bytes,
+            pdf_filename=f"presupuesto_{budget_id}.pdf",
+        )
+        if "correctamente" in (result or "").lower():
+            return "ok"
+        return result or "email_error"
+
     def _sync_budget_cart_prices(self, session: dict):
         """Recalcula precios del carrito con descuentos del cliente (tras conocer RUT)."""
         cid = session.get("customer_id")
@@ -640,10 +684,54 @@ class WhatsappClass:
             if text.strip() != "1":
                 self.send_autoreply(phone, "Marca 1 para continuar o 2 para cancelar.")
                 return
+            session["step"] = "budget_ask_shipping"
+            self.send_autoreply(
+                phone,
+                "Para armar el presupuesto: ¿necesitas envío a domicilio o retiro en tienda?\n"
+                "1) Sin envío (retiro en tienda)\n"
+                "2) Con envío a domicilio",
+            )
+            return
+
+        if step == "budget_ask_shipping":
+            choice = text.strip()
+            if choice in ["1", "1)", "sin envio", "sin envío", "retiro", "sin envío (retiro en tienda)"]:
+                session["shipping_method_id"] = 1
+                session["delivery_address"] = "Retiro en tienda / sin envío"
+                session["step"] = "budget_ask_rut"
+                self.send_autoreply(
+                    phone,
+                    "Perfecto, sin envío (retiro en tienda).\n"
+                    "Ahora envíame tu RUT (ej: 12345678-9).\n"
+                    "Si no estás registrado, te pediremos nombre y apellidos después.",
+                )
+                return
+            if choice in ["2", "2)", "con envio", "con envío", "envio", "envío", "domicilio", "delivery"]:
+                session["shipping_method_id"] = 2
+                session["step"] = "budget_collect_address"
+                self.send_autoreply(
+                    phone,
+                    "Con envío a domicilio. Indica la dirección completa (calle, número, comuna, referencias).\n"
+                    "Luego te pediremos el RUT.",
+                )
+                return
+            self.send_autoreply(
+                phone,
+                "Indica cómo quieres el presupuesto:\n"
+                "1) Sin envío (retiro en tienda)\n"
+                "2) Con envío a domicilio",
+            )
+            return
+
+        if step == "budget_collect_address":
+            if len(raw_text) < 8:
+                self.send_autoreply(phone, "La dirección parece muy corta. Envíala completa.")
+                return
+            session["delivery_address"] = raw_text.strip()
             session["step"] = "budget_ask_rut"
             self.send_autoreply(
                 phone,
-                "Perfecto. Envíame tu RUT (ej: 12345678-9).\n"
+                "Dirección registrada. Envíame tu RUT (ej: 12345678-9).\n"
                 "Si no estás registrado, te pediremos nombre y apellidos después.",
             )
             return
@@ -660,13 +748,23 @@ class WhatsappClass:
                 session["is_new"] = False
                 self._sync_customer_whatsapp_phone(customer, phone)
                 self._sync_budget_cart_prices(session)
-                session["step"] = "budget_ask_shipping"
+                if session.get("shipping_method_id") == 2:
+                    cust = self.db.query(CustomerModel).filter(CustomerModel.id == customer.id).first()
+                    if cust and session.get("delivery_address"):
+                        cust.address = session["delivery_address"]
+                        cust.updated_date = datetime.now()
+                        self.db.commit()
+                session["step"] = "budget_choose_document"
+                subtotal, shipping_cost, tax, total = self._preview_totals_for_session(session)
                 self.send_autoreply(
                     phone,
                     f"Cliente encontrado (RUT {rut_norm}).\n"
-                    "¿Cómo sería la entrega en el presupuesto?\n"
-                    "1) Sin envío (retiro en tienda)\n"
-                    "2) Con envío a domicilio",
+                    "Total del presupuesto:\n"
+                    f"Productos: {self._format_currency(subtotal)}\n"
+                    f"Envío: {self._format_currency(shipping_cost)}\n"
+                    f"IVA: {self._format_currency(tax)}\n"
+                    f"Total: {self._format_currency(total)}\n\n"
+                    "Tipo de documento deseado:\n1) Boleta\n2) Factura",
                 )
                 return
             session["is_new"] = True
@@ -692,59 +790,8 @@ class WhatsappClass:
                 self.send_autoreply(phone, "Indica tus apellidos.")
                 return
             session["last_name"] = raw_text.strip()
-            session["step"] = "budget_ask_shipping"
-            self.send_autoreply(
-                phone,
-                "¿Cómo sería la entrega?\n"
-                "1) Sin envío (retiro en tienda)\n"
-                "2) Con envío a domicilio",
-            )
-            return
-
-        if step == "budget_ask_shipping":
-            choice = text.strip()
-            if choice in ["1", "1)", "sin envio", "sin envío", "retiro", "sin envío (retiro en tienda)"]:
-                session["shipping_method_id"] = 1
-                session["delivery_address"] = "Retiro en tienda / sin envío"
-                if session.get("is_new") and not session.get("customer_id"):
-                    self._create_new_customer_record(session, phone)
-                self._sync_budget_cart_prices(session)
-                session["step"] = "budget_choose_document"
-                subtotal, shipping_cost, tax, total = self._preview_totals_for_session(session)
-                self.send_autoreply(
-                    phone,
-                    "Total del presupuesto (con IVA y forma de entrega indicada):\n"
-                    f"Productos: {self._format_currency(subtotal)}\n"
-                    f"Envío: {self._format_currency(shipping_cost)}\n"
-                    f"IVA: {self._format_currency(tax)}\n"
-                    f"Total: {self._format_currency(total)}\n\n"
-                    "Tipo de documento deseado:\n1) Boleta\n2) Factura",
-                )
-                return
-            if choice in ["2", "2)", "con envio", "con envío", "envio", "envío", "domicilio", "delivery"]:
-                session["shipping_method_id"] = 2
-                session["step"] = "budget_collect_address"
-                self.send_autoreply(
-                    phone,
-                    "Indica la dirección completa para el envío (calle, número, comuna, referencias).",
-                )
-                return
-            self.send_autoreply(phone, "Marca 1 para sin envío o 2 para con envío.")
-            return
-
-        if step == "budget_collect_address":
-            if len(raw_text) < 8:
-                self.send_autoreply(phone, "La dirección parece muy corta. Envíala completa.")
-                return
-            session["delivery_address"] = raw_text.strip()
             if session.get("is_new") and not session.get("customer_id"):
                 self._create_new_customer_record(session, phone)
-            else:
-                cust = self.db.query(CustomerModel).filter(CustomerModel.id == session.get("customer_id")).first()
-                if cust:
-                    cust.address = session["delivery_address"]
-                    cust.updated_date = datetime.now()
-                    self.db.commit()
             self._sync_budget_cart_prices(session)
             session["step"] = "budget_choose_document"
             subtotal, shipping_cost, tax, total = self._preview_totals_for_session(session)
@@ -781,14 +828,88 @@ class WhatsappClass:
             bid = res["budget_id"]
             total = res.get("total", 0)
             doc_label = "Boleta" if session.get("document_type_id") == 39 else "Factura"
+            session["pending_budget_id"] = bid
+            session["pending_budget_doc_label"] = doc_label
+            session["pending_budget_total"] = total
+            session["step"] = "budget_ask_send_pdf"
             self.send_autoreply(
                 phone,
                 f"Presupuesto #{bid} registrado.\n"
                 f"Documento indicado: {doc_label}\n"
-                f"Total: {self._format_currency(total)}\n"
-                "Te contactaremos a la brevedad."
-                + self._farewell_after_budget_text(),
+                f"Total: {self._format_currency(total)}\n\n"
+                "¿Te envío el presupuesto en PDF por correo?\n"
+                "1) Sí\n"
+                "2) No",
             )
+            return
+
+        if step == "budget_ask_send_pdf":
+            choice = text.strip()
+            if choice == "2":
+                bid = session.get("pending_budget_id")
+                total = session.get("pending_budget_total", 0)
+                self.send_autoreply(
+                    phone,
+                    f"Listo. Presupuesto #{bid} — Total: {self._format_currency(total)}.\n"
+                    "Te contactaremos a la brevedad."
+                    + self._farewell_after_budget_text(),
+                )
+                self._chat_sessions.pop(phone, None)
+                return
+            if choice == "1":
+                session["step"] = "budget_collect_email_for_pdf"
+                self.send_autoreply(
+                    phone,
+                    "Indica el correo electrónico donde enviar el PDF (ej: nombre@correo.cl).",
+                )
+                return
+            self.send_autoreply(phone, "Marca 1 para enviar el PDF por correo o 2 para no enviarlo.")
+            return
+
+        if step == "budget_collect_email_for_pdf":
+            addr = raw_text.strip()
+            if not self._looks_like_email(addr):
+                self.send_autoreply(
+                    phone,
+                    "No reconozco un correo válido. Envíalo así: nombre@dominio.com",
+                )
+                return
+            bid = session.get("pending_budget_id")
+            doc_label = session.get("pending_budget_doc_label") or ""
+            total = session.get("pending_budget_total", 0)
+            if not bid:
+                self._chat_sessions.pop(phone, None)
+                self.send_autoreply(phone, "Sesión expirada. Escribe Hola para comenzar de nuevo.")
+                return
+
+            send_res = self._send_budget_pdf_email(addr, bid, doc_label)
+            if send_res == "ok":
+                self.send_autoreply(
+                    phone,
+                    f"Listo, envié el PDF a {addr}.\n"
+                    f"Presupuesto #{bid} — Total: {self._format_currency(total)}."
+                    + self._farewell_after_budget_text(),
+                )
+            elif send_res == "no_pdf":
+                self.send_autoreply(
+                    phone,
+                    "No pude generar el PDF del presupuesto. Tu solicitud igual quedó registrada."
+                    + self._farewell_after_budget_text(),
+                )
+            elif send_res == "pdf_error":
+                self.send_autoreply(
+                    phone,
+                    "Hubo un error al generar el PDF. Tu presupuesto sí quedó registrado; "
+                    "te contactaremos por WhatsApp."
+                    + self._farewell_after_budget_text(),
+                )
+            else:
+                self.send_autoreply(
+                    phone,
+                    f"No pude enviar el correo ({send_res}). Tu presupuesto #{bid} quedó registrado.\n"
+                    f"Total: {self._format_currency(total)}."
+                    + self._farewell_after_budget_text(),
+                )
             self._chat_sessions.pop(phone, None)
             return
 

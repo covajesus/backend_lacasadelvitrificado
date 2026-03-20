@@ -1,7 +1,18 @@
-﻿from app.backend.schemas import ShoppingCreateInput
+from app.backend.schemas import ShoppingCreateInput
 import pdfkit
 from io import BytesIO
-from app.backend.db.models import SupplierModel, ProductModel, CategoryModel, UnitFeatureModel, ShoppingProductModel, SettingModel, ShoppingModel
+from app.backend.db.models import (
+    SupplierModel,
+    ProductModel,
+    CategoryModel,
+    UnitFeatureModel,
+    ShoppingProductModel,
+    SettingModel,
+    ShoppingModel,
+    BudgetModel,
+    BudgetProductModel,
+    CustomerModel,
+)
 from datetime import datetime
 import math
 
@@ -795,6 +806,116 @@ class TemplateClass:
         </html>
         """
 
+        return html
+
+    def generate_budget_pdf_html(self, budget_id: int, document_label: str = "") -> str:
+        """HTML para PDF de presupuesto (misma línea visual que correos/plantillas internas: logo, tabla, totales)."""
+        vitrificado_logo_url = "https://api.lacasadelvitrificado.com/public/assets/vitrificado-logo.png"
+        budget = (
+            self.db.query(BudgetModel, CustomerModel.social_reason)
+            .join(CustomerModel, CustomerModel.id == BudgetModel.customer_id, isouter=True)
+            .filter(BudgetModel.id == budget_id)
+            .first()
+        )
+        if not budget:
+            return ""
+
+        row, customer_name = budget
+        settings = self.db.query(SettingModel).filter(SettingModel.id == 1).first()
+        company_lines = []
+        if settings:
+            if settings.shop_address:
+                company_lines.append(settings.shop_address)
+            if settings.phone:
+                company_lines.append(f"Tel: {settings.phone}")
+            if settings.identification_number:
+                company_lines.append(f"RUT: {settings.identification_number}")
+
+        products = (
+            self.db.query(BudgetProductModel, ProductModel.product)
+            .join(ProductModel, ProductModel.id == BudgetProductModel.product_id, isouter=True)
+            .filter(BudgetProductModel.budget_id == budget_id)
+            .all()
+        )
+
+        date_str = row.added_date.strftime("%d-%m-%Y %H:%M") if row.added_date else ""
+
+        rows_html = ""
+        for bp, pname in products:
+            name = pname or "—"
+            qty = int(bp.quantity) if bp.quantity else 0
+            line_total = int(bp.total) if bp.total is not None else 0
+            unit = round(line_total / qty, 2) if qty > 0 else 0
+            rows_html += f"""
+            <tr>
+                <td>{self.truncate_text(name, 50)}</td>
+                <td style="text-align:right;">{self.format_number(qty)}</td>
+                <td style="text-align:right;">$ {self.format_currency(unit)}</td>
+                <td style="text-align:right;">$ {self.format_currency(line_total)}</td>
+            </tr>
+            """
+
+        doc_note = ""
+        if document_label:
+            doc_note = f"<p><strong>Documento solicitado:</strong> {document_label}</p>"
+
+        company_block = "<br>".join(company_lines) if company_lines else "VitrificadosChile"
+
+        html = f"""
+        <html>
+        <head>
+        <meta charset="utf-8">
+        <style>@page {{ margin: 2cm 1.5cm; size: A4 portrait; }}
+            body {{ font-family: Arial, sans-serif; font-size: 13px; line-height: 1.4; margin: 0; padding: 0; color: #222; }}
+            table {{ border-collapse: collapse; width: 100%; margin-top: 16px; }}
+            th, td {{ border: 1px solid #ddd; padding: 8px; text-align: left; }}
+            th {{ background-color: #f2f2f2; font-weight: bold; }}
+            .vitrificado_logo {{ width: 120px; }}
+            .title {{ text-align: center; margin: 16px 0 8px 0; }}
+            .totals {{ margin-top: 12px; width: 100%; max-width: 320px; margin-left: auto; }}
+            .totals td {{ border: none; padding: 4px 8px; text-align: right; }}
+            .muted {{ font-size: 11px; color: #555; margin-top: 24px; }}
+        </style>
+        </head>
+        <body>
+        <div style="margin-bottom: 12px;">
+            <img src="{vitrificado_logo_url}" class="vitrificado_logo" alt="VitrificadosChile" />
+        </div>
+        <div class="title"><h2>Presupuesto #{budget_id}</h2></div>
+        <div style="display: flex; justify-content: space-between; flex-wrap: wrap; gap: 12px;">
+            <div>
+                <strong>Cliente</strong><br>
+                {customer_name or "—"}<br>
+            </div>
+            <div style="text-align: right;">
+                <strong>Fecha</strong><br>{date_str}
+            </div>
+        </div>
+        {doc_note}
+        <p style="font-size: 12px;"><strong>Empresa</strong><br>{company_block}</p>
+        <table>
+            <thead>
+                <tr>
+                    <th>Producto</th>
+                    <th style="text-align:right;">Cantidad</th>
+                    <th style="text-align:right;">P. unitario</th>
+                    <th style="text-align:right;">Total línea</th>
+                </tr>
+            </thead>
+            <tbody>
+                {rows_html}
+            </tbody>
+        </table>
+        <table class="totals">
+            <tr><td>Subtotal productos</td><td>$ {self.format_currency(row.subtotal or 0)}</td></tr>
+            <tr><td>Envío</td><td>$ {self.format_currency(row.shipping or 0)}</td></tr>
+            <tr><td>IVA</td><td>$ {self.format_currency(row.tax or 0)}</td></tr>
+            <tr><td><strong>Total</strong></td><td><strong>$ {self.format_currency(row.total or 0)}</strong></td></tr>
+        </table>
+        <p class="muted">Documento referencial. Los valores y condiciones pueden ser confirmados por nuestro equipo comercial.</p>
+        </body>
+        </html>
+        """
         return html
 
     def html_to_pdf_bytes(self, html: str) -> bytes:
