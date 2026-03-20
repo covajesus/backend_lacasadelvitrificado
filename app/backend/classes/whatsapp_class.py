@@ -6,7 +6,6 @@ from types import SimpleNamespace
 from dotenv import load_dotenv
 from datetime import datetime
 from app.backend.classes.setting_class import SettingClass
-from app.backend.classes.sale_class import SaleClass
 from app.backend.db.models import UserModel, BudgetModel, CustomerModel, BudgetProductModel, ProductModel, WhatsAppMessageModel, SettingModel, SaleModel
 load_dotenv() 
 
@@ -171,6 +170,8 @@ class WhatsappClass:
         - sin envío (1): IVA solo subtotal productos
         - con envío (2): IVA sobre (subtotal + shipping_cost)
         """
+        from app.backend.classes.sale_class import SaleClass
+
         subtotal = int(self._cart_subtotal(session))
         shipping_method_id = session.get("shipping_method_id") or 1
         shipping_cost = 0
@@ -239,6 +240,8 @@ class WhatsappClass:
         return None, None
 
     def _create_sale_from_session(self, phone: str, session: dict):
+        from app.backend.classes.sale_class import SaleClass
+
         customer = self.db.query(CustomerModel).filter(CustomerModel.id == session.get("customer_id")).first()
         if not customer:
             return {"ok": False, "error": "Cliente no registrado en la sesión"}
@@ -551,6 +554,8 @@ class WhatsappClass:
                 return
 
             # Transferencia => pedido creado y pago aceptado automáticamente
+            from app.backend.classes.sale_class import SaleClass
+
             change_result = SaleClass(self.db).change_status(sale_id, 2)
             if isinstance(change_result, dict) and change_result.get("status") == "error":
                 self.send_autoreply(
