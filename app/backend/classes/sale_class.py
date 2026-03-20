@@ -297,7 +297,7 @@ class SaleClass:
                 if not customer_data:
                     customer_id = 0
                 customer_id = customer_data.id
-                status_id = 1
+                status_id = 1  # Pendiente / revisión de pago (hasta aceptar en ERP; status 2 descuenta stock)
 
             # Obtener shipping_cost desde settings
             shipping_cost = self.get_shipping_cost()

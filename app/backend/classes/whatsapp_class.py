@@ -8,7 +8,17 @@ from types import SimpleNamespace
 from dotenv import load_dotenv
 from datetime import datetime
 from app.backend.classes.setting_class import SettingClass
-from app.backend.db.models import UserModel, BudgetModel, CustomerModel, BudgetProductModel, ProductModel, WhatsAppMessageModel, SettingModel, SaleModel
+from app.backend.db.models import (
+    UserModel,
+    BudgetModel,
+    CustomerModel,
+    BudgetProductModel,
+    ProductModel,
+    WhatsAppMessageModel,
+    SettingModel,
+    SaleModel,
+    CustomerProductDiscountModel,
+)
 load_dotenv() 
 
 class WhatsappClass:
@@ -189,15 +199,42 @@ class WhatsappClass:
 
         return subtotal, shipping_cost, tax, total
 
-    def _get_public_products(self):
-        products = self.db.query(ProductModel).order_by(ProductModel.id.asc()).all()
+    def _get_public_products(self, customer_id=None):
+        """
+        Misma lógica que la tienda: precio público = max(public_sale_price) por lote
+        (ProductClass.sale_list), más descuento por producto/cliente si existe en la web.
+        """
+        from app.backend.classes.product_class import ProductClass
+
+        result_pc = ProductClass(self.db).sale_list(0)
+        if not isinstance(result_pc, dict) or result_pc.get("status") == "error":
+            return []
+        data = result_pc.get("data") or []
+        if not data:
+            return []
+
+        discounts = {}
+        if customer_id:
+            rows = (
+                self.db.query(CustomerProductDiscountModel)
+                .filter(CustomerProductDiscountModel.customer_id == customer_id)
+                .all()
+            )
+            discounts = {r.product_id: (r.discount_percentage or 0) for r in rows}
+
         result = []
-        for p in products:
-            price = self._parse_number(p.final_unit_cost)
+        for p in data:
+            pid = p["id"]
+            base = int(p.get("public_sale_price") or 0)
+            pct = discounts.get(pid, 0)
+            if 0 < pct <= 100:
+                price = int(round(base * (100 - pct) / 100))
+            else:
+                price = base
             result.append({
-                "id": p.id,
-                "name": p.product,
-                "price": price
+                "id": pid,
+                "name": p["product"],
+                "price": price,
             })
         return result
 
@@ -335,6 +372,10 @@ class WhatsappClass:
         return "\n".join(lines)
 
     def _create_sale_from_session(self, phone: str, session: dict):
+        """
+        Crea la venta con status_id=1 (pendiente / revisión de pago), igual efectivo o transferencia.
+        El inventario se descuenta solo al aceptar pago (status 2) desde el ERP.
+        """
         from app.backend.classes.sale_class import SaleClass
 
         customer = self.db.query(CustomerModel).filter(CustomerModel.id == session.get("customer_id")).first()
@@ -379,6 +420,10 @@ class WhatsappClass:
         if isinstance(sale_result, dict) and sale_result.get("sale_id"):
             sale_id = sale_result["sale_id"]
             sale_row = self.db.query(SaleModel).filter(SaleModel.id == sale_id).first()
+            if sale_row and sale_row.status_id != 1:
+                sale_row.status_id = 1
+                self.db.commit()
+                self.db.refresh(sale_row)
             return {
                 "ok": True,
                 "sale_id": sale_id,
@@ -419,7 +464,7 @@ class WhatsappClass:
         text = raw_text.lower()
         session = self._chat_sessions.get(phone)
 
-        products = self._get_public_products()
+        products = self._get_public_products(session.get("customer_id") if session else None)
         products_map = {p["id"]: p for p in products}
 
         if text in ["cancelar", "salir", "reiniciar"]:
@@ -726,7 +771,7 @@ class WhatsappClass:
                 f"Método de pago indicado: {pay_label}\n"
                 f"{ship_note}"
                 f"Total: {self._format_currency(sale_result['total'])}\n\n"
-                "El pedido queda pendiente para revisar y confirmar el pago en el sistema."
+                "El pedido queda en estado de revisión de pago (efectivo o transferencia) hasta confirmarlo en el sistema."
             )
             if is_transfer:
                 msg += "\n\n" + self._build_payment_info_text()
