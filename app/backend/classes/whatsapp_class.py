@@ -200,14 +200,10 @@ class WhatsappClass:
             })
         return result
 
-    def _build_products_menu_text(self, products):
+    def _build_product_prompt_text(self, products):
         if not products:
             return "No hay productos disponibles en este momento."
-        lines = ["Productos disponibles:"]
-        for p in products[:30]:
-            lines.append(f"{p['id']}. {self._clean_text_for_whatsapp(p['name'])} - {self._format_currency(p['price'])}")
-        lines.append("Envía el número de lista (ej: 12) o el nombre del producto; luego te pediré la cantidad.")
-        return "\n".join(lines)
+        return "Escribe el nombre del producto que buscas (luego te pediremos la cantidad)."
 
     def _normalize_product_search(self, s: str) -> str:
         if not s:
@@ -244,38 +240,30 @@ class WhatsappClass:
             return None, substring
         return None, []
 
-    def _resolve_product_pick_one(self, raw_text: str, products: list, products_map: dict):
-        """Un solo producto: número de lista o nombre (sin cantidad en el mismo mensaje)."""
+    def _resolve_product_pick_one(self, raw_text: str, products: list):
+        """Un solo producto por nombre (sin listado ni id)."""
         raw_text = (raw_text or "").strip()
         if not raw_text:
-            return None, "Indica el número de lista o el nombre del producto."
+            return None, "Escribe el nombre del producto."
 
         if re.match(r"^\s*\d+\s+\d+\s*$", raw_text):
-            return None, (
-                "Envía solo el producto (número o nombre). Luego te pediré la cantidad."
-            )
+            return None, "Envía solo el nombre del producto. Luego te pediremos la cantidad."
 
-        m = re.match(r"^\s*(\d+)\s*$", raw_text)
-        if m:
-            pid = int(m.group(1))
-            if pid in products_map:
-                return pid, None
-            return None, f"No existe el producto con número de lista {pid}."
+        if re.match(r"^\s*\d+\s*$", raw_text):
+            return None, "Indica el nombre del producto, no un número."
 
         pid, cands = self._resolve_name_to_product_id(raw_text, products)
         if pid:
             return pid, None
         if cands:
-            lines = [
-                f"Hay varias coincidencias para «{raw_text}». Sé más específico o usa el número de lista:"
-            ]
+            lines = [f"Hay varias coincidencias para «{raw_text}». Sé más específico con el nombre:"]
             for p in cands[:10]:
-                lines.append(f"{p['id']}. {self._clean_text_for_whatsapp(p['name'])}")
+                lines.append(
+                    f"- {self._clean_text_for_whatsapp(p['name'])} ({self._format_currency(p['price'])})"
+                )
             return None, "\n".join(lines)
 
-        return None, (
-            f"No encontré «{raw_text}». Revisa el nombre o el número de la lista."
-        )
+        return None, f"No encontré «{raw_text}». Prueba con otras palabras del nombre del producto."
 
     def _build_order_review_text(self, session: dict, subtotal: int, shipping_cost: int, tax: int, total: int):
         lines = ["Resumen de tu pedido:", ""]
@@ -497,7 +485,7 @@ class WhatsappClass:
                 self.send_autoreply(
                     phone,
                     "Perfecto, sin envío (retiro).\n"
-                    "Ahora dime qué productos quieres:\n" + self._build_products_menu_text(products)
+                    "Ahora dime qué productos quieres:\n" + self._build_product_prompt_text(products)
                 )
                 return
             if choice in ["2", "2)", "con envio", "con envío", "envio", "envío", "domicilio", "delivery"]:
@@ -527,12 +515,12 @@ class WhatsappClass:
             session["step"] = "selecting_products"
             self.send_autoreply(
                 phone,
-                "Dirección registrada. Ahora tus productos:\n" + self._build_products_menu_text(products)
+                "Dirección registrada. Ahora tus productos:\n" + self._build_product_prompt_text(products)
             )
             return
 
         if session["step"] == "selecting_products":
-            product_id, err = self._resolve_product_pick_one(raw_text, products, products_map)
+            product_id, err = self._resolve_product_pick_one(raw_text, products)
             if err:
                 self.send_autoreply(phone, err)
                 return
@@ -563,7 +551,7 @@ class WhatsappClass:
                 session["step"] = "selecting_products"
                 session.pop("pending_product_id", None)
                 session.pop("pending_product_name", None)
-                self.send_autoreply(phone, "Hubo un problema con el producto. Elige de nuevo.\n" + self._build_products_menu_text(products))
+                self.send_autoreply(phone, "Hubo un problema con el producto. Elige de nuevo.\n" + self._build_product_prompt_text(products))
                 return
 
             p = products_map[product_id]
@@ -590,7 +578,7 @@ class WhatsappClass:
                 session["step"] = "selecting_products"
                 self.send_autoreply(
                     phone,
-                    "Indica otro producto (número de lista o nombre):\n" + self._build_products_menu_text(products)
+                    "Indica otro producto por nombre:\n" + self._build_product_prompt_text(products)
                 )
                 return
             if text.strip() == "2":
@@ -598,7 +586,7 @@ class WhatsappClass:
                     session["step"] = "selecting_products"
                     self.send_autoreply(
                         phone,
-                        "Tu carrito está vacío. Agrega al menos un producto.\n\n" + self._build_products_menu_text(products)
+                        "Tu carrito está vacío. Agrega al menos un producto.\n\n" + self._build_product_prompt_text(products)
                     )
                     return
                 subtotal, shipping_cost, tax, total = self._preview_totals_for_session(session)
@@ -620,7 +608,7 @@ class WhatsappClass:
                 session["step"] = "selecting_products"
                 self.send_autoreply(
                     phone,
-                    "Agrega otro producto (número o nombre):\n" + self._build_products_menu_text(products)
+                    "Agrega otro producto por nombre:\n" + self._build_product_prompt_text(products)
                 )
                 return
             self.send_autoreply(phone, "Marca 1 para confirmar el pedido o 2 para agregar más productos.")
