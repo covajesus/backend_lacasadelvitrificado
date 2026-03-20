@@ -2,6 +2,7 @@ import requests
 import os
 import hashlib
 import re
+import unicodedata
 from types import SimpleNamespace
 from dotenv import load_dotenv
 from datetime import datetime
@@ -205,39 +206,96 @@ class WhatsappClass:
         lines = ["Productos disponibles:"]
         for p in products[:30]:
             lines.append(f"{p['id']}. {self._clean_text_for_whatsapp(p['name'])} - {self._format_currency(p['price'])}")
-        lines.append("Escribe: id cantidad (ej: 12 2).")
-        lines.append("Puedes enviar varios separados por coma: 12 2, 7 1")
+        lines.append("Envía el número de lista (ej: 12) o el nombre del producto; luego te pediré la cantidad.")
         return "\n".join(lines)
 
-    def _parse_product_selections(self, text: str):
-        """
-        Acepta formatos:
-        - '12 2' (producto 12, cantidad 2)
-        - '2 12' (cantidad 2, producto 12)
-        - múltiples con coma: '12 2, 2 7'
-        """
-        selections = []
-        if not text:
-            return selections
+    def _normalize_product_search(self, s: str) -> str:
+        if not s:
+            return ""
+        s = unicodedata.normalize("NFD", str(s))
+        s = "".join(c for c in s if unicodedata.category(c) != "Mn")
+        return re.sub(r"\s+", " ", s.lower().strip())
 
-        chunks = [c.strip() for c in text.split(",") if c.strip()]
-        for chunk in chunks:
-            numbers = re.findall(r"\d+", chunk)
-            if len(numbers) < 2:
-                continue
-            first = int(numbers[0])
-            second = int(numbers[1])
-            selections.append((first, second))
-        return selections
+    def _resolve_name_to_product_id(self, name_query: str, products: list):
+        """
+        Devuelve (product_id, candidatos_ambiguos).
+        candidatos_ambiguos es lista de dicts producto si hay empate; vacía si hay match único o ninguno.
+        """
+        nq = self._normalize_product_search(name_query)
+        if len(nq) < 2:
+            return None, []
 
-    def _resolve_selection(self, first: int, second: int, products_map):
-        # Preferir formato id cantidad
-        if first in products_map and second > 0:
-            return first, second
-        # Alternativa cantidad id
-        if second in products_map and first > 0:
-            return second, first
-        return None, None
+        exact = []
+        substring = []
+        for p in products:
+            pn = self._normalize_product_search(p["name"])
+            if pn == nq:
+                exact.append(p)
+            elif nq in pn:
+                substring.append(p)
+
+        if len(exact) == 1:
+            return exact[0]["id"], []
+        if len(exact) > 1:
+            return None, exact
+        if len(substring) == 1:
+            return substring[0]["id"], []
+        if len(substring) > 1:
+            return None, substring
+        return None, []
+
+    def _resolve_product_pick_one(self, raw_text: str, products: list, products_map: dict):
+        """Un solo producto: número de lista o nombre (sin cantidad en el mismo mensaje)."""
+        raw_text = (raw_text or "").strip()
+        if not raw_text:
+            return None, "Indica el número de lista o el nombre del producto."
+
+        if re.match(r"^\s*\d+\s+\d+\s*$", raw_text):
+            return None, (
+                "Envía solo el producto (número o nombre). Luego te pediré la cantidad."
+            )
+
+        m = re.match(r"^\s*(\d+)\s*$", raw_text)
+        if m:
+            pid = int(m.group(1))
+            if pid in products_map:
+                return pid, None
+            return None, f"No existe el producto con número de lista {pid}."
+
+        pid, cands = self._resolve_name_to_product_id(raw_text, products)
+        if pid:
+            return pid, None
+        if cands:
+            lines = [
+                f"Hay varias coincidencias para «{raw_text}». Sé más específico o usa el número de lista:"
+            ]
+            for p in cands[:10]:
+                lines.append(f"{p['id']}. {self._clean_text_for_whatsapp(p['name'])}")
+            return None, "\n".join(lines)
+
+        return None, (
+            f"No encontré «{raw_text}». Revisa el nombre o el número de la lista."
+        )
+
+    def _build_order_review_text(self, session: dict, subtotal: int, shipping_cost: int, tax: int, total: int):
+        lines = ["Resumen de tu pedido:", ""]
+        for item in session.get("cart", {}).values():
+            line_total = int(item["price"]) * int(item["quantity"])
+            lines.append(
+                f"- {self._clean_text_for_whatsapp(item['name'])} x {item['quantity']} → {self._format_currency(line_total)}"
+            )
+        lines.append("")
+        lines.append(f"Productos: {self._format_currency(subtotal)}")
+        if session.get("shipping_method_id") == 2:
+            lines.append(f"Envío: {self._format_currency(shipping_cost)}")
+            addr = session.get("delivery_address") or "-"
+            lines.append(f"Dirección: {self._clean_text_for_whatsapp(str(addr))}")
+        lines.append(f"IVA: {self._format_currency(tax)}")
+        lines.append(f"Total: {self._format_currency(total)}")
+        lines.append("")
+        lines.append("1) Confirmar pedido")
+        lines.append("2) Agregar más productos")
+        return "\n".join(lines)
 
     def _create_sale_from_session(self, phone: str, session: dict):
         from app.backend.classes.sale_class import SaleClass
@@ -264,10 +322,14 @@ class WhatsappClass:
                 "private_sale_price": item["price"]
             })
 
+        doc_id = session.get("document_type_id")
+        if doc_id not in (33, 39):
+            doc_id = 39
+
         sale_input = SimpleNamespace(
             rol_id=5,
             customer_rut=customer.identification_number,
-            document_type_id=39,
+            document_type_id=doc_id,
             delivery_address=delivery_address,
             subtotal=float(subtotal),
             tax=tax_placeholder,
@@ -332,6 +394,7 @@ class WhatsappClass:
                 "last_name": "",
                 "shipping_method_id": None,
                 "delivery_address": None,
+                "document_type_id": None,
             }
             self.send_autoreply(
                 phone,
@@ -353,6 +416,7 @@ class WhatsappClass:
                 "last_name": "",
                 "shipping_method_id": None,
                 "delivery_address": None,
+                "document_type_id": None,
             }
             session = self._chat_sessions[phone]
             maybe_rut = self._normalize_rut_chile(raw_text)
@@ -468,63 +532,125 @@ class WhatsappClass:
             return
 
         if session["step"] == "selecting_products":
-            selections = self._parse_product_selections(text)
-            if not selections:
-                self.send_autoreply(
-                    phone,
-                    "No pude entender los productos. Usa formato: id cantidad. Ej: 12 2, 7 1"
-                )
+            product_id, err = self._resolve_product_pick_one(raw_text, products, products_map)
+            if err:
+                self.send_autoreply(phone, err)
                 return
 
-            added_lines = []
-            for first, second in selections:
-                product_id, quantity = self._resolve_selection(first, second, products_map)
-                if not product_id or quantity <= 0:
-                    continue
-                p = products_map[product_id]
-                if product_id not in session["cart"]:
-                    session["cart"][product_id] = {
-                        "id": product_id,
-                        "name": p["name"],
-                        "price": p["price"],
-                        "quantity": 0
-                    }
-                session["cart"][product_id]["quantity"] += quantity
-                added_lines.append(f"{p['name']} x {quantity}")
-
-            if not added_lines:
-                self.send_autoreply(phone, "No encontré productos válidos. Intenta nuevamente.")
-                return
-
-            self._chat_sessions[phone]["step"] = "ask_more"
+            p = products_map[product_id]
+            session["pending_product_id"] = product_id
+            session["pending_product_name"] = p["name"]
+            session["step"] = "ask_quantity"
             self.send_autoreply(
                 phone,
-                "Agregado:\n- " + "\n- ".join(added_lines) + "\n\n¿Quieres agregar otro?\n1) Sí\n2) No"
+                f"Producto: {self._clean_text_for_whatsapp(p['name'])} ({self._format_currency(p['price'])} c/u).\n"
+                "¿Cuántas unidades quieres? (envía solo el número)"
+            )
+            return
+
+        if session["step"] == "ask_quantity":
+            qty_raw = raw_text.strip()
+            if not qty_raw.isdigit():
+                self.send_autoreply(phone, "Envía solo la cantidad con un número (ej: 3).")
+                return
+            quantity = int(qty_raw)
+            if quantity <= 0:
+                self.send_autoreply(phone, "La cantidad debe ser mayor a cero.")
+                return
+
+            product_id = session.get("pending_product_id")
+            if not product_id or product_id not in products_map:
+                session["step"] = "selecting_products"
+                session.pop("pending_product_id", None)
+                session.pop("pending_product_name", None)
+                self.send_autoreply(phone, "Hubo un problema con el producto. Elige de nuevo.\n" + self._build_products_menu_text(products))
+                return
+
+            p = products_map[product_id]
+            if product_id not in session["cart"]:
+                session["cart"][product_id] = {
+                    "id": product_id,
+                    "name": p["name"],
+                    "price": p["price"],
+                    "quantity": 0
+                }
+            session["cart"][product_id]["quantity"] += quantity
+            session.pop("pending_product_id", None)
+            session.pop("pending_product_name", None)
+            session["step"] = "ask_more"
+            self.send_autoreply(
+                phone,
+                f"Listo: {self._clean_text_for_whatsapp(p['name'])} x {quantity}.\n\n"
+                "¿Quieres agregar otro producto?\n1) Sí\n2) No"
             )
             return
 
         if session["step"] == "ask_more":
             if text.strip() == "1":
-                self._chat_sessions[phone]["step"] = "selecting_products"
-                self.send_autoreply(phone, "Perfecto, envíame más productos. Ej: 12 1, 7 2")
-                return
-            if text.strip() == "2":
-                subtotal, shipping_cost, tax, total = self._preview_totals_for_session(session)
-                self._chat_sessions[phone]["step"] = "choose_payment"
-                ship_line = ""
-                if session.get("shipping_method_id") == 2 and shipping_cost > 0:
-                    ship_line = f"Envío: {self._format_currency(shipping_cost)}\n"
+                session["step"] = "selecting_products"
                 self.send_autoreply(
                     phone,
-                    f"Total a pagar:\n"
-                    f"Productos: {self._format_currency(subtotal)}\n"
-                    f"{ship_line}"
-                    f"IVA: {self._format_currency(tax)}\n"
-                    f"Total: {self._format_currency(total)}\n\n"
-                    "Selecciona método de pago:\n1) Efectivo\n2) Transferencia"
+                    "Indica otro producto (número de lista o nombre):\n" + self._build_products_menu_text(products)
                 )
                 return
-            self.send_autoreply(phone, "Respuesta inválida. Marca 1 para Sí o 2 para No.")
+            if text.strip() == "2":
+                if not session.get("cart"):
+                    session["step"] = "selecting_products"
+                    self.send_autoreply(
+                        phone,
+                        "Tu carrito está vacío. Agrega al menos un producto.\n\n" + self._build_products_menu_text(products)
+                    )
+                    return
+                subtotal, shipping_cost, tax, total = self._preview_totals_for_session(session)
+                session["step"] = "review_order"
+                self.send_autoreply(phone, self._build_order_review_text(session, subtotal, shipping_cost, tax, total))
+                return
+            self.send_autoreply(phone, "Respuesta inválida. Marca 1 para agregar otro producto o 2 para ver el resumen.")
+            return
+
+        if session["step"] == "review_order":
+            if text.strip() == "1":
+                session["step"] = "choose_document"
+                self.send_autoreply(
+                    phone,
+                    "Tipo de documento:\n1) Boleta\n2) Factura"
+                )
+                return
+            if text.strip() == "2":
+                session["step"] = "selecting_products"
+                self.send_autoreply(
+                    phone,
+                    "Agrega otro producto (número o nombre):\n" + self._build_products_menu_text(products)
+                )
+                return
+            self.send_autoreply(phone, "Marca 1 para confirmar el pedido o 2 para agregar más productos.")
+            return
+
+        if session["step"] == "choose_document":
+            choice = text.strip()
+            if choice == "1":
+                session["document_type_id"] = 39
+            elif choice == "2":
+                session["document_type_id"] = 33
+            else:
+                self.send_autoreply(phone, "Selecciona 1 (Boleta) o 2 (Factura).")
+                return
+
+            subtotal, shipping_cost, tax, total = self._preview_totals_for_session(session)
+            session["step"] = "choose_payment"
+            ship_line = ""
+            if session.get("shipping_method_id") == 2 and shipping_cost > 0:
+                ship_line = f"Envío: {self._format_currency(shipping_cost)}\n"
+            doc_label = "Boleta" if session["document_type_id"] == 39 else "Factura"
+            self.send_autoreply(
+                phone,
+                f"Documento: {doc_label}\n"
+                f"Productos: {self._format_currency(subtotal)}\n"
+                f"{ship_line}"
+                f"IVA: {self._format_currency(tax)}\n"
+                f"Total: {self._format_currency(total)}\n\n"
+                "Método de pago:\n1) Efectivo\n2) Transferencia"
+            )
             return
 
         if session["step"] == "choose_payment":
@@ -544,9 +670,12 @@ class WhatsappClass:
                 ship_note = ""
                 if sale_result.get("shipping_cost"):
                     ship_note = f"Envío: {self._format_currency(sale_result['shipping_cost'])}\n"
+                doc_label = "Boleta" if session.get("document_type_id") == 39 else "Factura"
                 self.send_autoreply(
                     phone,
-                    f"Pedido creado exitosamente #{sale_id}.\nPago: Efectivo.\n"
+                    f"Pedido creado exitosamente #{sale_id}.\n"
+                    f"Documento: {doc_label}\n"
+                    f"Pago: Efectivo.\n"
                     f"{ship_note}"
                     f"Total: {self._format_currency(sale_result['total'])}"
                 )
@@ -566,9 +695,11 @@ class WhatsappClass:
                 ship_note = ""
                 if sale_result.get("shipping_cost"):
                     ship_note = f"Envío: {self._format_currency(sale_result['shipping_cost'])}\n"
+                doc_label = "Boleta" if session.get("document_type_id") == 39 else "Factura"
                 self.send_autoreply(
                     phone,
                     f"Pedido #{sale_id} creado con pago aceptado.\n"
+                    f"Documento: {doc_label}\n"
                     f"{ship_note}"
                     f"Total: {self._format_currency(sale_result['total'])}\n\n{self._build_payment_info_text()}"
                 )
