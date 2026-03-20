@@ -1,13 +1,18 @@
 import requests
 import os
 import hashlib
+import re
+from types import SimpleNamespace
 from dotenv import load_dotenv
 from datetime import datetime
 from app.backend.classes.setting_class import SettingClass
-from app.backend.db.models import UserModel, BudgetModel, CustomerModel, BudgetProductModel, ProductModel, WhatsAppMessageModel
+from app.backend.classes.sale_class import SaleClass
+from app.backend.db.models import UserModel, BudgetModel, CustomerModel, BudgetProductModel, ProductModel, WhatsAppMessageModel, SettingModel, SaleModel
 load_dotenv() 
 
 class WhatsappClass:
+    _chat_sessions = {}
+
     def __init__(self, db):
         self.db = db
 
@@ -54,13 +59,517 @@ class WhatsappClass:
         text = text.replace("\t", " ")
         
         # Reemplazar múltiples espacios consecutivos por un solo espacio
-        import re
         text = re.sub(r' +', ' ', text)
         
         # Limitar a máximo 4 espacios consecutivos (por si acaso)
         text = re.sub(r' {5,}', '    ', text)
         
         return text.strip()
+
+    def _extract_message_text(self, message: dict):
+        msg_type = message.get("type")
+        if msg_type == "text":
+            return (message.get("text", {}).get("body") or "").strip()
+        if msg_type == "interactive":
+            interactive = message.get("interactive", {})
+            interactive_type = interactive.get("type")
+            if interactive_type == "button_reply":
+                return (interactive.get("button_reply", {}).get("title") or "").strip()
+            if interactive_type == "list_reply":
+                return (interactive.get("list_reply", {}).get("title") or "").strip()
+        return ""
+
+    def _parse_number(self, value):
+        if value is None:
+            return 0
+        cleaned = re.sub(r"[^\d]", "", str(value))
+        return int(cleaned) if cleaned else 0
+
+    def _format_currency(self, amount: int):
+        return f"${int(amount):,}".replace(",", ".")
+
+    def _normalize_rut_chile(self, rut_input: str):
+        """
+        Normaliza RUT chileno a formato 12345678-9 (sin puntos, DV puede ser K).
+        Retorna None si no es válido.
+        """
+        if not rut_input:
+            return None
+        t = str(rut_input).strip().upper().replace(".", "").replace(" ", "")
+        if not t:
+            return None
+        if "-" in t:
+            body, dv = t.split("-", 1)
+        else:
+            if len(t) < 2:
+                return None
+            body, dv = t[:-1], t[-1]
+        if not body.isdigit() or len(body) < 7:
+            return None
+        if dv not in "0123456789K":
+            return None
+        return f"{body}-{dv}"
+
+    def _find_customer_by_rut(self, rut_normalized: str):
+        if not rut_normalized:
+            return None
+        body, dv = rut_normalized.split("-", 1)
+        no_dash = f"{body}{dv}"
+        variants = {rut_normalized, no_dash}
+        if len(body) == 8:
+            variants.add(f"{body[0:2]}.{body[2:5]}.{body[5:8]}-{dv}")
+        if len(body) == 7:
+            variants.add(f"{body[0:1]}.{body[1:4]}.{body[4:7]}-{dv}")
+        return (
+            self.db.query(CustomerModel)
+            .filter(CustomerModel.identification_number.in_(list(variants)))
+            .first()
+        )
+
+    def _sync_customer_whatsapp_phone(self, customer: CustomerModel, wa_phone: str):
+        """Actualiza teléfono del cliente con el número de WhatsApp si falta o cambió."""
+        clean_phone = self._clean_phone_number(wa_phone)
+        if not customer or not clean_phone:
+            return
+        if (customer.phone or "").replace(" ", "") != clean_phone.replace(" ", ""):
+            customer.phone = clean_phone
+            customer.updated_date = datetime.now()
+            self.db.commit()
+
+    def _create_new_customer_record(self, session: dict, wa_phone: str):
+        """Crea cliente nuevo después de tener RUT, nombre, envío y dirección si aplica."""
+        clean_phone = self._clean_phone_number(wa_phone)
+        social = f"{session.get('first_name', '').strip()} {session.get('last_name', '').strip()}".strip()
+        address = (session.get("delivery_address") or "").strip() or "Sin dirección"
+        customer = CustomerModel(
+            region_id=1,
+            commune_id=1,
+            identification_number=session["rut"],
+            social_reason=social or f"Cliente {session['rut']}",
+            activity="Venta WhatsApp",
+            address=address,
+            phone=clean_phone,
+            email=f"whatsapp_{clean_phone}@local",
+            added_date=datetime.now(),
+            updated_date=datetime.now(),
+        )
+        self.db.add(customer)
+        self.db.commit()
+        self.db.refresh(customer)
+        session["customer_id"] = customer.id
+        session["is_new"] = False
+
+    def _cart_subtotal(self, session: dict):
+        return sum(
+            item["price"] * item["quantity"]
+            for item in session.get("cart", {}).values()
+        )
+
+    def _preview_totals_for_session(self, session: dict):
+        """
+        Totales alineados con SaleClass.store para rol público:
+        - sin envío (1): IVA solo subtotal productos
+        - con envío (2): IVA sobre (subtotal + shipping_cost)
+        """
+        subtotal = int(self._cart_subtotal(session))
+        shipping_method_id = session.get("shipping_method_id") or 1
+        shipping_cost = 0
+        if shipping_method_id == 2:
+            shipping_cost = int(round(SaleClass(self.db).get_shipping_cost()))
+
+        if shipping_method_id == 2 and shipping_cost > 0:
+            tax = int(round((subtotal + shipping_cost) * 0.19))
+            total = subtotal + shipping_cost + tax
+        else:
+            tax = int(round(subtotal * 0.19))
+            total = subtotal + tax
+
+        return subtotal, shipping_cost, tax, total
+
+    def _get_public_products(self):
+        products = self.db.query(ProductModel).order_by(ProductModel.id.asc()).all()
+        result = []
+        for p in products:
+            price = self._parse_number(p.final_unit_cost)
+            result.append({
+                "id": p.id,
+                "name": p.product,
+                "price": price
+            })
+        return result
+
+    def _build_products_menu_text(self, products):
+        if not products:
+            return "No hay productos disponibles en este momento."
+        lines = ["Productos disponibles:"]
+        for p in products[:30]:
+            lines.append(f"{p['id']}. {self._clean_text_for_whatsapp(p['name'])} - {self._format_currency(p['price'])}")
+        lines.append("Escribe: id cantidad (ej: 12 2).")
+        lines.append("Puedes enviar varios separados por coma: 12 2, 7 1")
+        return "\n".join(lines)
+
+    def _parse_product_selections(self, text: str):
+        """
+        Acepta formatos:
+        - '12 2' (producto 12, cantidad 2)
+        - '2 12' (cantidad 2, producto 12)
+        - múltiples con coma: '12 2, 2 7'
+        """
+        selections = []
+        if not text:
+            return selections
+
+        chunks = [c.strip() for c in text.split(",") if c.strip()]
+        for chunk in chunks:
+            numbers = re.findall(r"\d+", chunk)
+            if len(numbers) < 2:
+                continue
+            first = int(numbers[0])
+            second = int(numbers[1])
+            selections.append((first, second))
+        return selections
+
+    def _resolve_selection(self, first: int, second: int, products_map):
+        # Preferir formato id cantidad
+        if first in products_map and second > 0:
+            return first, second
+        # Alternativa cantidad id
+        if second in products_map and first > 0:
+            return second, first
+        return None, None
+
+    def _create_sale_from_session(self, phone: str, session: dict):
+        customer = self.db.query(CustomerModel).filter(CustomerModel.id == session.get("customer_id")).first()
+        if not customer:
+            return {"ok": False, "error": "Cliente no registrado en la sesión"}
+
+        subtotal = int(self._cart_subtotal(session))
+        shipping_method_id = session.get("shipping_method_id") or 1
+        delivery_address = (session.get("delivery_address") or "Pedido por WhatsApp").strip()
+
+        # Placeholders: SaleClass.store recalcula tax/total según envío
+        tax_placeholder = float(int(round(subtotal * 0.19)))
+        total_placeholder = float(subtotal + tax_placeholder)
+
+        cart = []
+        for item in session["cart"].values():
+            cart.append({
+                "id": item["id"],
+                "quantity": item["quantity"],
+                "lot_numbers": "",
+                "public_sale_price": item["price"],
+                "private_sale_price": item["price"]
+            })
+
+        sale_input = SimpleNamespace(
+            rol_id=5,
+            customer_rut=customer.identification_number,
+            document_type_id=39,
+            delivery_address=delivery_address,
+            subtotal=float(subtotal),
+            tax=tax_placeholder,
+            total=total_placeholder,
+            cart=[SimpleNamespace(**x) for x in cart],
+            shipping_method_id=shipping_method_id
+        )
+
+        sale_result = SaleClass(self.db).store(sale_input)
+        if isinstance(sale_result, dict) and sale_result.get("sale_id"):
+            sale_id = sale_result["sale_id"]
+            sale_row = self.db.query(SaleModel).filter(SaleModel.id == sale_id).first()
+            return {
+                "ok": True,
+                "sale_id": sale_id,
+                "subtotal": int(sale_row.subtotal) if sale_row and sale_row.subtotal is not None else subtotal,
+                "shipping_cost": int(sale_row.shipping_cost) if sale_row and sale_row.shipping_cost is not None else 0,
+                "tax": int(sale_row.tax) if sale_row and sale_row.tax is not None else int(tax_placeholder),
+                "total": int(sale_row.total) if sale_row and sale_row.total is not None else int(total_placeholder),
+            }
+        return {"ok": False, "error": str(sale_result)}
+
+    def _build_payment_info_text(self):
+        setting = self.db.query(SettingModel).filter(SettingModel.id == 1).first()
+        if not setting:
+            return "No se encontró configuración bancaria."
+
+        return (
+            "Datos para transferencia:\n"
+            f"Banco: {setting.bank or '-'}\n"
+            f"Tipo cuenta: {setting.account_type or '-'}\n"
+            f"N° cuenta: {setting.account_number or '-'}\n"
+            f"Titular: {setting.account_name or '-'}\n"
+            f"Correo: {setting.account_email or '-'}"
+        )
+
+    def _handle_text_flow(self, message: dict):
+        phone = message.get("from")
+        if not phone:
+            return
+
+        raw_text = (self._extract_message_text(message) or "").strip()
+        text = raw_text.lower()
+        session = self._chat_sessions.get(phone)
+
+        products = self._get_public_products()
+        products_map = {p["id"]: p for p in products}
+
+        if text in ["cancelar", "salir", "reiniciar"]:
+            self._chat_sessions.pop(phone, None)
+            self.send_autoreply(phone, "Listo, conversación reiniciada. Escribe Hola para comenzar de nuevo.")
+            return
+
+        if not session and text in ["hola", "inicio", "start", "menu", "comprar", "buenos dias", "buenas", "hey"]:
+            self._chat_sessions[phone] = {
+                "step": "ask_rut",
+                "cart": {},
+                "rut": None,
+                "customer_id": None,
+                "is_new": False,
+                "first_name": "",
+                "last_name": "",
+                "shipping_method_id": None,
+                "delivery_address": None,
+            }
+            self.send_autoreply(
+                phone,
+                "Hola, ¿Qué necesitas comprar?\n"
+                "Para continuar necesito tu RUT (ej: 12345678-9).\n"
+                "Si aún no estás registrado, te pediré tus datos después del RUT."
+            )
+            return
+
+        if not session:
+            # Primera interacción o mensaje sin saludo: pedir RUT primero
+            self._chat_sessions[phone] = {
+                "step": "ask_rut",
+                "cart": {},
+                "rut": None,
+                "customer_id": None,
+                "is_new": False,
+                "first_name": "",
+                "last_name": "",
+                "shipping_method_id": None,
+                "delivery_address": None,
+            }
+            session = self._chat_sessions[phone]
+            maybe_rut = self._normalize_rut_chile(raw_text)
+            if not maybe_rut:
+                self.send_autoreply(
+                    phone,
+                    "Hola, ¿Qué necesitas comprar?\n"
+                    "Primero envíame tu RUT para identificarte (ej: 12345678-9)."
+                )
+                return
+            # Si el primer mensaje ya es un RUT válido, continuar sin mensaje duplicado
+
+        if session["step"] == "ask_rut":
+            rut_norm = self._normalize_rut_chile(raw_text)
+            if not rut_norm:
+                self.send_autoreply(
+                    phone,
+                    "No reconozco el RUT. Envíalo así: 12345678-9 (puedes sin puntos)."
+                )
+                return
+            session["rut"] = rut_norm
+            customer = self._find_customer_by_rut(rut_norm)
+            if customer:
+                session["customer_id"] = customer.id
+                session["is_new"] = False
+                self._sync_customer_whatsapp_phone(customer, phone)
+                session["step"] = "ask_shipping"
+                self.send_autoreply(
+                    phone,
+                    f"¡Encontramos tu registro, RUT {rut_norm}!\n"
+                    "¿Cómo deseas recibir tu pedido?\n"
+                    "1) Sin envío (retiro en tienda)\n"
+                    "2) Con envío a domicilio"
+                )
+                return
+
+            session["is_new"] = True
+            session["customer_id"] = None
+            session["step"] = "collect_first_name"
+            self.send_autoreply(
+                phone,
+                f"No encontramos el RUT {rut_norm} en nuestro sistema.\n"
+                "Indica tu nombre (solo nombre)."
+            )
+            return
+
+        if session["step"] == "collect_first_name":
+            if len(raw_text) < 2:
+                self.send_autoreply(phone, "Por favor indica tu nombre.")
+                return
+            session["first_name"] = raw_text.strip()
+            session["step"] = "collect_last_name"
+            self.send_autoreply(phone, "Ahora tus apellidos.")
+            return
+
+        if session["step"] == "collect_last_name":
+            if len(raw_text) < 2:
+                self.send_autoreply(phone, "Por favor indica tus apellidos.")
+                return
+            session["last_name"] = raw_text.strip()
+            session["step"] = "ask_shipping"
+            self.send_autoreply(
+                phone,
+                "¿Cómo deseas recibir tu pedido?\n"
+                "1) Sin envío (retiro en tienda)\n"
+                "2) Con envío a domicilio"
+            )
+            return
+
+        if session["step"] == "ask_shipping":
+            choice = text.strip()
+            if choice in ["1", "1)", "sin envio", "sin envío", "retiro", "sin envío (retiro en tienda)"]:
+                session["shipping_method_id"] = 1
+                session["delivery_address"] = "Retiro en tienda / sin envío"
+                if session.get("is_new") and not session.get("customer_id"):
+                    self._create_new_customer_record(session, phone)
+                session["step"] = "selecting_products"
+                self.send_autoreply(
+                    phone,
+                    "Perfecto, sin envío (retiro).\n"
+                    "Ahora dime qué productos quieres:\n" + self._build_products_menu_text(products)
+                )
+                return
+            if choice in ["2", "2)", "con envio", "con envío", "envio", "envío", "domicilio", "delivery"]:
+                session["shipping_method_id"] = 2
+                session["step"] = "collect_address"
+                self.send_autoreply(
+                    phone,
+                    "Indica la dirección completa para el envío (calle, número, comuna, referencias)."
+                )
+                return
+            self.send_autoreply(phone, "Marca 1 para sin envío o 2 para con envío.")
+            return
+
+        if session["step"] == "collect_address":
+            if len(raw_text) < 8:
+                self.send_autoreply(phone, "La dirección parece muy corta. Envíala completa por favor.")
+                return
+            session["delivery_address"] = raw_text.strip()
+            if session.get("is_new") and not session.get("customer_id"):
+                self._create_new_customer_record(session, phone)
+            else:
+                cust = self.db.query(CustomerModel).filter(CustomerModel.id == session.get("customer_id")).first()
+                if cust:
+                    cust.address = session["delivery_address"]
+                    cust.updated_date = datetime.now()
+                    self.db.commit()
+            session["step"] = "selecting_products"
+            self.send_autoreply(
+                phone,
+                "Dirección registrada. Ahora tus productos:\n" + self._build_products_menu_text(products)
+            )
+            return
+
+        if session["step"] == "selecting_products":
+            selections = self._parse_product_selections(text)
+            if not selections:
+                self.send_autoreply(
+                    phone,
+                    "No pude entender los productos. Usa formato: id cantidad. Ej: 12 2, 7 1"
+                )
+                return
+
+            added_lines = []
+            for first, second in selections:
+                product_id, quantity = self._resolve_selection(first, second, products_map)
+                if not product_id or quantity <= 0:
+                    continue
+                p = products_map[product_id]
+                if product_id not in session["cart"]:
+                    session["cart"][product_id] = {
+                        "id": product_id,
+                        "name": p["name"],
+                        "price": p["price"],
+                        "quantity": 0
+                    }
+                session["cart"][product_id]["quantity"] += quantity
+                added_lines.append(f"{p['name']} x {quantity}")
+
+            if not added_lines:
+                self.send_autoreply(phone, "No encontré productos válidos. Intenta nuevamente.")
+                return
+
+            self._chat_sessions[phone]["step"] = "ask_more"
+            self.send_autoreply(
+                phone,
+                "Agregado:\n- " + "\n- ".join(added_lines) + "\n\n¿Quieres agregar otro?\n1) Sí\n2) No"
+            )
+            return
+
+        if session["step"] == "ask_more":
+            if text.strip() == "1":
+                self._chat_sessions[phone]["step"] = "selecting_products"
+                self.send_autoreply(phone, "Perfecto, envíame más productos. Ej: 12 1, 7 2")
+                return
+            if text.strip() == "2":
+                subtotal, shipping_cost, tax, total = self._preview_totals_for_session(session)
+                self._chat_sessions[phone]["step"] = "choose_payment"
+                ship_line = ""
+                if session.get("shipping_method_id") == 2 and shipping_cost > 0:
+                    ship_line = f"Envío: {self._format_currency(shipping_cost)}\n"
+                self.send_autoreply(
+                    phone,
+                    f"Total a pagar:\n"
+                    f"Productos: {self._format_currency(subtotal)}\n"
+                    f"{ship_line}"
+                    f"IVA: {self._format_currency(tax)}\n"
+                    f"Total: {self._format_currency(total)}\n\n"
+                    "Selecciona método de pago:\n1) Efectivo\n2) Transferencia"
+                )
+                return
+            self.send_autoreply(phone, "Respuesta inválida. Marca 1 para Sí o 2 para No.")
+            return
+
+        if session["step"] == "choose_payment":
+            if text.strip() not in ["1", "2"]:
+                self.send_autoreply(phone, "Selecciona 1 (Efectivo) o 2 (Transferencia).")
+                return
+
+            sale_result = self._create_sale_from_session(phone, session)
+            if not sale_result["ok"]:
+                self.send_autoreply(phone, "No pude crear el pedido. Intenta nuevamente más tarde.")
+                self._chat_sessions.pop(phone, None)
+                return
+
+            sale_id = sale_result["sale_id"]
+
+            if text.strip() == "1":
+                ship_note = ""
+                if sale_result.get("shipping_cost"):
+                    ship_note = f"Envío: {self._format_currency(sale_result['shipping_cost'])}\n"
+                self.send_autoreply(
+                    phone,
+                    f"Pedido creado exitosamente #{sale_id}.\nPago: Efectivo.\n"
+                    f"{ship_note}"
+                    f"Total: {self._format_currency(sale_result['total'])}"
+                )
+                self._chat_sessions.pop(phone, None)
+                return
+
+            # Transferencia => pedido creado y pago aceptado automáticamente
+            change_result = SaleClass(self.db).change_status(sale_id, 2)
+            if isinstance(change_result, dict) and change_result.get("status") == "error":
+                self.send_autoreply(
+                    phone,
+                    f"Pedido #{sale_id} creado, pero no pude aceptar el pago automáticamente: {change_result.get('message')}"
+                )
+            else:
+                ship_note = ""
+                if sale_result.get("shipping_cost"):
+                    ship_note = f"Envío: {self._format_currency(sale_result['shipping_cost'])}\n"
+                self.send_autoreply(
+                    phone,
+                    f"Pedido #{sale_id} creado con pago aceptado.\n"
+                    f"{ship_note}"
+                    f"Total: {self._format_currency(sale_result['total'])}\n\n{self._build_payment_info_text()}"
+                )
+
+            self._chat_sessions.pop(phone, None)
+            return
 
     def send_dte(self, customer_phone, dte_type, folio, date, amount, dynamic_value, sale_id: int = None): 
         url = "https://graph.facebook.com/v22.0/790586727468909/messages"
@@ -396,21 +905,24 @@ class WhatsappClass:
         print("📩 MENSAJE:", message)
         print(f"[WHATSAPP_HANDLE] Tipo de mensaje: {message.get('type')}")
 
-        if message.get("type") != "button":
-            print(f"[WHATSAPP_HANDLE] Mensaje no es de tipo button, ignorando. Tipo: {message.get('type')}")
+        if message.get("type") == "button":
+            payload = message.get("button", {}).get("payload")  # accept_38
+            phone = message.get("from")
+            print(f"[WHATSAPP_HANDLE] Payload recibido: {payload}, Phone: {phone}")
+
+            if not payload or "_" not in payload:
+                print(f"[WHATSAPP_HANDLE] Payload inválido o sin '_': {payload}")
+                return
+
+            action, budget_id = payload.split("_", 1)
+            action = action.lower()
+            print(f"[WHATSAPP_HANDLE] Action: {action}, Budget ID: {budget_id}")
+        elif message.get("type") in ["text", "interactive"]:
+            self._handle_text_flow(message)
             return
-
-        payload = message.get("button", {}).get("payload")  # accept_38
-        phone = message.get("from")
-        print(f"[WHATSAPP_HANDLE] Payload recibido: {payload}, Phone: {phone}")
-
-        if not payload or "_" not in payload:
-            print(f"[WHATSAPP_HANDLE] Payload inválido o sin '_': {payload}")
+        else:
+            print(f"[WHATSAPP_HANDLE] Tipo de mensaje no soportado: {message.get('type')}")
             return
-
-        action, budget_id = payload.split("_", 1)
-        action = action.lower()
-        print(f"[WHATSAPP_HANDLE] Action: {action}, Budget ID: {budget_id}")
 
         budget = (
             self.db
