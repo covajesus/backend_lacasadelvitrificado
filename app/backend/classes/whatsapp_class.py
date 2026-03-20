@@ -403,6 +403,13 @@ class WhatsappClass:
             f"Correo: {setting.account_email or '-'}"
         )
 
+    def _farewell_after_purchase_text(self) -> str:
+        return (
+            "\n\n¡Gracias por tu pedido! "
+            "Si más adelante quieres comprar de nuevo, escribe Hola. "
+            "¡Que tengas un excelente día!"
+        )
+
     def _handle_text_flow(self, message: dict):
         phone = message.get("from")
         if not phone:
@@ -417,7 +424,10 @@ class WhatsappClass:
 
         if text in ["cancelar", "salir", "reiniciar"]:
             self._chat_sessions.pop(phone, None)
-            self.send_autoreply(phone, "Listo, conversación reiniciada. Escribe Hola para comenzar de nuevo.")
+            self.send_autoreply(
+                phone,
+                "Listo, conversación reiniciada. Escribe Hola cuando quieras volver.\n¡Hasta pronto!",
+            )
             return
 
         if not session and text in ["hola", "inicio", "start", "menu", "comprar", "buenos dias", "buenas", "hey"]:
@@ -702,45 +712,28 @@ class WhatsappClass:
                 return
 
             sale_id = sale_result["sale_id"]
+            is_transfer = text.strip() == "2"
 
-            if text.strip() == "1":
-                ship_note = ""
-                if sale_result.get("shipping_cost"):
-                    ship_note = f"Envío: {self._format_currency(sale_result['shipping_cost'])}\n"
-                doc_label = "Boleta" if session.get("document_type_id") == 39 else "Factura"
-                self.send_autoreply(
-                    phone,
-                    f"Pedido creado exitosamente #{sale_id}.\n"
-                    f"Documento: {doc_label}\n"
-                    f"Pago: Efectivo.\n"
-                    f"{ship_note}"
-                    f"Total: {self._format_currency(sale_result['total'])}"
-                )
-                self._chat_sessions.pop(phone, None)
-                return
+            ship_note = ""
+            if sale_result.get("shipping_cost"):
+                ship_note = f"Envío: {self._format_currency(sale_result['shipping_cost'])}\n"
+            doc_label = "Boleta" if session.get("document_type_id") == 39 else "Factura"
+            pay_label = "Transferencia" if is_transfer else "Efectivo"
 
-            # Transferencia => pedido creado y pago aceptado automáticamente
-            from app.backend.classes.sale_class import SaleClass
+            msg = (
+                f"Pedido #{sale_id} creado.\n"
+                f"Documento: {doc_label}\n"
+                f"Método de pago indicado: {pay_label}\n"
+                f"{ship_note}"
+                f"Total: {self._format_currency(sale_result['total'])}\n\n"
+                "El pedido queda pendiente para revisar y confirmar el pago en el sistema."
+            )
+            if is_transfer:
+                msg += "\n\n" + self._build_payment_info_text()
 
-            change_result = SaleClass(self.db).change_status(sale_id, 2)
-            if isinstance(change_result, dict) and change_result.get("status") == "error":
-                self.send_autoreply(
-                    phone,
-                    f"Pedido #{sale_id} creado, pero no pude aceptar el pago automáticamente: {change_result.get('message')}"
-                )
-            else:
-                ship_note = ""
-                if sale_result.get("shipping_cost"):
-                    ship_note = f"Envío: {self._format_currency(sale_result['shipping_cost'])}\n"
-                doc_label = "Boleta" if session.get("document_type_id") == 39 else "Factura"
-                self.send_autoreply(
-                    phone,
-                    f"Pedido #{sale_id} creado con pago aceptado.\n"
-                    f"Documento: {doc_label}\n"
-                    f"{ship_note}"
-                    f"Total: {self._format_currency(sale_result['total'])}\n\n{self._build_payment_info_text()}"
-                )
+            msg += self._farewell_after_purchase_text()
 
+            self.send_autoreply(phone, msg)
             self._chat_sessions.pop(phone, None)
             return
 
