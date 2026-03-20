@@ -2,6 +2,7 @@ import requests
 import os
 import hashlib
 import re
+import difflib
 import unicodedata
 from types import SimpleNamespace
 from dotenv import load_dotenv
@@ -212,33 +213,78 @@ class WhatsappClass:
         s = "".join(c for c in s if unicodedata.category(c) != "Mn")
         return re.sub(r"\s+", " ", s.lower().strip())
 
+    def _score_name_similarity(self, query_norm: str, product_norm: str) -> float:
+        """
+        Similitud 0..1: tolera errores de tipeo, palabras parciales y orden distinto.
+        """
+        if not query_norm or not product_norm:
+            return 0.0
+        if query_norm == product_norm:
+            return 1.0
+        if query_norm in product_norm:
+            return 0.92
+        if product_norm in query_norm:
+            return 0.84
+
+        ratio_full = difflib.SequenceMatcher(None, query_norm, product_norm).ratio()
+
+        q_tokens = re.findall(r"[a-z0-9]{2,}", query_norm)
+        if not q_tokens:
+            return ratio_full
+
+        match_sum = 0.0
+        p_tokens = re.findall(r"[a-z0-9]{2,}", product_norm)
+        for qt in q_tokens:
+            if qt in product_norm:
+                match_sum += 1.0
+                continue
+            best_r = 0.0
+            for pt in p_tokens:
+                r = difflib.SequenceMatcher(None, qt, pt).ratio()
+                if r > best_r:
+                    best_r = r
+            if best_r >= 0.52:
+                match_sum += best_r
+
+        token_score = match_sum / len(q_tokens)
+        return max(ratio_full, 0.4 * ratio_full + 0.6 * token_score)
+
     def _resolve_name_to_product_id(self, name_query: str, products: list):
         """
         Devuelve (product_id, candidatos_ambiguos).
-        candidatos_ambiguos es lista de dicts producto si hay empate; vacía si hay match único o ninguno.
+        Usa similitud difusa; candidatos si hay varios resultados muy parecidos.
         """
         nq = self._normalize_product_search(name_query)
         if len(nq) < 2:
             return None, []
 
-        exact = []
-        substring = []
+        scored = []
         for p in products:
             pn = self._normalize_product_search(p["name"])
-            if pn == nq:
-                exact.append(p)
-            elif nq in pn:
-                substring.append(p)
+            score = self._score_name_similarity(nq, pn)
+            scored.append((score, p))
 
-        if len(exact) == 1:
-            return exact[0]["id"], []
-        if len(exact) > 1:
-            return None, exact
-        if len(substring) == 1:
-            return substring[0]["id"], []
-        if len(substring) > 1:
-            return None, substring
-        return None, []
+        scored.sort(key=lambda x: -x[0])
+        if not scored or scored[0][0] <= 0:
+            return None, []
+
+        best = scored[0][0]
+        second = scored[1][0] if len(scored) > 1 else 0.0
+
+        MIN_SCORE = 0.38
+        GAP_CLEAR = 0.085
+        AMBIGUOUS_BAND = 0.072
+
+        if best < MIN_SCORE:
+            return None, []
+
+        if best - second >= GAP_CLEAR or second < MIN_SCORE:
+            return scored[0][1]["id"], []
+
+        close = [p for s, p in scored if s >= best - AMBIGUOUS_BAND and s >= MIN_SCORE]
+        if len(close) <= 1:
+            return close[0]["id"], []
+        return None, close[:10]
 
     def _resolve_product_pick_one(self, raw_text: str, products: list):
         """Un solo producto por nombre (sin listado ni id)."""
@@ -263,7 +309,10 @@ class WhatsappClass:
                 )
             return None, "\n".join(lines)
 
-        return None, f"No encontré «{raw_text}». Prueba con otras palabras del nombre del producto."
+        return None, (
+            f"No encontré «{raw_text}». Prueba con más palabras o un nombre más parecido "
+            "(no hace falta que sea exacto)."
+        )
 
     def _build_order_review_text(self, session: dict, subtotal: int, shipping_cost: int, tax: int, total: int):
         lines = ["Resumen de tu pedido:", ""]
