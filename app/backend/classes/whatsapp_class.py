@@ -2,6 +2,7 @@ import requests
 import os
 import hashlib
 import re
+import uuid
 import difflib
 import unicodedata
 from types import SimpleNamespace
@@ -753,6 +754,93 @@ class WhatsappClass:
             f"Titular: {setting.account_name or '-'}\n"
             f"Correo: {setting.account_email or '-'}"
         )
+
+    def _whatsapp_graph_media_url(self, media_id: str) -> dict | None:
+        token = os.getenv("META_TOKEN")
+        if not token or not media_id:
+            return None
+        url = f"https://graph.facebook.com/v22.0/{media_id}"
+        r = requests.get(url, headers={"Authorization": f"Bearer {token}"}, timeout=60)
+        if r.status_code != 200:
+            print(f"[WHATSAPP_MEDIA] media_id error {r.status_code}: {r.text}")
+            return None
+        return r.json()
+
+    def _download_whatsapp_image_bytes(self, media_id: str) -> tuple[bytes, str] | None:
+        meta = self._whatsapp_graph_media_url(media_id)
+        if not meta or not meta.get("url"):
+            return None
+        token = os.getenv("META_TOKEN")
+        r = requests.get(meta["url"], headers={"Authorization": f"Bearer {token}"}, timeout=120)
+        if r.status_code != 200:
+            print(f"[WHATSAPP_MEDIA] download error {r.status_code}")
+            return None
+        mime = (meta.get("mime_type") or "image/jpeg").lower()
+        ext = {"image/jpeg": "jpg", "image/jpg": "jpg", "image/png": "png", "image/webp": "webp"}.get(
+            mime, "jpg"
+        )
+        return (r.content, ext)
+
+    def _save_sale_transfer_proof_file(self, sale_id: int, image_bytes: bytes, ext: str) -> str | None:
+        from app.backend.classes.file_class import FileClass
+
+        ts = datetime.now().strftime("%Y_%m_%d_%H_%M_%S")
+        uid = uuid.uuid4().hex[:8]
+        filename = f"payment_wa_{sale_id}_{ts}_{uid}.{ext}"
+        try:
+            FileClass(self.db).temporal_upload(image_bytes, filename)
+            return filename
+        except Exception as e:
+            print(f"[WHATSAPP_MEDIA] save error: {e}")
+            return None
+
+    def _handle_transfer_proof_image_message(self, message: dict):
+        """Recibe imagen del comprobante de transferencia y la guarda en la venta (payment_support)."""
+        phone = message.get("from")
+        if not phone:
+            return
+        session = self._chat_sessions.get(phone)
+        if not session or session.get("step") not in (
+            "order_await_transfer_proof",
+            "budget_await_transfer_proof",
+        ):
+            return
+        sale_id = session.get("await_transfer_proof_sale_id")
+        if not sale_id:
+            self._chat_sessions.pop(phone, None)
+            self.send_autoreply(phone, "⚠️ Sesión incompleta. Escribe Hola para comenzar de nuevo.")
+            return
+        media_id = (message.get("image") or {}).get("id")
+        if not media_id:
+            self.send_autoreply(phone, "⚠️ No recibí la imagen. Envía una foto del comprobante.")
+            return
+        got = self._download_whatsapp_image_bytes(media_id)
+        if not got:
+            self.send_autoreply(
+                phone,
+                "⚠️ No pude descargar la imagen. Intenta enviarla de nuevo en unos segundos.",
+            )
+            return
+        image_bytes, ext = got
+        filename = self._save_sale_transfer_proof_file(int(sale_id), image_bytes, ext)
+        if not filename:
+            self.send_autoreply(phone, "⚠️ No pude guardar el comprobante. Intenta de nuevo.")
+            return
+        sale = self.db.query(SaleModel).filter(SaleModel.id == int(sale_id)).first()
+        if not sale:
+            self._chat_sessions.pop(phone, None)
+            self.send_autoreply(phone, "⚠️ No encontré el pedido.")
+            return
+        sale.payment_support = filename
+        sale.updated_date = datetime.now()
+        self.db.commit()
+        self.send_autoreply(
+            phone,
+            f"✅ Comprobante recibido para el pedido #{sale_id}.\n\n"
+            "Queda registrado en tu pedido para revisión.\n"
+            + self._farewell_after_purchase_text(),
+        )
+        self._chat_sessions.pop(phone, None)
 
     def _farewell_after_purchase_text(self) -> str:
         return (
@@ -1509,7 +1597,16 @@ class WhatsappClass:
                 "⏳ Queda en revisión de pago hasta confirmarlo en el sistema."
             )
             if is_transfer:
-                msg += "\n\n" + self._build_payment_info_text()
+                msg += (
+                    "\n\n📸 *Envía una foto* del comprobante de transferencia para registrarlo en tu pedido.\n\n"
+                )
+                msg += self._build_payment_info_text()
+                session["step"] = "budget_await_transfer_proof"
+                session["await_transfer_proof_sale_id"] = sale_id
+                session["flow"] = "budget"
+                self.send_autoreply(phone, msg)
+                return
+
             msg += self._farewell_after_purchase_text()
             self.send_autoreply(phone, msg)
             self._chat_sessions.pop(phone, None)
@@ -1721,6 +1818,14 @@ class WhatsappClass:
                 phone,
                 "👋 Elige una opción",
                 buttons=list(self._BTN_MAIN_MENU),
+            )
+            return
+
+        if session.get("step") in ("order_await_transfer_proof", "budget_await_transfer_proof"):
+            self.send_autoreply(
+                phone,
+                "📸 Envía una *foto* del comprobante de transferencia.\n\n"
+                "Para volver al menú, escribe Hola.",
             )
             return
 
@@ -2069,6 +2174,12 @@ class WhatsappClass:
             sale_id = sale_result["sale_id"]
             is_transfer = tp in ("2", "transferencia")
 
+            sale_row = self.db.query(SaleModel).filter(SaleModel.id == sale_id).first()
+            if sale_row:
+                sale_row.payment_support = "Transferencia" if is_transfer else "Efectivo"
+                sale_row.updated_date = datetime.now()
+                self.db.commit()
+
             ship_note = ""
             if sale_result.get("shipping_cost"):
                 ship_note = f"🚚 Envío: {self._format_currency(sale_result['shipping_cost'])}\n"
@@ -2084,7 +2195,15 @@ class WhatsappClass:
                 "⏳ El pedido queda en revisión de pago hasta confirmarlo en el sistema."
             )
             if is_transfer:
-                msg += "\n\n" + self._build_payment_info_text()
+                msg += (
+                    "\n\n📸 *Envía una foto* del comprobante de transferencia para registrarlo en tu pedido.\n\n"
+                )
+                msg += self._build_payment_info_text()
+                session["step"] = "order_await_transfer_proof"
+                session["await_transfer_proof_sale_id"] = sale_id
+                session["flow"] = "order"
+                self.send_autoreply(phone, msg)
+                return
 
             msg += self._farewell_after_purchase_text()
 
@@ -2434,6 +2553,9 @@ class WhatsappClass:
             action, budget_id = payload.split("_", 1)
             action = action.lower()
             print(f"[WHATSAPP_HANDLE] Action: {action}, Budget ID: {budget_id}")
+        elif message.get("type") == "image":
+            self._handle_transfer_proof_image_message(message)
+            return
         elif message.get("type") in ["text", "interactive"]:
             self._handle_text_flow(message)
             return
