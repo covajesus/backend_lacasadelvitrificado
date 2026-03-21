@@ -1490,12 +1490,12 @@ class WhatsappClass:
                 ship_note = f"🚚 Envío: {self._format_currency(fin['shipping_cost'])}\n"
 
             msg = (
-                f"🎉 Pedido #{sale_id} creado\n\n"
+                f"🎉 ¡Pedido #{sale_id} creado!\n\n"
                 f"📄 Documento: {doc_label}\n"
                 f"💳 Método de pago: {pay_label}\n"
                 f"{ship_note}"
                 f"💰 Total: {self._format_currency(fin['total'])}\n\n"
-                "⏳ El pedido queda en revisión de pago hasta confirmarlo en el sistema."
+                "⏳ Queda en revisión de pago hasta confirmarlo en el sistema."
             )
             if is_transfer:
                 msg += "\n\n" + self._build_payment_info_text()
@@ -1540,6 +1540,7 @@ class WhatsappClass:
                 ship_line = f"🚚 Envío: {self._format_currency(ship)}\n"
             self.send_autoreply(
                 phone,
+                "Último paso: elige pago y generamos tu pedido.\n\n"
                 f"📄 Documento: {doc_label}\n"
                 f"📦 Productos: {self._format_currency(subtotal)}\n"
                 f"{ship_line}"
@@ -1595,8 +1596,10 @@ class WhatsappClass:
                 session["step"] = "budget_accept_choose_document"
                 self.send_autoreply(
                     phone,
-                    "✅ Cliente encontrado\n\n"
-                    "📄 Tipo de documento para tu pedido",
+                    "✅ Cliente encontrado.\n\n"
+                    "Siguiente: tipo de documento y método de pago. "
+                    "Al confirmar el pago se crea tu pedido.\n\n"
+                    "📄 Tipo de documento",
                     buttons=list(self._BTN_DOC_BACK),
                 )
                 return
@@ -1628,7 +1631,8 @@ class WhatsappClass:
                     phone,
                     "📝 Para crear tu pedido, envíame tu RUT\n"
                     "Ejemplo: 12345678-9\n\n"
-                    "Si no estás registrado, te pediremos nombre y apellidos.",
+                    "Si no estás registrado, te pediremos nombre y apellidos.\n"
+                    "Después: documento → pago → se confirma el pedido.",
                 )
                 return
             elif choice == "2":
