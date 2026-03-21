@@ -48,9 +48,178 @@ class WhatsappClass:
             "back",
         }
     )
+    # Respuestas que no son dirección (texto normalizado sin tildes, minúsculas)
+    _ABSURD_ADDRESS_EXACT = frozenset(
+        {
+            "no",
+            "nose",
+            "no se",
+            "na",
+            "nop",
+            "nope",
+            "nada",
+            "ninguna",
+            "ninguno",
+            "no hay",
+            "sin direccion",
+            "no tengo",
+            "no tengo direccion",
+            "no se la direccion",
+            "no me la se",
+            "no la conozco",
+            "no conozco",
+            "no conozco la direccion",
+            "no se donde vivo",
+            "no se donde es",
+            "despues",
+            "luego",
+            "paso",
+            "salto",
+            "cualquiera",
+            "lo que sea",
+            "da igual",
+            "no importa",
+            "asdf",
+            "qwerty",
+            "prueba",
+            "test",
+            "hola",
+            "chau",
+            "xd",
+            "jaja",
+            "jeje",
+            "aaa",
+            "aaaa",
+            "aaaaa",
+            "xdd",
+            "123",
+            "1234",
+            "12345",
+            "123456",
+            "abc",
+            "abcd",
+            "qqqq",
+            "wwww",
+            "asdasd",
+            "qweqwe",
+            "zxc",
+            "xxx",
+            "ningun lado",
+            "en ninguna parte",
+            "no existe",
+            "falsa",
+            "inventada",
+            "random",
+            "no se cual",
+            "no se cual es",
+            "buscame",
+            "googlealo",
+            "maps",
+            "no recuerdo",
+            "olvide",
+            "se me olvido",
+            "privada",
+            "secreto",
+            "no digo",
+            "no dire",
+        }
+    )
+    _ABSURD_ADDRESS_IN_TEXT = (
+        "no se donde",
+        "no me la se",
+        "no la conozco",
+        "no tengo direccion",
+        "no tengo la direccion",
+        "prefiero no decir",
+        "no quiero decir",
+        "despues te digo",
+        "te digo despues",
+        "no puedo decir",
+        "me invento",
+        "inventa una",
+        "pon lo que sea",
+        "cualquier direccion",
+        "no me acuerdo",
+        "no recuerdo la direccion",
+        "no se mi direccion",
+        "no se la direccion",
+        "no conozco mi direccion",
+        "vivo en ningun lado",
+        "no tengo casa",
+        "no vivo aqui",
+        "no vivo aca",
+    )
 
     def __init__(self, db):
         self.db = db
+
+    def _normalize_address_input(self, raw: str) -> str:
+        s = (raw or "").strip().lower()
+        t = unicodedata.normalize("NFKD", s)
+        t = "".join(c for c in t if not unicodedata.combining(c))
+        t = re.sub(r"\s+", " ", t).strip()
+        return t
+
+    def _delivery_address_user_error(self, raw: str) -> str | None:
+        """
+        None si la dirección parece aceptable.
+        Si no, devuelve el texto completo para enviar al usuario.
+        """
+        t = self._normalize_address_input(raw)
+        if not t:
+            return (
+                "⚠️ Necesitamos una dirección escrita.\n\n"
+                "📍 Envía calle, número, comuna y referencias (ej: Los Laureles 890, Temuco, casa azul)."
+            )
+        if len(t) < 12:
+            return (
+                "⚠️ La dirección es muy corta o incompleta.\n\n"
+                "📍 Escribe calle, número, comuna y si puedes una referencia."
+            )
+        if t in self._ABSURD_ADDRESS_EXACT:
+            return (
+                "⚠️ Eso no es una dirección de envío válida.\n\n"
+                "📍 Escribe la dirección real donde debemos entregar: calle, número, comuna y referencias."
+            )
+        padded = f" {t} "
+        for phrase in self._ABSURD_ADDRESS_IN_TEXT:
+            if f" {phrase} " in padded:
+                return (
+                    "⚠️ Necesitamos la dirección completa y real, no esa clase de respuesta.\n\n"
+                    "📍 Ejemplo: Av. Alemania 1234, Depto 502, Temuco."
+                )
+        if re.search(r"(.)\1{4,}", t):
+            return (
+                "⚠️ La dirección no se entiende (muchas letras o números repetidos).\n\n"
+                "📍 Escríbela con calle, número, comuna y referencias claras."
+            )
+        letters = re.findall(r"[a-z]", t)
+        digits = re.findall(r"[0-9]", t)
+        words = [w for w in t.split() if re.search(r"[a-z0-9]", w)]
+        if len(digits) >= 3 and len(letters) == 0:
+            return (
+                "⚠️ No aceptamos solo números.\n\n"
+                "📍 Incluye nombre de calle, número, comuna (ej: O'Higgins 567, Valdivia)."
+            )
+        if len(letters) == 0:
+            return (
+                "⚠️ Falta el texto de la dirección (calle, comuna…).\n\n"
+                "📍 Escribe la dirección completa con palabras y números."
+            )
+        has_digit = len(digits) > 0
+        if not has_digit:
+            if len(words) < 4 or len(t) < 22:
+                return (
+                    "⚠️ Sin número de calle o casa la dirección queda muy vaga.\n\n"
+                    "📍 Incluye calle, número, comuna y referencias (o un texto más detallado con al menos 4 palabras)."
+                )
+        else:
+            if len(words) < 2:
+                return (
+                    "⚠️ Agrega más detalle: comuna, sector o referencias junto al número.\n\n"
+                    "📍 Ejemplo: Los Carrera 340, centro, Temuco."
+                )
+        return None
 
     def _is_exit_command(self, text: str) -> bool:
         t = (text or "").strip().lower()
@@ -742,7 +911,17 @@ class WhatsappClass:
             "delivery_address": None,
             "document_type_id": None,
             "budget_contact_email": None,
+            "processing_budget_email": False,
         }
+
+    def _reply_while_processing_budget_email(self, phone: str):
+        """Mensaje si el usuario escribe de nuevo mientras se genera/envía el PDF al correo."""
+        self.send_autoreply(
+            phone,
+            "⏳ Todavía estamos procesando tu presupuesto y el envío del correo con el PDF.\n\n"
+            "Por favor espera unos segundos y no envíes otro mensaje hasta recibir la confirmación.\n\n"
+            "Si volviste a escribir: sigue en proceso; en cuanto termine te respondemos aquí.",
+        )
 
     def _resend_budget_accept_reject_prompt(self, phone: str, session: dict):
         bid = session.get("pending_budget_id")
@@ -1047,6 +1226,10 @@ class WhatsappClass:
         return False
 
     def _handle_budget_flow(self, phone: str, raw_text: str, text: str, session: dict):
+        if session.get("processing_budget_email"):
+            self._reply_while_processing_budget_email(phone)
+            return
+
         if self._is_back_command(text):
             if self._budget_go_back(phone, session):
                 return
@@ -1185,8 +1368,9 @@ class WhatsappClass:
             return
 
         if step == "budget_collect_address":
-            if len(raw_text) < 8:
-                self.send_autoreply(phone, "La dirección parece muy corta. Envíala completa.")
+            addr_err = self._delivery_address_user_error(raw_text)
+            if addr_err:
+                self.send_autoreply(phone, addr_err)
                 return
             session["delivery_address"] = raw_text.strip()
             session["step"] = "budget_collect_email"
@@ -1209,70 +1393,74 @@ class WhatsappClass:
                 return
             session["budget_contact_email"] = addr
             session["customer_id"] = None
-            res = self._create_budget_from_whatsapp_session(phone, session)
-            if not res.get("ok"):
-                self.send_autoreply(
-                    phone,
-                    "❌ No pude registrar el presupuesto\n\n"
-                    "⏳ Intenta más tarde o escribe Hola",
+            session["processing_budget_email"] = True
+            try:
+                res = self._create_budget_from_whatsapp_session(phone, session)
+                if not res.get("ok"):
+                    self.send_autoreply(
+                        phone,
+                        "❌ No pude registrar el presupuesto\n\n"
+                        "⏳ Intenta más tarde o escribe Hola",
+                    )
+                    self._chat_sessions.pop(phone, None)
+                    return
+
+                bid = res["budget_id"]
+                total = res.get("total", 0)
+                contact_email = (session.get("budget_contact_email") or "").strip()
+                send_res = (
+                    self._send_budget_pdf_email(
+                        contact_email,
+                        bid,
+                        "",
+                        session.get("delivery_address"),
+                    )
+                    if contact_email
+                    else "email_error"
                 )
+
+                if send_res == "ok":
+                    session["pending_budget_id"] = bid
+                    session["step"] = "budget_ask_accept_reject"
+                    self.send_autoreply(
+                        phone,
+                        "📧 Presupuesto enviado a tu correo\n\n"
+                        f"📄 Revisa tu correo ({contact_email}); va el PDF adjunto\n"
+                        f"📋 N° {bid} · 💰 Total: {self._format_currency(total)}\n\n"
+                        "❓ ¿Aceptas este presupuesto?\n"
+                        "Toca un botón o escribe 1 / 2.",
+                        buttons=list(self._BTN_BUDGET_ACCEPT),
+                    )
+                    return
+                elif send_res == "no_pdf":
+                    self.send_autoreply(
+                        phone,
+                        f"✅ Tu presupuesto quedó registrado\n"
+                        f"📋 N° {bid} · 💰 Total: {self._format_currency(total)}\n\n"
+                        "⚠️ No se pudo generar el PDF; te contactaremos por este chat."
+                        + self._farewell_after_budget_text(),
+                    )
+                elif send_res == "pdf_error":
+                    self.send_autoreply(
+                        phone,
+                        f"✅ Tu presupuesto quedó registrado\n"
+                        f"📋 N° {bid} · 💰 Total: {self._format_currency(total)}\n\n"
+                        "⚠️ Hubo un error al generar el PDF; te escribimos por WhatsApp."
+                        + self._farewell_after_budget_text(),
+                    )
+                else:
+                    self.send_autoreply(
+                        phone,
+                        f"✅ Tu presupuesto quedó registrado\n"
+                        f"📋 N° {bid} · 💰 Total: {self._format_currency(total)}\n\n"
+                        f"⚠️ No se pudo enviar el correo con el PDF ({send_res})\n"
+                        "Te contactamos por aquí."
+                        + self._farewell_after_budget_text(),
+                    )
                 self._chat_sessions.pop(phone, None)
                 return
-
-            bid = res["budget_id"]
-            total = res.get("total", 0)
-            contact_email = (session.get("budget_contact_email") or "").strip()
-            send_res = (
-                self._send_budget_pdf_email(
-                    contact_email,
-                    bid,
-                    "",
-                    session.get("delivery_address"),
-                )
-                if contact_email
-                else "email_error"
-            )
-
-            if send_res == "ok":
-                session["pending_budget_id"] = bid
-                session["step"] = "budget_ask_accept_reject"
-                self.send_autoreply(
-                    phone,
-                    "📧 Presupuesto enviado a tu correo\n\n"
-                    f"📄 Revisa tu correo ({contact_email}); va el PDF adjunto\n"
-                    f"📋 N° {bid} · 💰 Total: {self._format_currency(total)}\n\n"
-                    "❓ ¿Aceptas este presupuesto?\n"
-                    "Toca un botón o escribe 1 / 2.",
-                    buttons=list(self._BTN_BUDGET_ACCEPT),
-                )
-                return
-            elif send_res == "no_pdf":
-                self.send_autoreply(
-                    phone,
-                    f"✅ Tu presupuesto quedó registrado\n"
-                    f"📋 N° {bid} · 💰 Total: {self._format_currency(total)}\n\n"
-                    "⚠️ No se pudo generar el PDF; te contactaremos por este chat."
-                    + self._farewell_after_budget_text(),
-                )
-            elif send_res == "pdf_error":
-                self.send_autoreply(
-                    phone,
-                    f"✅ Tu presupuesto quedó registrado\n"
-                    f"📋 N° {bid} · 💰 Total: {self._format_currency(total)}\n\n"
-                    "⚠️ Hubo un error al generar el PDF; te escribimos por WhatsApp."
-                    + self._farewell_after_budget_text(),
-                )
-            else:
-                self.send_autoreply(
-                    phone,
-                    f"✅ Tu presupuesto quedó registrado\n"
-                    f"📋 N° {bid} · 💰 Total: {self._format_currency(total)}\n\n"
-                    f"⚠️ No se pudo enviar el correo con el PDF ({send_res})\n"
-                    "Te contactamos por aquí."
-                    + self._farewell_after_budget_text(),
-                )
-            self._chat_sessions.pop(phone, None)
-            return
+            finally:
+                session["processing_budget_email"] = False
 
         if step == "budget_accept_choose_payment":
             if text.strip() not in ["1", "2"]:
@@ -1557,6 +1745,7 @@ class WhatsappClass:
                 session["delivery_address"] = None
                 session["document_type_id"] = None
                 session["budget_contact_email"] = None
+                session["processing_budget_email"] = False
                 self.send_autoreply(
                     phone,
                     "💰 Solicitud de presupuesto\n\n" + self._build_product_prompt_text(self._get_public_products(None)),
@@ -1673,12 +1862,9 @@ class WhatsappClass:
             return
 
         if session["step"] == "collect_address":
-            if len(raw_text) < 8:
-                self.send_autoreply(
-                    phone,
-                    "⚠️ La dirección parece muy corta\n\n"
-                    "📍 Envíala completa por favor"
-                )
+            addr_err = self._delivery_address_user_error(raw_text)
+            if addr_err:
+                self.send_autoreply(phone, addr_err)
                 return
             session["delivery_address"] = raw_text.strip()
             if session.get("is_new") and not session.get("customer_id"):
