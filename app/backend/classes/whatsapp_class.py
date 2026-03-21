@@ -1465,14 +1465,19 @@ class WhatsappClass:
                 session["processing_budget_email"] = False
 
         if step == "budget_accept_choose_payment":
-            if text.strip() not in ["1", "2"]:
+            t = text.strip().lower()
+            if t in ("1", "efectivo"):
+                pay_choice = "1"
+            elif t in ("2", "transferencia"):
+                pay_choice = "2"
+            else:
                 self.send_autoreply(
                     phone,
                     "⚠️ Elige método de pago",
                     buttons=list(self._BTN_PAY_BACK),
                 )
                 return
-            fin = self._finalize_budget_accept_sale(phone, session, text.strip())
+            fin = self._finalize_budget_accept_sale(phone, session, pay_choice)
             if not fin.get("ok"):
                 self.send_autoreply(
                     phone,
@@ -1482,7 +1487,7 @@ class WhatsappClass:
                 return
 
             sale_id = fin["sale_id"]
-            is_transfer = text.strip() == "2"
+            is_transfer = pay_choice == "2"
             doc_label = "Boleta" if session.get("document_type_id") == 39 else "Factura"
             pay_label = "Transferencia" if is_transfer else "Efectivo"
             ship_note = ""
@@ -1505,10 +1510,10 @@ class WhatsappClass:
             return
 
         if step == "budget_accept_choose_document":
-            choice = text.strip()
-            if choice == "1":
+            choice = text.strip().lower()
+            if choice in ("1", "boleta"):
                 session["document_type_id"] = 39
-            elif choice == "2":
+            elif choice in ("2", "factura"):
                 session["document_type_id"] = 33
             else:
                 self.send_autoreply(
@@ -1669,7 +1674,12 @@ class WhatsappClass:
         session = self._chat_sessions.get(phone)
 
         if session is not None:
-            if session.get("flow") is None and session.get("step") != "main_menu":
+            step = session.get("step")
+            if isinstance(step, str) and step.startswith("budget_"):
+                # Si el paso es de presupuesto, el flujo debe ser budget (evita que flow=None se fuerce a "order"
+                # y se pierdan budget_accept_* sin respuesta).
+                session["flow"] = "budget"
+            elif session.get("flow") is None and step != "main_menu":
                 session["flow"] = "order"
 
         if self._is_exit_command(text):
@@ -1995,10 +2005,10 @@ class WhatsappClass:
             return
 
         if session["step"] == "choose_document":
-            choice = text.strip()
-            if choice == "1":
+            choice = text.strip().lower()
+            if choice in ("1", "boleta"):
                 session["document_type_id"] = 39
-            elif choice == "2":
+            elif choice in ("2", "factura"):
                 session["document_type_id"] = 33
             else:
                 self.send_autoreply(
@@ -2027,7 +2037,12 @@ class WhatsappClass:
             return
 
         if session["step"] == "choose_payment":
-            if text.strip() not in ["1", "2"]:
+            tp = text.strip().lower()
+            if tp in ("1", "efectivo"):
+                pass
+            elif tp in ("2", "transferencia"):
+                pass
+            else:
                 self.send_autoreply(
                     phone,
                     "⚠️ Elige método de pago",
@@ -2046,7 +2061,7 @@ class WhatsappClass:
                 return
 
             sale_id = sale_result["sale_id"]
-            is_transfer = text.strip() == "2"
+            is_transfer = tp in ("2", "transferencia")
 
             ship_note = ""
             if sale_result.get("shipping_cost"):

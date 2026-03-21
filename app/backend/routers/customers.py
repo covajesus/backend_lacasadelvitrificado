@@ -16,7 +16,8 @@ def index(customer_inputs: CustomerList, session_user: UserLogin = Depends(get_c
     data = CustomerClass(db).get_all(
         page=customer_inputs.page,
         name=customer_inputs.name,
-        rut=customer_inputs.rut
+        rut=customer_inputs.rut,
+        phone=customer_inputs.phone,
     )
 
     return {"message": data}

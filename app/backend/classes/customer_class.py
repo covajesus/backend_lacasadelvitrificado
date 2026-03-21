@@ -1,5 +1,7 @@
+import re
 from app.backend.db.models import CustomerModel, RegionModel, CommuneModel, CustomerProductDiscountModel, SettingModel, UserModel
 from datetime import datetime
+from sqlalchemy import or_
 from app.backend.auth.auth_user import generate_bcrypt_hash
 
 class CustomerClass:
@@ -36,7 +38,7 @@ class CustomerClass:
             error_message = str(e)
             return {"status": "error", "message": error_message}
 
-    def get_all(self, page=0, items_per_page=10, name=None, rut=None):
+    def get_all(self, page=0, items_per_page=10, name=None, rut=None, phone=None):
         try:
             query = (
                 self.db.query(
@@ -56,6 +58,20 @@ class CustomerClass:
 
             if rut and rut.strip():
                 query = query.filter(CustomerModel.identification_number == rut.strip())
+
+            if phone and phone.strip():
+                p = phone.strip()
+                digits = re.sub(r"\D", "", p)
+                # MySQL: like; coincide por texto o solo por dígitos (ej. 912345678 vs +56 9 1234 5678)
+                if digits:
+                    query = query.filter(
+                        or_(
+                            CustomerModel.phone.like(f"%{p}%"),
+                            CustomerModel.phone.like(f"%{digits}%"),
+                        )
+                    )
+                else:
+                    query = query.filter(CustomerModel.phone.like(f"%{p}%"))
 
             if page > 0:
                 total_items = query.count()
