@@ -369,9 +369,32 @@ class WhatsappClass:
     def _format_currency(self, amount: int):
         return f"${int(amount):,}".replace(",", ".")
 
+    _RUT_CHILE_INVALID_MSG = (
+        "⚠️ RUT no válido.\n\n"
+        "📝 Ingresa el número con o sin guión (ej. 7651334-8 o 76513348). "
+        "El dígito verificador debe ser correcto. Puedes usar puntos: 7.651.334-8"
+    )
+
+    def _rut_chile_compute_dv(self, body: str) -> str:
+        """Dígito verificador módulo 11 (Chile). body solo dígitos (8 cifras, con ceros a la izquierda si aplica), sin DV."""
+        if not body or not body.isdigit():
+            return ""
+        s = 0
+        m = 2
+        for ch in reversed(body):
+            s += int(ch) * m
+            m = m + 1 if m < 7 else 2
+        d = 11 - (s % 11)
+        if d == 11:
+            return "0"
+        if d == 10:
+            return "K"
+        return str(d)
+
     def _normalize_rut_chile(self, rut_input: str):
         """
-        Normaliza RUT chileno a formato 12345678-9 (sin puntos, DV puede ser K).
+        Normaliza RUT chileno a cuerpo-DV sin puntos (ej. 7651334-8). Acepta con o sin guión.
+        El DV se valida sobre el cuerpo rellenado a 8 dígitos (ceros a la izquierda), como en documentos antiguos (ej. 07651334-8 ≡ 76513348).
         Retorna None si no es válido.
         """
         if not rut_input:
@@ -382,14 +405,24 @@ class WhatsappClass:
         if "-" in t:
             body, dv = t.split("-", 1)
         else:
-            if len(t) < 2:
+            if len(t) < 8:
                 return None
             body, dv = t[:-1], t[-1]
-        if not body.isdigit() or len(body) < 7:
+        if not body or not dv or len(dv) != 1:
             return None
+        if not body.isdigit() or len(body) < 7 or len(body) > 8:
+            return None
+        dv = dv.upper()
         if dv not in "0123456789K":
             return None
-        return f"{body}-{dv}"
+        canonical = body.lstrip("0") or "0"
+        if len(canonical) < 7 or len(canonical) > 8:
+            return None
+        padded = body.zfill(8)
+        expected = self._rut_chile_compute_dv(padded)
+        if dv != expected:
+            return None
+        return f"{canonical}-{dv}"
 
     def _find_customer_by_rut(self, rut_normalized: str):
         if not rut_normalized:
@@ -1544,7 +1577,7 @@ class WhatsappClass:
         if step == "budget_accept_collect_rut":
             rut_norm = self._normalize_rut_chile(raw_text)
             if not rut_norm:
-                self.send_autoreply(phone, "⚠️ No reconozco el RUT\n\n📝 Envíalo así: 12345678-9")
+                self.send_autoreply(phone, self._RUT_CHILE_INVALID_MSG)
                 return
             session["rut"] = rut_norm
             customer = self._find_customer_by_rut(rut_norm)
@@ -1730,11 +1763,7 @@ class WhatsappClass:
         if session["step"] == "ask_rut":
             rut_norm = self._normalize_rut_chile(raw_text)
             if not rut_norm:
-                self.send_autoreply(
-                    phone,
-                    "⚠️ No reconozco el RUT\n\n"
-                    "📝 Envíalo así: 12345678-9 (puedes sin puntos)"
-                )
+                self.send_autoreply(phone, self._RUT_CHILE_INVALID_MSG)
                 return
             session["rut"] = rut_norm
             customer = self._find_customer_by_rut(rut_norm)
