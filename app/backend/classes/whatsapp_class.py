@@ -23,9 +23,48 @@ load_dotenv()
 
 class WhatsappClass:
     _chat_sessions = {}
+    _EXIT_WORDS = frozenset(
+        {
+            "cancelar",
+            "salir",
+            "reiniciar",
+            "terminar",
+            "fin",
+            "cerrar",
+            "chau",
+            "adiós",
+            "adios",
+            "stop",
+        }
+    )
+    _BACK_WORDS = frozenset(
+        {
+            "volver",
+            "atrás",
+            "atras",
+            "retroceder",
+            "regresar",
+            "anterior",
+            "back",
+        }
+    )
 
     def __init__(self, db):
         self.db = db
+
+    def _is_exit_command(self, text: str) -> bool:
+        t = (text or "").strip().lower()
+        if not t:
+            return False
+        first = t.split()[0]
+        return first in self._EXIT_WORDS or t in self._EXIT_WORDS
+
+    def _is_back_command(self, text: str) -> bool:
+        t = (text or "").strip().lower()
+        if not t:
+            return False
+        first = t.split()[0]
+        return first in self._BACK_WORDS or t in self._BACK_WORDS
 
     def _clean_phone_number(self, phone):
         """
@@ -524,6 +563,62 @@ class WhatsappClass:
             return "ok"
         return result or "email_error"
 
+    def _finalize_budget_accept_sale(self, phone: str, session: dict, payment_choice: str) -> dict:
+        """Vincula cliente al presupuesto, ejecuta accept() y guarda medio de pago en la venta."""
+        from app.backend.classes.budget_class import BudgetClass
+
+        bid = session.get("pending_budget_id")
+        cid = session.get("customer_id")
+        doc_id = session.get("document_type_id")
+        if not bid or not cid:
+            return {"ok": False, "error": "Datos incompletos"}
+        if doc_id not in (33, 39):
+            doc_id = 39
+
+        budget = self.db.query(BudgetModel).filter(BudgetModel.id == bid).first()
+        if not budget:
+            return {"ok": False, "error": "Presupuesto no encontrado"}
+        if budget.status_id == 1:
+            return {"ok": False, "error": "Presupuesto ya fue aceptado"}
+        if budget.status_id == 2:
+            return {"ok": False, "error": "Presupuesto rechazado"}
+
+        budget.customer_id = cid
+        budget.updated_date = datetime.now()
+        self.db.commit()
+
+        delivery = (session.get("delivery_address") or "").strip() or None
+        accept_res = BudgetClass(self.db).accept(
+            int(bid),
+            dte_type_id=doc_id,
+            delivery_address_override=delivery,
+        )
+        if isinstance(accept_res, dict) and accept_res.get("status") == "error":
+            return {"ok": False, "error": accept_res.get("message", "Error al aceptar")}
+
+        sale_id = accept_res.get("sale_id") if isinstance(accept_res, dict) else None
+        if not sale_id:
+            return {"ok": False, "error": "No se obtuvo la venta"}
+
+        pay_label = "Transferencia" if payment_choice == "2" else "Efectivo"
+        sale = self.db.query(SaleModel).filter(SaleModel.id == sale_id).first()
+        if sale:
+            sale.payment_support = pay_label
+            if sale.status_id != 1:
+                sale.status_id = 1
+            self.db.commit()
+            self.db.refresh(sale)
+
+        total = int(sale.total) if sale and sale.total is not None else int(budget.total or 0)
+        ship_cost = int(sale.shipping_cost) if sale and sale.shipping_cost is not None else int(budget.shipping or 0)
+
+        return {
+            "ok": True,
+            "sale_id": sale_id,
+            "total": total,
+            "shipping_cost": ship_cost,
+        }
+
     def _sync_budget_cart_prices(self, session: dict):
         """Recalcula precios del carrito con descuentos del cliente (tras conocer RUT)."""
         cid = session.get("customer_id")
@@ -598,7 +693,294 @@ class WhatsappClass:
             "budget_contact_email": None,
         }
 
+    def _resend_budget_accept_reject_prompt(self, phone: str, session: dict):
+        bid = session.get("pending_budget_id")
+        contact_email = (session.get("budget_contact_email") or "").strip()
+        total = 0
+        if bid:
+            row = self.db.query(BudgetModel).filter(BudgetModel.id == bid).first()
+            if row and row.total is not None:
+                total = int(row.total)
+        self.send_autoreply(
+            phone,
+            "Presupuesto enviado a tu correo.\n\n"
+            f"Revisa tu correo ({contact_email or '—'}); va el PDF adjunto.\n"
+            f"N° {bid} · Total: {self._format_currency(total)}\n\n"
+            "¿Aceptas este presupuesto?\n"
+            "1) Sí, acepto\n"
+            "2) No, rechazo",
+        )
+
+    def _budget_go_back(self, phone: str, session: dict) -> bool:
+        """Retrocede un paso en el flujo de presupuesto. Devuelve True si aplicó."""
+        step = session.get("step")
+        products = self._get_public_products(None)
+        prompt_tail = "\n\n(Tip: escribe Volver para el paso anterior o Salir para reiniciar.)"
+
+        if step == "budget_selecting_products":
+            session["step"] = "main_menu"
+            session["flow"] = None
+            session["cart"] = {}
+            session.pop("pending_product_id", None)
+            session.pop("pending_product_name", None)
+            self.send_autoreply(
+                phone,
+                "Volviste al menú principal.\n"
+                "1) Pedido / compra\n"
+                "2) Solicitar presupuesto",
+            )
+            return True
+
+        if step == "budget_ask_quantity":
+            session["step"] = "budget_selecting_products"
+            session.pop("pending_product_id", None)
+            session.pop("pending_product_name", None)
+            self.send_autoreply(
+                phone,
+                "Indica el producto por nombre:\n"
+                + self._build_product_prompt_text(products)
+                + prompt_tail,
+            )
+            return True
+
+        if step == "budget_ask_more":
+            session["step"] = "budget_selecting_products"
+            self.send_autoreply(
+                phone,
+                "Indica el producto por nombre:\n"
+                + self._build_product_prompt_text(products)
+                + prompt_tail,
+            )
+            return True
+
+        if step == "budget_ask_shipping":
+            if not session.get("cart"):
+                session["step"] = "budget_selecting_products"
+                self.send_autoreply(
+                    phone,
+                    "Indica el producto por nombre:\n"
+                    + self._build_product_prompt_text(products)
+                    + prompt_tail,
+                )
+            else:
+                session["step"] = "budget_ask_more"
+                self.send_autoreply(
+                    phone,
+                    "¿Agregar otro producto?\n1) Sí\n2) No" + prompt_tail,
+                )
+            return True
+
+        if step == "budget_collect_address":
+            session["step"] = "budget_ask_shipping"
+            self.send_autoreply(
+                phone,
+                "¿Envío a domicilio o retiro en tienda?\n"
+                "1) Retiro en tienda (sin envío)\n"
+                "2) Envío a domicilio"
+                + prompt_tail,
+            )
+            return True
+
+        if step == "budget_collect_email":
+            if session.get("shipping_method_id") == 2:
+                session["step"] = "budget_collect_address"
+                self.send_autoreply(
+                    phone,
+                    "Indica la dirección completa (calle, número, comuna, referencias).\n"
+                    "Después te pediremos tu correo."
+                    + prompt_tail,
+                )
+            else:
+                session["step"] = "budget_ask_shipping"
+                self.send_autoreply(
+                    phone,
+                    "¿Envío a domicilio o retiro en tienda?\n"
+                    "1) Retiro en tienda (sin envío)\n"
+                    "2) Envío a domicilio"
+                    + prompt_tail,
+                )
+            return True
+
+        if step == "budget_ask_accept_reject":
+            self.send_autoreply(
+                phone,
+                "En este paso no se puede volver más atrás (el presupuesto ya está registrado).\n"
+                "Responde 1 para aceptar o 2 para rechazar.\n"
+                "Para empezar de cero escribe Salir o Cancelar.",
+            )
+            return True
+
+        if step == "budget_accept_collect_rut":
+            session["step"] = "budget_ask_accept_reject"
+            self._resend_budget_accept_reject_prompt(phone, session)
+            return True
+
+        if step == "budget_accept_collect_first_name":
+            session["step"] = "budget_accept_collect_rut"
+            self.send_autoreply(
+                phone,
+                "Para crear tu pedido, envíame tu RUT (ej: 12345678-9)." + prompt_tail,
+            )
+            return True
+
+        if step == "budget_accept_collect_last_name":
+            session["step"] = "budget_accept_collect_first_name"
+            self.send_autoreply(phone, "Indica tu nombre (solo nombre)." + prompt_tail)
+            return True
+
+        if step == "budget_accept_choose_document":
+            if session.get("budget_accept_doc_from") == "new":
+                session["step"] = "budget_accept_collect_last_name"
+                self.send_autoreply(phone, "Ahora tus apellidos." + prompt_tail)
+            else:
+                session["step"] = "budget_accept_collect_rut"
+                self.send_autoreply(
+                    phone,
+                    "Para crear tu pedido, envíame tu RUT (ej: 12345678-9)." + prompt_tail,
+                )
+            return True
+
+        if step == "budget_accept_choose_payment":
+            session["step"] = "budget_accept_choose_document"
+            self.send_autoreply(
+                phone,
+                "Tipo de documento para tu pedido:\n1) Boleta\n2) Factura" + prompt_tail,
+            )
+            return True
+
+        return False
+
+    def _order_go_back(self, phone: str, session: dict) -> bool:
+        """Retrocede un paso en el flujo de pedido. Devuelve True si aplicó."""
+        step = session.get("step")
+        products = self._get_public_products(session.get("customer_id"))
+        prompt_tail = "\n\n(Tip: Volver = paso anterior · Salir = reiniciar.)"
+
+        if step == "ask_rut":
+            session["step"] = "main_menu"
+            session["flow"] = None
+            session["cart"] = {}
+            session["rut"] = None
+            session["customer_id"] = None
+            session["is_new"] = False
+            session["first_name"] = ""
+            session["last_name"] = ""
+            session["shipping_method_id"] = None
+            session["delivery_address"] = None
+            session["document_type_id"] = None
+            self.send_autoreply(
+                phone,
+                "Volviste al menú principal.\n"
+                "1) Pedido / compra\n"
+                "2) Solicitar presupuesto",
+            )
+            return True
+
+        if step == "collect_first_name":
+            session["step"] = "ask_rut"
+            self.send_autoreply(
+                phone,
+                "Envíame tu RUT (ej: 12345678-9)." + prompt_tail,
+            )
+            return True
+
+        if step == "collect_last_name":
+            session["step"] = "collect_first_name"
+            self.send_autoreply(phone, "Indica tu nombre (solo nombre)." + prompt_tail)
+            return True
+
+        if step == "ask_shipping":
+            if session.get("is_new") and not session.get("customer_id"):
+                session["step"] = "collect_last_name"
+                self.send_autoreply(phone, "Ahora tus apellidos." + prompt_tail)
+            else:
+                session["step"] = "ask_rut"
+                session["customer_id"] = None
+                session["rut"] = None
+                self.send_autoreply(
+                    phone,
+                    "Envíame tu RUT (ej: 12345678-9)." + prompt_tail,
+                )
+            return True
+
+        if step == "collect_address":
+            session["step"] = "ask_shipping"
+            session["delivery_address"] = None
+            self.send_autoreply(
+                phone,
+                "¿Cómo deseas recibir tu pedido?\n"
+                "1) Sin envío (retiro en tienda)\n"
+                "2) Con envío a domicilio"
+                + prompt_tail,
+            )
+            return True
+
+        if step == "selecting_products":
+            if session.get("shipping_method_id") == 2:
+                session["step"] = "collect_address"
+                self.send_autoreply(
+                    phone,
+                    "Indica la dirección completa para el envío (calle, número, comuna, referencias)."
+                    + prompt_tail,
+                )
+            else:
+                session["step"] = "ask_shipping"
+                self.send_autoreply(
+                    phone,
+                    "¿Cómo deseas recibir tu pedido?\n"
+                    "1) Sin envío (retiro en tienda)\n"
+                    "2) Con envío a domicilio"
+                    + prompt_tail,
+                )
+            return True
+
+        if step == "ask_quantity":
+            session["step"] = "selecting_products"
+            session.pop("pending_product_id", None)
+            session.pop("pending_product_name", None)
+            self.send_autoreply(
+                phone,
+                "Indica el producto por nombre:\n" + self._build_product_prompt_text(products) + prompt_tail,
+            )
+            return True
+
+        if step == "ask_more":
+            session["step"] = "selecting_products"
+            self.send_autoreply(
+                phone,
+                "Indica el producto por nombre:\n" + self._build_product_prompt_text(products) + prompt_tail,
+            )
+            return True
+
+        if step == "review_order":
+            session["step"] = "ask_more"
+            self.send_autoreply(
+                phone,
+                "¿Quieres agregar otro producto?\n1) Sí\n2) No" + prompt_tail,
+            )
+            return True
+
+        if step == "choose_document":
+            subtotal, shipping_cost, tax, total = self._preview_totals_for_session(session)
+            session["step"] = "review_order"
+            self.send_autoreply(
+                phone,
+                self._build_order_review_text(session, subtotal, shipping_cost, tax, total) + prompt_tail,
+            )
+            return True
+
+        if step == "choose_payment":
+            session["step"] = "choose_document"
+            self.send_autoreply(phone, "Tipo de documento:\n1) Boleta\n2) Factura" + prompt_tail)
+            return True
+
+        return False
+
     def _handle_budget_flow(self, phone: str, raw_text: str, text: str, session: dict):
+        if self._is_back_command(text):
+            if self._budget_go_back(phone, session):
+                return
+
         cid = session.get("customer_id")
         products = self._get_public_products(cid)
         products_map = {p["id"]: p for p in products}
@@ -800,6 +1182,136 @@ class WhatsappClass:
             self._chat_sessions.pop(phone, None)
             return
 
+        if step == "budget_accept_choose_payment":
+            if text.strip() not in ["1", "2"]:
+                self.send_autoreply(phone, "Selecciona 1 (Efectivo) o 2 (Transferencia).")
+                return
+            fin = self._finalize_budget_accept_sale(phone, session, text.strip())
+            if not fin.get("ok"):
+                self.send_autoreply(
+                    phone,
+                    f"No pude crear el pedido: {fin.get('error', 'error desconocido')}",
+                )
+                self._chat_sessions.pop(phone, None)
+                return
+
+            sale_id = fin["sale_id"]
+            is_transfer = text.strip() == "2"
+            doc_label = "Boleta" if session.get("document_type_id") == 39 else "Factura"
+            pay_label = "Transferencia" if is_transfer else "Efectivo"
+            ship_note = ""
+            if fin.get("shipping_cost"):
+                ship_note = f"Envío: {self._format_currency(fin['shipping_cost'])}\n"
+
+            msg = (
+                f"Pedido #{sale_id} creado.\n"
+                f"Documento: {doc_label}\n"
+                f"Método de pago: {pay_label}\n"
+                f"{ship_note}"
+                f"Total: {self._format_currency(fin['total'])}\n\n"
+                "El pedido queda en revisión de pago hasta confirmarlo en el sistema."
+            )
+            if is_transfer:
+                msg += "\n\n" + self._build_payment_info_text()
+            msg += self._farewell_after_purchase_text()
+            self.send_autoreply(phone, msg)
+            self._chat_sessions.pop(phone, None)
+            return
+
+        if step == "budget_accept_choose_document":
+            choice = text.strip()
+            if choice == "1":
+                session["document_type_id"] = 39
+            elif choice == "2":
+                session["document_type_id"] = 33
+            else:
+                self.send_autoreply(phone, "Selecciona 1 (Boleta) o 2 (Factura).")
+                return
+
+            bid = session.get("pending_budget_id")
+            b = self.db.query(BudgetModel).filter(BudgetModel.id == bid).first() if bid else None
+            if not b:
+                self._chat_sessions.pop(phone, None)
+                self.send_autoreply(phone, "No encontré el presupuesto. Escribe Hola para comenzar de nuevo.")
+                return
+
+            subtotal = int(b.subtotal or 0)
+            ship = int(b.shipping or 0)
+            tax = int(b.tax or 0)
+            total = int(b.total or 0)
+            session["step"] = "budget_accept_choose_payment"
+            doc_label = "Boleta" if session["document_type_id"] == 39 else "Factura"
+            ship_line = ""
+            if ship > 0:
+                ship_line = f"Envío: {self._format_currency(ship)}\n"
+            self.send_autoreply(
+                phone,
+                f"Documento: {doc_label}\n"
+                f"Productos: {self._format_currency(subtotal)}\n"
+                f"{ship_line}"
+                f"IVA: {self._format_currency(tax)}\n"
+                f"Total: {self._format_currency(total)}\n\n"
+                "Método de pago:\n1) Efectivo\n2) Transferencia",
+            )
+            return
+
+        if step == "budget_accept_collect_last_name":
+            if len(raw_text) < 2:
+                self.send_autoreply(phone, "Indica tus apellidos.")
+                return
+            session["last_name"] = raw_text.strip()
+            self._create_new_customer_record(session, phone)
+            session["budget_accept_doc_from"] = "new"
+            session["step"] = "budget_accept_choose_document"
+            self.send_autoreply(
+                phone,
+                "Tipo de documento para tu pedido:\n1) Boleta\n2) Factura",
+            )
+            return
+
+        if step == "budget_accept_collect_first_name":
+            if len(raw_text) < 2:
+                self.send_autoreply(phone, "Indica tu nombre.")
+                return
+            session["first_name"] = raw_text.strip()
+            session["step"] = "budget_accept_collect_last_name"
+            self.send_autoreply(phone, "Ahora tus apellidos.")
+            return
+
+        if step == "budget_accept_collect_rut":
+            rut_norm = self._normalize_rut_chile(raw_text)
+            if not rut_norm:
+                self.send_autoreply(phone, "No reconozco el RUT. Envíalo así: 12345678-9.")
+                return
+            session["rut"] = rut_norm
+            customer = self._find_customer_by_rut(rut_norm)
+            if customer:
+                session["customer_id"] = customer.id
+                session["is_new"] = False
+                self._sync_customer_whatsapp_phone(customer, phone)
+                if session.get("shipping_method_id") == 2 and session.get("delivery_address"):
+                    cust = self.db.query(CustomerModel).filter(CustomerModel.id == customer.id).first()
+                    if cust:
+                        cust.address = session["delivery_address"]
+                        cust.updated_date = datetime.now()
+                        self.db.commit()
+                session["budget_accept_doc_from"] = "rut"
+                session["step"] = "budget_accept_choose_document"
+                self.send_autoreply(
+                    phone,
+                    "Cliente encontrado.\n"
+                    "Tipo de documento para tu pedido:\n1) Boleta\n2) Factura",
+                )
+                return
+            session["is_new"] = True
+            session["customer_id"] = None
+            session["step"] = "budget_accept_collect_first_name"
+            self.send_autoreply(
+                phone,
+                f"No tenemos el RUT {rut_norm} registrado.\nIndica tu nombre (solo nombre).",
+            )
+            return
+
         if step == "budget_ask_accept_reject":
             choice = text.strip()
             bid = session.get("pending_budget_id")
@@ -809,24 +1321,12 @@ class WhatsappClass:
                 return
 
             if choice == "1":
-                from app.backend.classes.budget_class import BudgetClass
-                budget_class = BudgetClass(self.db)
-                accept_result = budget_class.accept(int(bid))
-                
-                if isinstance(accept_result, dict) and accept_result.get("status") == "error":
-                    self.send_autoreply(
-                        phone,
-                        f"Ocurrió un error al procesar la aceptación: {accept_result.get('message')}"
-                    )
-                else:
-                    sale_id = accept_result.get('sale_id') if isinstance(accept_result, dict) else None
-                    self.send_autoreply(
-                        phone,
-                        "Gracias por aceptar el presupuesto.\n"
-                        "Nos pondremos en contacto contigo a la brevedad."
-                        + self._farewell_after_budget_text(),
-                    )
-                self._chat_sessions.pop(phone, None)
+                session["step"] = "budget_accept_collect_rut"
+                self.send_autoreply(
+                    phone,
+                    "Para crear tu pedido con este presupuesto, envíame tu RUT (ej: 12345678-9).\n"
+                    "Si no estás registrado, te pediremos nombre y apellidos.",
+                )
                 return
             elif choice == "2":
                 budget = self.db.query(BudgetModel).filter(BudgetModel.id == bid).first()
@@ -861,11 +1361,11 @@ class WhatsappClass:
             if session.get("flow") is None and session.get("step") != "main_menu":
                 session["flow"] = "order"
 
-        if text in ["cancelar", "salir", "reiniciar"]:
+        if self._is_exit_command(text):
             self._chat_sessions.pop(phone, None)
             self.send_autoreply(
                 phone,
-                "Listo, conversación reiniciada. Escribe Hola cuando quieras volver.\n¡Hasta pronto!",
+                "Listo, conversación finalizada. Escribe Hola cuando quieras volver.\n¡Hasta pronto!",
             )
             return
 
@@ -875,7 +1375,8 @@ class WhatsappClass:
                 phone,
                 "¡Hola! ¿En qué te ayudamos?\n"
                 "1) Pedido / compra\n"
-                "2) Solicitar presupuesto",
+                "2) Solicitar presupuesto\n\n"
+                "En cualquier momento: Salir (o Cancelar) para terminar · Volver para el paso anterior.",
             )
             return
 
@@ -885,11 +1386,19 @@ class WhatsappClass:
                 phone,
                 "Elige una opción:\n"
                 "1) Pedido / compra\n"
-                "2) Solicitar presupuesto",
+                "2) Solicitar presupuesto\n\n"
+                "Salir / Cancelar = terminar chat · Volver = paso anterior.",
             )
             return
 
         if session["step"] == "main_menu":
+            if self._is_back_command(text):
+                self.send_autoreply(
+                    phone,
+                    "Ya estás en el menú principal. Elige 1 (pedido) o 2 (presupuesto), "
+                    "o escribe Salir para cerrar el chat.",
+                )
+                return
             choice = text.strip()
             if choice == "1":
                 session["flow"] = "order"
@@ -936,6 +1445,10 @@ class WhatsappClass:
 
         products = self._get_public_products(session.get("customer_id"))
         products_map = {p["id"]: p for p in products}
+
+        if self._is_back_command(text):
+            if self._order_go_back(phone, session):
+                return
 
         if session["step"] == "ask_rut":
             rut_norm = self._normalize_rut_chile(raw_text)

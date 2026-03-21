@@ -326,7 +326,7 @@ class BudgetClass:
             self.db.rollback()
             return {"status": "error", "message": str(e)}
 
-    def accept(self, budget_id, dte_type_id=None, dte_status_id=None):
+    def accept(self, budget_id, dte_type_id=None, dte_status_id=None, delivery_address_override=None):
         print(f"[BUDGET_ACCEPT] Iniciando aceptación de presupuesto {budget_id}, dte_type_id={dte_type_id}, dte_status_id={dte_status_id}")
         try:
             # Usar with_for_update() para bloquear la fila y prevenir race conditions
@@ -358,13 +358,20 @@ class BudgetClass:
             if not customer:
                 return {"status": "error", "message": "Customer not found"}
 
-            # Determinar shipping_method_id y delivery_address según shipping
-            shipping_method_id = None
+            # Determinar shipping_method_id y delivery_address según shipping del presupuesto
+            shipping_method_id = 1
             delivery_address = None
-            
-            if budget.shipping and budget.shipping != 0:
-                shipping_method_id = 1
+            has_shipping_cost = bool(budget.shipping and int(budget.shipping or 0) > 0)
+
+            if delivery_address_override and str(delivery_address_override).strip():
+                delivery_address = str(delivery_address_override).strip()
+                shipping_method_id = 2 if has_shipping_cost else 1
+            elif has_shipping_cost:
+                shipping_method_id = 2
                 delivery_address = customer.address if customer.address else None
+            else:
+                shipping_method_id = 1
+                delivery_address = "Retiro en tienda / sin envío"
 
             # Determinar dte_type_id y dte_status_id
             # Si se pasan por parámetro, usar esos valores
