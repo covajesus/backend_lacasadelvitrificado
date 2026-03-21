@@ -1,8 +1,26 @@
 import re
 from app.backend.db.models import CustomerModel, RegionModel, CommuneModel, CustomerProductDiscountModel, SettingModel, UserModel
 from datetime import datetime
-from sqlalchemy import or_
+from sqlalchemy import case, func
+
 from app.backend.auth.auth_user import generate_bcrypt_hash
+
+
+def _normalize_phone_digits(raw: str) -> str:
+    """Solo dígitos; quita prefijo país 56 para comparar con lo guardado en distintos formatos."""
+    d = re.sub(r"\D", "", (raw or "").strip())
+    if d.startswith("56") and len(d) > 2:
+        d = d[2:]
+    return d
+
+
+def _phone_db_normalized_expr(column):
+    """
+    Misma lógica que _normalize_phone_digits sobre el valor en BD (MySQL 8+ REGEXP_REPLACE).
+    """
+    rx = func.regexp_replace(func.coalesce(column, ""), "[^0-9]", "")
+    return case((rx.like("56%"), func.substring(rx, 3)), else_=rx)
+
 
 class CustomerClass:
     def __init__(self, db):
@@ -59,19 +77,12 @@ class CustomerClass:
             if rut and rut.strip():
                 query = query.filter(CustomerModel.identification_number == rut.strip())
 
-            if phone and phone.strip():
-                p = phone.strip()
-                digits = re.sub(r"\D", "", p)
-                # MySQL: like; coincide por texto o solo por dígitos (ej. 912345678 vs +56 9 1234 5678)
-                if digits:
+            if phone is not None and str(phone).strip():
+                search_norm = _normalize_phone_digits(str(phone))
+                if search_norm:
                     query = query.filter(
-                        or_(
-                            CustomerModel.phone.like(f"%{p}%"),
-                            CustomerModel.phone.like(f"%{digits}%"),
-                        )
+                        _phone_db_normalized_expr(CustomerModel.phone) == search_norm
                     )
-                else:
-                    query = query.filter(CustomerModel.phone.like(f"%{p}%"))
 
             if page > 0:
                 total_items = query.count()
