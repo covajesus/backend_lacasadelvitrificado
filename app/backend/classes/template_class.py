@@ -880,7 +880,7 @@ class TemplateClass:
         else:
             client_display = "—"
 
-        html = f"""
+        html_content = f"""
         <html>
         <head>
         <meta charset="utf-8">
@@ -936,7 +936,7 @@ class TemplateClass:
         </body>
         </html>
         """
-        return html
+        return html_content
 
     def html_to_pdf_bytes(self, html: str) -> bytes:
         path_wkhtmltopdf = '/usr/bin/wkhtmltopdf'
