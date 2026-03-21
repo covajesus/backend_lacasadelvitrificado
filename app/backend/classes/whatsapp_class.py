@@ -795,20 +795,15 @@ class WhatsappClass:
             return None
 
     def _handle_transfer_proof_image_message(self, message: dict):
-        """Recibe imagen del comprobante de transferencia y la guarda en la venta (payment_support)."""
+        """
+        Comprobante por transferencia: primero la imagen, luego se crea el pedido y se guarda el archivo en payment_support.
+        """
         phone = message.get("from")
         if not phone:
             return
         session = self._chat_sessions.get(phone)
-        if not session or session.get("step") not in (
-            "order_await_transfer_proof",
-            "budget_await_transfer_proof",
-        ):
-            return
-        sale_id = session.get("await_transfer_proof_sale_id")
-        if not sale_id:
-            self._chat_sessions.pop(phone, None)
-            self.send_autoreply(phone, "⚠️ Sesión incompleta. Escribe Hola para comenzar de nuevo.")
+        step = session.get("step") if session else None
+        if step not in ("order_transfer_upload", "budget_transfer_upload"):
             return
         media_id = (message.get("image") or {}).get("id")
         if not media_id:
@@ -822,24 +817,80 @@ class WhatsappClass:
             )
             return
         image_bytes, ext = got
-        filename = self._save_sale_transfer_proof_file(int(sale_id), image_bytes, ext)
-        if not filename:
-            self.send_autoreply(phone, "⚠️ No pude guardar el comprobante. Intenta de nuevo.")
-            return
-        sale = self.db.query(SaleModel).filter(SaleModel.id == int(sale_id)).first()
-        if not sale:
+
+        if step == "order_transfer_upload":
+            sale_result = self._create_sale_from_session(phone, session)
+            if not sale_result.get("ok"):
+                self.send_autoreply(
+                    phone,
+                    "❌ No pude crear el pedido\n\n"
+                    "⏳ Intenta nuevamente más tarde o escribe Hola",
+                )
+                self._chat_sessions.pop(phone, None)
+                return
+            sale_id = sale_result["sale_id"]
+            filename = self._save_sale_transfer_proof_file(sale_id, image_bytes, ext)
+            if not filename:
+                self.send_autoreply(phone, "⚠️ No pude guardar el comprobante. Intenta de nuevo.")
+                return
+            sale = self.db.query(SaleModel).filter(SaleModel.id == sale_id).first()
+            if sale:
+                sale.payment_support = filename
+                sale.updated_date = datetime.now()
+                self.db.commit()
+            ship_note = ""
+            if sale_result.get("shipping_cost"):
+                ship_note = f"🚚 Envío: {self._format_currency(sale_result['shipping_cost'])}\n"
+            doc_label = "Boleta" if session.get("document_type_id") == 39 else "Factura"
+            msg = (
+                f"🎉 ¡Pedido #{sale_id} creado!\n\n"
+                f"📄 Documento: {doc_label}\n"
+                f"💳 Método de pago: Transferencia\n"
+                f"{ship_note}"
+                f"💰 Total: {self._format_currency(sale_result['total'])}\n\n"
+                "✅ Comprobante registrado en tu pedido.\n"
+                "⏳ Queda en revisión hasta confirmarlo en el sistema."
+            )
+            msg += self._farewell_after_purchase_text()
+            self.send_autoreply(phone, msg)
             self._chat_sessions.pop(phone, None)
-            self.send_autoreply(phone, "⚠️ No encontré el pedido.")
             return
-        sale.payment_support = filename
-        sale.updated_date = datetime.now()
-        self.db.commit()
-        self.send_autoreply(
-            phone,
-            f"✅ Comprobante recibido para el pedido #{sale_id}.\n\n"
-            "Queda registrado en tu pedido para revisión.\n"
-            + self._farewell_after_purchase_text(),
+
+        # budget_transfer_upload
+        fin = self._finalize_budget_accept_sale(phone, session, "2")
+        if not fin.get("ok"):
+            self.send_autoreply(
+                phone,
+                f"❌ No pude crear el pedido: {fin.get('error', 'error desconocido')}",
+            )
+            self._chat_sessions.pop(phone, None)
+            return
+        sale_id = fin["sale_id"]
+        filename = self._save_sale_transfer_proof_file(sale_id, image_bytes, ext)
+        if not filename:
+            self.send_autoreply(phone, "⚠️ Pedido creado pero no pude guardar la imagen. Contacta al local.")
+            self._chat_sessions.pop(phone, None)
+            return
+        sale = self.db.query(SaleModel).filter(SaleModel.id == sale_id).first()
+        if sale:
+            sale.payment_support = filename
+            sale.updated_date = datetime.now()
+            self.db.commit()
+        doc_label = "Boleta" if session.get("document_type_id") == 39 else "Factura"
+        ship_note = ""
+        if fin.get("shipping_cost"):
+            ship_note = f"🚚 Envío: {self._format_currency(fin['shipping_cost'])}\n"
+        msg = (
+            f"🎉 ¡Pedido #{sale_id} creado!\n\n"
+            f"📄 Documento: {doc_label}\n"
+            f"💳 Método de pago: Transferencia\n"
+            f"{ship_note}"
+            f"💰 Total: {self._format_currency(fin['total'])}\n\n"
+            "✅ Comprobante registrado en tu pedido.\n"
+            "⏳ Queda en revisión de pago hasta confirmarlo en el sistema."
         )
+        msg += self._farewell_after_purchase_text()
+        self.send_autoreply(phone, msg)
         self._chat_sessions.pop(phone, None)
 
     def _farewell_after_purchase_text(self) -> str:
@@ -1188,6 +1239,15 @@ class WhatsappClass:
                 )
             return True
 
+        if step == "budget_transfer_upload":
+            session["step"] = "budget_accept_choose_payment"
+            self.send_autoreply(
+                phone,
+                "💳 Método de pago",
+                buttons=list(self._BTN_PAY_BACK),
+            )
+            return True
+
         if step == "budget_accept_choose_payment":
             session["step"] = "budget_accept_choose_document"
             self.send_autoreply(
@@ -1314,6 +1374,25 @@ class WhatsappClass:
                 phone,
                 self._build_order_review_text(session, subtotal, shipping_cost, tax, total),
                 buttons=list(self._BTN_ORDER_REVIEW),
+            )
+            return True
+
+        if step == "order_transfer_upload":
+            session["step"] = "choose_payment"
+            subtotal, shipping_cost, tax, total = self._preview_totals_for_session(session)
+            ship_line = ""
+            if session.get("shipping_method_id") == 2 and shipping_cost > 0:
+                ship_line = f"🚚 Envío: {self._format_currency(shipping_cost)}\n"
+            doc_label = "Boleta" if session.get("document_type_id") == 39 else "Factura"
+            self.send_autoreply(
+                phone,
+                f"📄 Documento: {doc_label}\n"
+                f"📦 Productos: {self._format_currency(subtotal)}\n"
+                f"{ship_line}"
+                f"📊 IVA: {self._format_currency(tax)}\n"
+                f"💰 Total: {self._format_currency(total)}\n\n"
+                "💳 Método de pago",
+                buttons=list(self._BTN_PAY_BACK),
             )
             return True
 
@@ -1571,6 +1650,40 @@ class WhatsappClass:
                     buttons=list(self._BTN_PAY_BACK),
                 )
                 return
+
+            if pay_choice == "2":
+                bid = session.get("pending_budget_id")
+                b = self.db.query(BudgetModel).filter(BudgetModel.id == bid).first() if bid else None
+                if not b:
+                    self._chat_sessions.pop(phone, None)
+                    self.send_autoreply(
+                        phone,
+                        "⚠️ No encontré el presupuesto\n\n"
+                        "👋 Escribe Hola para comenzar de nuevo",
+                    )
+                    return
+                subtotal = int(b.subtotal or 0)
+                ship = int(b.shipping or 0)
+                tax = int(b.tax or 0)
+                total = int(b.total or 0)
+                doc_label = "Boleta" if session.get("document_type_id") == 39 else "Factura"
+                ship_line = ""
+                if ship > 0:
+                    ship_line = f"🚚 Envío: {self._format_currency(ship)}\n"
+                session["step"] = "budget_transfer_upload"
+                session["flow"] = "budget"
+                msg = (
+                    "💳 Pagarás con *transferencia*.\n\n"
+                    f"📄 Documento: {doc_label}\n"
+                    f"📦 Productos: {self._format_currency(subtotal)}\n"
+                    f"{ship_line}"
+                    f"📊 IVA: {self._format_currency(tax)}\n"
+                    f"💰 Total a transferir: {self._format_currency(total)}\n\n"
+                    "📸 Envía una *foto* del comprobante para crear tu pedido.\n\n"
+                ) + self._build_payment_info_text()
+                self.send_autoreply(phone, msg)
+                return
+
             fin = self._finalize_budget_accept_sale(phone, session, pay_choice)
             if not fin.get("ok"):
                 self.send_autoreply(
@@ -1581,9 +1694,7 @@ class WhatsappClass:
                 return
 
             sale_id = fin["sale_id"]
-            is_transfer = pay_choice == "2"
             doc_label = "Boleta" if session.get("document_type_id") == 39 else "Factura"
-            pay_label = "Transferencia" if is_transfer else "Efectivo"
             ship_note = ""
             if fin.get("shipping_cost"):
                 ship_note = f"🚚 Envío: {self._format_currency(fin['shipping_cost'])}\n"
@@ -1591,22 +1702,11 @@ class WhatsappClass:
             msg = (
                 f"🎉 ¡Pedido #{sale_id} creado!\n\n"
                 f"📄 Documento: {doc_label}\n"
-                f"💳 Método de pago: {pay_label}\n"
+                f"💳 Método de pago: Efectivo\n"
                 f"{ship_note}"
                 f"💰 Total: {self._format_currency(fin['total'])}\n\n"
                 "⏳ Queda en revisión de pago hasta confirmarlo en el sistema."
             )
-            if is_transfer:
-                msg += (
-                    "\n\n📸 *Envía una foto* del comprobante de transferencia para registrarlo en tu pedido.\n\n"
-                )
-                msg += self._build_payment_info_text()
-                session["step"] = "budget_await_transfer_proof"
-                session["await_transfer_proof_sale_id"] = sale_id
-                session["flow"] = "budget"
-                self.send_autoreply(phone, msg)
-                return
-
             msg += self._farewell_after_purchase_text()
             self.send_autoreply(phone, msg)
             self._chat_sessions.pop(phone, None)
@@ -1821,7 +1921,7 @@ class WhatsappClass:
             )
             return
 
-        if session.get("step") in ("order_await_transfer_proof", "budget_await_transfer_proof"):
+        if session.get("step") in ("order_transfer_upload", "budget_transfer_upload"):
             self.send_autoreply(
                 phone,
                 "📸 Envía una *foto* del comprobante de transferencia.\n\n"
@@ -2161,6 +2261,28 @@ class WhatsappClass:
                 )
                 return
 
+            is_transfer = tp in ("2", "transferencia")
+
+            if is_transfer:
+                subtotal, shipping_cost, tax, total = self._preview_totals_for_session(session)
+                session["step"] = "order_transfer_upload"
+                session["flow"] = "order"
+                ship_line = ""
+                if session.get("shipping_method_id") == 2 and shipping_cost > 0:
+                    ship_line = f"🚚 Envío: {self._format_currency(shipping_cost)}\n"
+                doc_label = "Boleta" if session.get("document_type_id") == 39 else "Factura"
+                msg = (
+                    "💳 Pagarás con *transferencia*.\n\n"
+                    f"📄 Documento: {doc_label}\n"
+                    f"📦 Productos: {self._format_currency(subtotal)}\n"
+                    f"{ship_line}"
+                    f"📊 IVA: {self._format_currency(tax)}\n"
+                    f"💰 Total a transferir: {self._format_currency(total)}\n\n"
+                    "📸 Envía una *foto* del comprobante para crear tu pedido.\n\n"
+                ) + self._build_payment_info_text()
+                self.send_autoreply(phone, msg)
+                return
+
             sale_result = self._create_sale_from_session(phone, session)
             if not sale_result["ok"]:
                 self.send_autoreply(
@@ -2172,11 +2294,9 @@ class WhatsappClass:
                 return
 
             sale_id = sale_result["sale_id"]
-            is_transfer = tp in ("2", "transferencia")
-
             sale_row = self.db.query(SaleModel).filter(SaleModel.id == sale_id).first()
             if sale_row:
-                sale_row.payment_support = "Transferencia" if is_transfer else "Efectivo"
+                sale_row.payment_support = "Efectivo"
                 sale_row.updated_date = datetime.now()
                 self.db.commit()
 
@@ -2184,27 +2304,15 @@ class WhatsappClass:
             if sale_result.get("shipping_cost"):
                 ship_note = f"🚚 Envío: {self._format_currency(sale_result['shipping_cost'])}\n"
             doc_label = "Boleta" if session.get("document_type_id") == 39 else "Factura"
-            pay_label = "Transferencia" if is_transfer else "Efectivo"
 
             msg = (
                 f"🎉 Pedido #{sale_id} creado\n\n"
                 f"📄 Documento: {doc_label}\n"
-                f"💳 Método de pago: {pay_label}\n"
+                f"💳 Método de pago: Efectivo\n"
                 f"{ship_note}"
                 f"💰 Total: {self._format_currency(sale_result['total'])}\n\n"
                 "⏳ El pedido queda en revisión de pago hasta confirmarlo en el sistema."
             )
-            if is_transfer:
-                msg += (
-                    "\n\n📸 *Envía una foto* del comprobante de transferencia para registrarlo en tu pedido.\n\n"
-                )
-                msg += self._build_payment_info_text()
-                session["step"] = "order_await_transfer_proof"
-                session["await_transfer_proof_sale_id"] = sale_id
-                session["flow"] = "order"
-                self.send_autoreply(phone, msg)
-                return
-
             msg += self._farewell_after_purchase_text()
 
             self.send_autoreply(phone, msg)
