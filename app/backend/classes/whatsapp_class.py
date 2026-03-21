@@ -525,11 +525,17 @@ class WhatsappClass:
             )
             discounts = {r.product_id: (r.discount_percentage or 0) for r in rows}
 
+        def _pct_num(v):
+            try:
+                return float(v or 0)
+            except (TypeError, ValueError):
+                return 0.0
+
         result = []
         for p in data:
             pid = p["id"]
             base = int(p.get("public_sale_price") or 0)
-            pct = discounts.get(pid, 0)
+            pct = _pct_num(discounts.get(pid, 0))
             if 0 < pct <= 100:
                 price = int(round(base * (100 - pct) / 100))
             else:
