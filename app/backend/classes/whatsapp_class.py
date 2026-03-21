@@ -135,10 +135,61 @@ class WhatsappClass:
             interactive = message.get("interactive", {})
             interactive_type = interactive.get("type")
             if interactive_type == "button_reply":
-                return (interactive.get("button_reply", {}).get("title") or "").strip()
+                br = interactive.get("button_reply") or {}
+                # Preferimos el id del botón (coincide con 1/2/salir/volver en el flujo)
+                bid = (br.get("id") or "").strip()
+                if bid:
+                    return bid
+                return (br.get("title") or "").strip()
             if interactive_type == "list_reply":
-                return (interactive.get("list_reply", {}).get("title") or "").strip()
+                lr = interactive.get("list_reply") or {}
+                lid = (lr.get("id") or "").strip()
+                if lid:
+                    return lid
+                return (lr.get("title") or "").strip()
         return ""
+
+    # Botones de respuesta rápida (WhatsApp Cloud API: máx. 3 por mensaje, título máx. 20 caracteres)
+    _BTN_MAIN_MENU = [
+        ("1", "Pedido / compra"),
+        ("2", "Presupuesto"),
+        ("salir", "Salir"),
+    ]
+    _BTN_YES_NO_BACK = [
+        ("1", "Sí"),
+        ("2", "No"),
+        ("volver", "Volver"),
+    ]
+    _BTN_SHIPPING = [
+        ("1", "Retiro en tienda"),
+        ("2", "Envío domicilio"),
+        ("volver", "Volver"),
+    ]
+    _BTN_DOC_BACK = [
+        ("1", "Boleta"),
+        ("2", "Factura"),
+        ("volver", "Volver"),
+    ]
+    _BTN_PAY_BACK = [
+        ("1", "Efectivo"),
+        ("2", "Transferencia"),
+        ("volver", "Volver"),
+    ]
+    _BTN_BUDGET_ACCEPT = [
+        ("1", "Sí, acepto"),
+        ("2", "No, rechazo"),
+    ]
+    _BTN_ORDER_REVIEW = [
+        ("1", "Confirmar pedido"),
+        ("2", "Agregar más"),
+        ("volver", "Volver"),
+    ]
+
+    def _reply_button_title(self, title: str, max_len: int = 20) -> str:
+        t = (title or "").strip()
+        if len(t) <= max_len:
+            return t
+        return t[: max_len - 1].rstrip() + "…"
 
     def _parse_number(self, value):
         if value is None:
@@ -380,7 +431,7 @@ class WhatsappClass:
             return None, "Escribe el nombre del producto."
 
         if re.match(r"^\s*\d+\s+\d+\s*$", raw_text):
-            return None, "Envía solo el nombre del producto. Luego te pediremos la cantidad."
+            return None, "📝 Envía solo el nombre del producto\n\n🔢 Luego te pediremos la cantidad"
 
         if re.match(r"^\s*\d+\s*$", raw_text):
             return None, "Indica el nombre del producto, no un número."
@@ -389,7 +440,7 @@ class WhatsappClass:
         if pid:
             return pid, None
         if cands:
-            lines = [f"Hay varias coincidencias para «{raw_text}». Sé más específico con el nombre:"]
+            lines = [f"🔍 Hay varias coincidencias para «{raw_text}»\n\n⚠️ Sé más específico con el nombre:"]
             for p in cands[:10]:
                 lines.append(
                     f"- {self._clean_text_for_whatsapp(p['name'])} ({self._format_currency(p['price'])})"
@@ -402,23 +453,23 @@ class WhatsappClass:
         )
 
     def _build_order_review_text(self, session: dict, subtotal: int, shipping_cost: int, tax: int, total: int):
-        lines = ["Resumen de tu pedido:", ""]
+        lines = ["📋 Resumen de tu pedido:", ""]
         for item in session.get("cart", {}).values():
             line_total = int(item["price"]) * int(item["quantity"])
             lines.append(
-                f"- {self._clean_text_for_whatsapp(item['name'])} x {item['quantity']} → {self._format_currency(line_total)}"
+                f"📦 {self._clean_text_for_whatsapp(item['name'])} x {item['quantity']} → {self._format_currency(line_total)}"
             )
         lines.append("")
-        lines.append(f"Productos: {self._format_currency(subtotal)}")
+        lines.append(f"📦 Productos: {self._format_currency(subtotal)}")
         if session.get("shipping_method_id") == 2:
-            lines.append(f"Envío: {self._format_currency(shipping_cost)}")
+            lines.append(f"🚚 Envío: {self._format_currency(shipping_cost)}")
             addr = session.get("delivery_address") or "-"
-            lines.append(f"Dirección: {self._clean_text_for_whatsapp(str(addr))}")
-        lines.append(f"IVA: {self._format_currency(tax)}")
-        lines.append(f"Total: {self._format_currency(total)}")
+            lines.append(f"📍 Dirección: {self._clean_text_for_whatsapp(str(addr))}")
+        lines.append(f"📊 IVA: {self._format_currency(tax)}")
+        lines.append(f"💰 Total: {self._format_currency(total)}")
         lines.append("")
-        lines.append("1) Confirmar pedido")
-        lines.append("2) Agregar más productos")
+        lines.append("✅ 1) Confirmar pedido")
+        lines.append("➕ 2) Agregar más productos")
         return "\n".join(lines)
 
     def _create_sale_from_session(self, phone: str, session: dict):
@@ -500,13 +551,13 @@ class WhatsappClass:
 
     def _farewell_after_purchase_text(self) -> str:
         return (
-            "\n\n¡Gracias por tu pedido! "
-            "Si más adelante quieres comprar de nuevo, escribe Hola. "
-            "¡Que tengas un excelente día!"
+            "\n\n🙏 ¡Gracias por tu pedido!\n"
+            "👋 Si más adelante quieres comprar de nuevo, escribe Hola.\n"
+            "✨ ¡Que tengas un excelente día!"
         )
 
     def _farewell_after_budget_text(self) -> str:
-        return "\n\nEscribe Hola cuando quieras solicitar otro presupuesto."
+        return "\n\n👋 Escribe Hola cuando quieras solicitar otro presupuesto."
 
     def _looks_like_email(self, s: str) -> bool:
         s = (s or "").strip()
@@ -703,12 +754,12 @@ class WhatsappClass:
                 total = int(row.total)
         self.send_autoreply(
             phone,
-            "Presupuesto enviado a tu correo.\n\n"
-            f"Revisa tu correo ({contact_email or '—'}); va el PDF adjunto.\n"
-            f"N° {bid} · Total: {self._format_currency(total)}\n\n"
-            "¿Aceptas este presupuesto?\n"
-            "1) Sí, acepto\n"
-            "2) No, rechazo",
+            "📧 Presupuesto enviado a tu correo\n\n"
+            f"📄 Revisa tu correo ({contact_email or '—'}); va el PDF adjunto\n"
+            f"📋 N° {bid} · 💰 Total: {self._format_currency(total)}\n\n"
+            "❓ ¿Aceptas este presupuesto?\n"
+            "Toca un botón o escribe 1 / 2.",
+            buttons=list(self._BTN_BUDGET_ACCEPT),
         )
 
     def _budget_go_back(self, phone: str, session: dict) -> bool:
@@ -725,9 +776,10 @@ class WhatsappClass:
             session.pop("pending_product_name", None)
             self.send_autoreply(
                 phone,
-                "Volviste al menú principal.\n"
-                "1) Pedido / compra\n"
-                "2) Solicitar presupuesto",
+                "⬅️ Volviste al menú principal\n\n"
+                "Elige con los botones o escribe 1 / 2.\n"
+                "🚪 Salir termina el chat.",
+                buttons=list(self._BTN_MAIN_MENU),
             )
             return True
 
@@ -737,7 +789,7 @@ class WhatsappClass:
             session.pop("pending_product_name", None)
             self.send_autoreply(
                 phone,
-                "Indica el producto por nombre:\n"
+                "📦 Indica el producto por nombre:\n"
                 + self._build_product_prompt_text(products)
                 + prompt_tail,
             )
@@ -747,7 +799,7 @@ class WhatsappClass:
             session["step"] = "budget_selecting_products"
             self.send_autoreply(
                 phone,
-                "Indica el producto por nombre:\n"
+                "📦 Indica el producto por nombre:\n"
                 + self._build_product_prompt_text(products)
                 + prompt_tail,
             )
@@ -766,7 +818,7 @@ class WhatsappClass:
                 session["step"] = "budget_ask_more"
                 self.send_autoreply(
                     phone,
-                    "¿Agregar otro producto?\n1) Sí\n2) No" + prompt_tail,
+                    "🛒 ¿Agregar otro producto?\n1) Sí\n2) No" + prompt_tail,
                 )
             return True
 
@@ -774,9 +826,9 @@ class WhatsappClass:
             session["step"] = "budget_ask_shipping"
             self.send_autoreply(
                 phone,
-                "¿Envío a domicilio o retiro en tienda?\n"
-                "1) Retiro en tienda (sin envío)\n"
-                "2) Envío a domicilio"
+                "🚚 ¿Envío a domicilio o retiro en tienda?\n"
+                "🏪 1) Retiro en tienda (sin envío)\n"
+                "🚚 2) Envío a domicilio"
                 + prompt_tail,
             )
             return True
@@ -786,7 +838,10 @@ class WhatsappClass:
                 session["step"] = "budget_collect_address"
                 self.send_autoreply(
                     phone,
-                    "Indica la dirección completa (calle, número, comuna, referencias).\n"
+                    "📍 Indica la dirección completa:\n"
+                    "• Calle y número\n"
+                    "• Comuna\n"
+                    "• Referencias\n\n"
                     "Después te pediremos tu correo."
                     + prompt_tail,
                 )
@@ -794,19 +849,19 @@ class WhatsappClass:
                 session["step"] = "budget_ask_shipping"
                 self.send_autoreply(
                     phone,
-                    "¿Envío a domicilio o retiro en tienda?\n"
-                    "1) Retiro en tienda (sin envío)\n"
-                    "2) Envío a domicilio"
-                    + prompt_tail,
+                    "🚚 ¿Envío a domicilio o retiro en tienda?\n"
+                    "Usa los botones o escribe 1 / 2." + prompt_tail,
+                    buttons=list(self._BTN_SHIPPING),
                 )
             return True
 
         if step == "budget_ask_accept_reject":
             self.send_autoreply(
                 phone,
-                "En este paso no se puede volver más atrás (el presupuesto ya está registrado).\n"
-                "Responde 1 para aceptar o 2 para rechazar.\n"
-                "Para empezar de cero escribe Salir o Cancelar.",
+                "⚠️ Aquí no se puede volver atrás (presupuesto ya registrado).\n\n"
+                "Responde con los botones o escribe 1 / 2.\n"
+                "🚪 Salir reinicia el chat.",
+                buttons=list(self._BTN_BUDGET_ACCEPT),
             )
             return True
 
@@ -819,7 +874,8 @@ class WhatsappClass:
             session["step"] = "budget_accept_collect_rut"
             self.send_autoreply(
                 phone,
-                "Para crear tu pedido, envíame tu RUT (ej: 12345678-9)." + prompt_tail,
+                "📝 Para crear tu pedido, envíame tu RUT\n"
+                "Ejemplo: 12345678-9" + prompt_tail,
             )
             return True
 
@@ -836,7 +892,8 @@ class WhatsappClass:
                 session["step"] = "budget_accept_collect_rut"
                 self.send_autoreply(
                     phone,
-                    "Para crear tu pedido, envíame tu RUT (ej: 12345678-9)." + prompt_tail,
+                    "📝 Para crear tu pedido, envíame tu RUT\n"
+                    "Ejemplo: 12345678-9" + prompt_tail,
                 )
             return True
 
@@ -844,7 +901,9 @@ class WhatsappClass:
             session["step"] = "budget_accept_choose_document"
             self.send_autoreply(
                 phone,
-                "Tipo de documento para tu pedido:\n1) Boleta\n2) Factura" + prompt_tail,
+                "📄 Tipo de documento para tu pedido\n"
+                "Usa los botones o escribe 1 / 2." + prompt_tail,
+                buttons=list(self._BTN_DOC_BACK),
             )
             return True
 
@@ -870,9 +929,9 @@ class WhatsappClass:
             session["document_type_id"] = None
             self.send_autoreply(
                 phone,
-                "Volviste al menú principal.\n"
-                "1) Pedido / compra\n"
-                "2) Solicitar presupuesto",
+                "⬅️ Volviste al menú principal\n\n"
+                "Elige con los botones o escribe 1 / 2.",
+                buttons=list(self._BTN_MAIN_MENU),
             )
             return True
 
@@ -880,7 +939,8 @@ class WhatsappClass:
             session["step"] = "ask_rut"
             self.send_autoreply(
                 phone,
-                "Envíame tu RUT (ej: 12345678-9)." + prompt_tail,
+                "📝 Envíame tu RUT\n"
+                "Ejemplo: 12345678-9" + prompt_tail,
             )
             return True
 
@@ -899,7 +959,8 @@ class WhatsappClass:
                 session["rut"] = None
                 self.send_autoreply(
                     phone,
-                    "Envíame tu RUT (ej: 12345678-9)." + prompt_tail,
+                    "📝 Envíame tu RUT\n"
+                    "Ejemplo: 12345678-9" + prompt_tail,
                 )
             return True
 
@@ -908,10 +969,9 @@ class WhatsappClass:
             session["delivery_address"] = None
             self.send_autoreply(
                 phone,
-                "¿Cómo deseas recibir tu pedido?\n"
-                "1) Sin envío (retiro en tienda)\n"
-                "2) Con envío a domicilio"
-                + prompt_tail,
+                "🚚 ¿Cómo deseas recibir tu pedido?\n"
+                "Usa los botones o escribe 1 / 2." + prompt_tail,
+                buttons=list(self._BTN_SHIPPING),
             )
             return True
 
@@ -920,17 +980,19 @@ class WhatsappClass:
                 session["step"] = "collect_address"
                 self.send_autoreply(
                     phone,
-                    "Indica la dirección completa para el envío (calle, número, comuna, referencias)."
+                    "📍 Indica la dirección completa para el envío:\n"
+                    "• Calle y número\n"
+                    "• Comuna\n"
+                    "• Referencias"
                     + prompt_tail,
                 )
             else:
                 session["step"] = "ask_shipping"
                 self.send_autoreply(
                     phone,
-                    "¿Cómo deseas recibir tu pedido?\n"
-                    "1) Sin envío (retiro en tienda)\n"
-                    "2) Con envío a domicilio"
-                    + prompt_tail,
+                    "🚚 ¿Cómo deseas recibir tu pedido?\n"
+                    "Usa los botones o escribe 1 / 2." + prompt_tail,
+                    buttons=list(self._BTN_SHIPPING),
                 )
             return True
 
@@ -940,7 +1002,7 @@ class WhatsappClass:
             session.pop("pending_product_name", None)
             self.send_autoreply(
                 phone,
-                "Indica el producto por nombre:\n" + self._build_product_prompt_text(products) + prompt_tail,
+                "📦 Indica el producto por nombre:\n" + self._build_product_prompt_text(products) + prompt_tail,
             )
             return True
 
@@ -948,7 +1010,7 @@ class WhatsappClass:
             session["step"] = "selecting_products"
             self.send_autoreply(
                 phone,
-                "Indica el producto por nombre:\n" + self._build_product_prompt_text(products) + prompt_tail,
+                "📦 Indica el producto por nombre:\n" + self._build_product_prompt_text(products) + prompt_tail,
             )
             return True
 
@@ -956,7 +1018,9 @@ class WhatsappClass:
             session["step"] = "ask_more"
             self.send_autoreply(
                 phone,
-                "¿Quieres agregar otro producto?\n1) Sí\n2) No" + prompt_tail,
+                "🛒 ¿Quieres agregar otro producto?\n"
+                "Usa los botones o escribe 1 / 2." + prompt_tail,
+                buttons=list(self._BTN_YES_NO_BACK),
             )
             return True
 
@@ -966,12 +1030,18 @@ class WhatsappClass:
             self.send_autoreply(
                 phone,
                 self._build_order_review_text(session, subtotal, shipping_cost, tax, total) + prompt_tail,
+                buttons=list(self._BTN_ORDER_REVIEW),
             )
             return True
 
         if step == "choose_payment":
             session["step"] = "choose_document"
-            self.send_autoreply(phone, "Tipo de documento:\n1) Boleta\n2) Factura" + prompt_tail)
+            self.send_autoreply(
+                phone,
+                "📄 Tipo de documento\n"
+                "Usa los botones o escribe 1 / 2." + prompt_tail,
+                buttons=list(self._BTN_DOC_BACK),
+            )
             return True
 
         return False
@@ -997,8 +1067,9 @@ class WhatsappClass:
             session["step"] = "budget_ask_quantity"
             self.send_autoreply(
                 phone,
-                f"Producto: {self._clean_text_for_whatsapp(p['name'])} ({self._format_currency(p['price'])} c/u).\n"
-                "¿Cuántas unidades? (solo el número)",
+                f"📦 Producto: {self._clean_text_for_whatsapp(p['name'])}\n"
+                f"💰 Precio: {self._format_currency(p['price'])} c/u\n\n"
+                "🔢 ¿Cuántas unidades? (envía solo el número)",
             )
             return
 
@@ -1033,8 +1104,11 @@ class WhatsappClass:
             session["step"] = "budget_ask_more"
             self.send_autoreply(
                 phone,
-                f"Agregado: {self._clean_text_for_whatsapp(p['name'])} x {quantity}.\n\n"
-                "¿Agregar otro producto?\n1) Sí\n2) No",
+                f"✅ Agregado: {self._clean_text_for_whatsapp(p['name'])} x {quantity}\n\n"
+                "🛒 ¿Agregar otro producto?\n"
+                "Toca un botón o escribe 1 / 2.\n"
+                "💡 Volver / Salir también funcionan.",
+                buttons=list(self._BTN_YES_NO_BACK),
             )
             return
 
@@ -1058,16 +1132,21 @@ class WhatsappClass:
                 session["step"] = "budget_ask_shipping"
                 self.send_autoreply(
                     phone,
-                    "Resumen (sin envío aún):\n"
-                    f"Productos: {self._format_currency(subtotal)}\n"
-                    f"IVA: {self._format_currency(tax)}\n"
-                    f"Total estimado: {self._format_currency(total)}\n\n"
-                    "¿Necesitas envío a domicilio o retiro en tienda?\n"
-                    "1) Retiro en tienda (sin envío)\n"
-                    "2) Envío a domicilio",
+                    "📋 Resumen (sin envío aún):\n"
+                    f"📦 Productos: {self._format_currency(subtotal)}\n"
+                    f"📊 IVA: {self._format_currency(tax)}\n"
+                    f"💰 Total estimado: {self._format_currency(total)}\n\n"
+                    "🚚 ¿Envío a domicilio o retiro en tienda?\n"
+                    "Toca un botón o escribe 1 / 2.\n"
+                    "💡 Volver / Salir también funcionan.",
+                    buttons=list(self._BTN_SHIPPING),
                 )
                 return
-            self.send_autoreply(phone, "Marca 1 para agregar otro producto o 2 para continuar con el presupuesto.")
+            self.send_autoreply(
+                phone,
+                "⚠️ Marca 1 para agregar otro producto o 2 para continuar con el presupuesto",
+                buttons=list(self._BTN_YES_NO_BACK),
+            )
             return
 
         if step == "budget_ask_shipping":
@@ -1078,8 +1157,9 @@ class WhatsappClass:
                 session["step"] = "budget_collect_email"
                 self.send_autoreply(
                     phone,
-                    "Perfecto, sin envío (retiro en tienda).\n"
-                    "Indica tu correo electrónico para el presupuesto (ej: nombre@correo.cl).",
+                    "✅ Perfecto, sin envío (retiro en tienda)\n\n"
+                    "📧 Indica tu correo electrónico para el presupuesto\n"
+                    "Ejemplo: nombre@correo.cl",
                 )
                 return
             if choice in ["2", "2)", "con envio", "con envío", "envio", "envío", "domicilio", "delivery"]:
@@ -1087,15 +1167,20 @@ class WhatsappClass:
                 session["step"] = "budget_collect_address"
                 self.send_autoreply(
                     phone,
-                    "Con envío a domicilio. Indica la dirección completa (calle, número, comuna, referencias).\n"
+                    "🚚 Con envío a domicilio\n\n"
+                    "📍 Indica la dirección completa:\n"
+                    "• Calle y número\n"
+                    "• Comuna\n"
+                    "• Referencias\n\n"
                     "Después te pediremos tu correo.",
                 )
                 return
             self.send_autoreply(
                 phone,
-                "¿Envío a domicilio o retiro en tienda?\n"
-                "1) Retiro en tienda (sin envío)\n"
-                "2) Envío a domicilio",
+                "🚚 ¿Envío a domicilio o retiro en tienda?\n"
+                "Toca un botón o escribe 1 / 2.\n"
+                "💡 Volver / Salir también funcionan.",
+                buttons=list(self._BTN_SHIPPING),
             )
             return
 
@@ -1107,8 +1192,9 @@ class WhatsappClass:
             session["step"] = "budget_collect_email"
             self.send_autoreply(
                 phone,
-                "Dirección registrada.\n"
-                "Indica tu correo electrónico para el presupuesto (ej: nombre@correo.cl).",
+                "✅ Dirección registrada\n\n"
+                "📧 Indica tu correo electrónico para el presupuesto\n"
+                "Ejemplo: nombre@correo.cl",
             )
             return
 
@@ -1117,7 +1203,8 @@ class WhatsappClass:
             if not self._looks_like_email(addr):
                 self.send_autoreply(
                     phone,
-                    "No reconozco un correo válido. Envíalo así: nombre@dominio.com",
+                    "⚠️ No reconozco un correo válido\n\n"
+                    "📧 Envíalo así: nombre@dominio.com",
                 )
                 return
             session["budget_contact_email"] = addr
@@ -1126,7 +1213,8 @@ class WhatsappClass:
             if not res.get("ok"):
                 self.send_autoreply(
                     phone,
-                    "No pude registrar el presupuesto. Intenta más tarde o escribe Hola.",
+                    "❌ No pude registrar el presupuesto\n\n"
+                    "⏳ Intenta más tarde o escribe Hola",
                 )
                 self._chat_sessions.pop(phone, None)
                 return
@@ -1150,33 +1238,37 @@ class WhatsappClass:
                 session["step"] = "budget_ask_accept_reject"
                 self.send_autoreply(
                     phone,
-                    "Presupuesto enviado a tu correo.\n\n"
-                    f"Revisa tu correo ({contact_email}); va el PDF adjunto.\n"
-                    f"N° {bid} · Total: {self._format_currency(total)}\n\n"
-                    "¿Aceptas este presupuesto?\n"
-                    "1) Sí, acepto\n"
-                    "2) No, rechazo",
+                    "📧 Presupuesto enviado a tu correo\n\n"
+                    f"📄 Revisa tu correo ({contact_email}); va el PDF adjunto\n"
+                    f"📋 N° {bid} · 💰 Total: {self._format_currency(total)}\n\n"
+                    "❓ ¿Aceptas este presupuesto?\n"
+                    "Toca un botón o escribe 1 / 2.",
+                    buttons=list(self._BTN_BUDGET_ACCEPT),
                 )
                 return
             elif send_res == "no_pdf":
                 self.send_autoreply(
                     phone,
-                    f"Tu presupuesto quedó registrado (N° {bid}, total {self._format_currency(total)}).\n"
-                    "No se pudo generar el PDF; te contactaremos por este chat."
+                    f"✅ Tu presupuesto quedó registrado\n"
+                    f"📋 N° {bid} · 💰 Total: {self._format_currency(total)}\n\n"
+                    "⚠️ No se pudo generar el PDF; te contactaremos por este chat."
                     + self._farewell_after_budget_text(),
                 )
             elif send_res == "pdf_error":
                 self.send_autoreply(
                     phone,
-                    f"Tu presupuesto quedó registrado (N° {bid}, total {self._format_currency(total)}).\n"
-                    "Hubo un error al generar el PDF; te escribimos por WhatsApp."
+                    f"✅ Tu presupuesto quedó registrado\n"
+                    f"📋 N° {bid} · 💰 Total: {self._format_currency(total)}\n\n"
+                    "⚠️ Hubo un error al generar el PDF; te escribimos por WhatsApp."
                     + self._farewell_after_budget_text(),
                 )
             else:
                 self.send_autoreply(
                     phone,
-                    f"Tu presupuesto quedó registrado (N° {bid}, total {self._format_currency(total)}).\n"
-                    f"No se pudo enviar el correo con el PDF ({send_res}). Te contactamos por aquí."
+                    f"✅ Tu presupuesto quedó registrado\n"
+                    f"📋 N° {bid} · 💰 Total: {self._format_currency(total)}\n\n"
+                    f"⚠️ No se pudo enviar el correo con el PDF ({send_res})\n"
+                    "Te contactamos por aquí."
                     + self._farewell_after_budget_text(),
                 )
             self._chat_sessions.pop(phone, None)
@@ -1184,7 +1276,12 @@ class WhatsappClass:
 
         if step == "budget_accept_choose_payment":
             if text.strip() not in ["1", "2"]:
-                self.send_autoreply(phone, "Selecciona 1 (Efectivo) o 2 (Transferencia).")
+                self.send_autoreply(
+                    phone,
+                    "⚠️ Elige método de pago\n"
+                    "Usa los botones o escribe 1 / 2.",
+                    buttons=list(self._BTN_PAY_BACK),
+                )
                 return
             fin = self._finalize_budget_accept_sale(phone, session, text.strip())
             if not fin.get("ok"):
@@ -1201,15 +1298,15 @@ class WhatsappClass:
             pay_label = "Transferencia" if is_transfer else "Efectivo"
             ship_note = ""
             if fin.get("shipping_cost"):
-                ship_note = f"Envío: {self._format_currency(fin['shipping_cost'])}\n"
+                ship_note = f"🚚 Envío: {self._format_currency(fin['shipping_cost'])}\n"
 
             msg = (
-                f"Pedido #{sale_id} creado.\n"
-                f"Documento: {doc_label}\n"
-                f"Método de pago: {pay_label}\n"
+                f"🎉 Pedido #{sale_id} creado\n\n"
+                f"📄 Documento: {doc_label}\n"
+                f"💳 Método de pago: {pay_label}\n"
                 f"{ship_note}"
-                f"Total: {self._format_currency(fin['total'])}\n\n"
-                "El pedido queda en revisión de pago hasta confirmarlo en el sistema."
+                f"💰 Total: {self._format_currency(fin['total'])}\n\n"
+                "⏳ El pedido queda en revisión de pago hasta confirmarlo en el sistema."
             )
             if is_transfer:
                 msg += "\n\n" + self._build_payment_info_text()
@@ -1225,14 +1322,23 @@ class WhatsappClass:
             elif choice == "2":
                 session["document_type_id"] = 33
             else:
-                self.send_autoreply(phone, "Selecciona 1 (Boleta) o 2 (Factura).")
+                self.send_autoreply(
+                    phone,
+                    "⚠️ Elige documento\n"
+                    "Usa los botones o escribe 1 / 2.",
+                    buttons=list(self._BTN_DOC_BACK),
+                )
                 return
 
             bid = session.get("pending_budget_id")
             b = self.db.query(BudgetModel).filter(BudgetModel.id == bid).first() if bid else None
             if not b:
                 self._chat_sessions.pop(phone, None)
-                self.send_autoreply(phone, "No encontré el presupuesto. Escribe Hola para comenzar de nuevo.")
+                self.send_autoreply(
+                    phone,
+                    "⚠️ No encontré el presupuesto\n\n"
+                    "👋 Escribe Hola para comenzar de nuevo"
+                )
                 return
 
             subtotal = int(b.subtotal or 0)
@@ -1243,21 +1349,23 @@ class WhatsappClass:
             doc_label = "Boleta" if session["document_type_id"] == 39 else "Factura"
             ship_line = ""
             if ship > 0:
-                ship_line = f"Envío: {self._format_currency(ship)}\n"
+                ship_line = f"🚚 Envío: {self._format_currency(ship)}\n"
             self.send_autoreply(
                 phone,
-                f"Documento: {doc_label}\n"
-                f"Productos: {self._format_currency(subtotal)}\n"
+                f"📄 Documento: {doc_label}\n"
+                f"📦 Productos: {self._format_currency(subtotal)}\n"
                 f"{ship_line}"
-                f"IVA: {self._format_currency(tax)}\n"
-                f"Total: {self._format_currency(total)}\n\n"
-                "Método de pago:\n1) Efectivo\n2) Transferencia",
+                f"📊 IVA: {self._format_currency(tax)}\n"
+                f"💰 Total: {self._format_currency(total)}\n\n"
+                "💳 Método de pago\n"
+                "Usa los botones o escribe 1 / 2.",
+                buttons=list(self._BTN_PAY_BACK),
             )
             return
 
         if step == "budget_accept_collect_last_name":
             if len(raw_text) < 2:
-                self.send_autoreply(phone, "Indica tus apellidos.")
+                self.send_autoreply(phone, "📝 Indica tus apellidos")
                 return
             session["last_name"] = raw_text.strip()
             self._create_new_customer_record(session, phone)
@@ -1265,23 +1373,25 @@ class WhatsappClass:
             session["step"] = "budget_accept_choose_document"
             self.send_autoreply(
                 phone,
-                "Tipo de documento para tu pedido:\n1) Boleta\n2) Factura",
+                "📄 Tipo de documento para tu pedido\n"
+                "Usa los botones o escribe 1 / 2.",
+                buttons=list(self._BTN_DOC_BACK),
             )
             return
 
         if step == "budget_accept_collect_first_name":
             if len(raw_text) < 2:
-                self.send_autoreply(phone, "Indica tu nombre.")
+                self.send_autoreply(phone, "📝 Indica tu nombre")
                 return
             session["first_name"] = raw_text.strip()
             session["step"] = "budget_accept_collect_last_name"
-            self.send_autoreply(phone, "Ahora tus apellidos.")
+            self.send_autoreply(phone, "📝 Ahora tus apellidos")
             return
 
         if step == "budget_accept_collect_rut":
             rut_norm = self._normalize_rut_chile(raw_text)
             if not rut_norm:
-                self.send_autoreply(phone, "No reconozco el RUT. Envíalo así: 12345678-9.")
+                self.send_autoreply(phone, "⚠️ No reconozco el RUT\n\n📝 Envíalo así: 12345678-9")
                 return
             session["rut"] = rut_norm
             customer = self._find_customer_by_rut(rut_norm)
@@ -1299,8 +1409,10 @@ class WhatsappClass:
                 session["step"] = "budget_accept_choose_document"
                 self.send_autoreply(
                     phone,
-                    "Cliente encontrado.\n"
-                    "Tipo de documento para tu pedido:\n1) Boleta\n2) Factura",
+                    "✅ Cliente encontrado\n\n"
+                    "📄 Tipo de documento para tu pedido\n"
+                    "Usa los botones o escribe 1 / 2.",
+                    buttons=list(self._BTN_DOC_BACK),
                 )
                 return
             session["is_new"] = True
@@ -1308,7 +1420,8 @@ class WhatsappClass:
             session["step"] = "budget_accept_collect_first_name"
             self.send_autoreply(
                 phone,
-                f"No tenemos el RUT {rut_norm} registrado.\nIndica tu nombre (solo nombre).",
+                f"📝 No tenemos el RUT {rut_norm} registrado\n\n"
+                "Indica tu nombre (solo nombre).",
             )
             return
 
@@ -1317,14 +1430,19 @@ class WhatsappClass:
             bid = session.get("pending_budget_id")
             if not bid:
                 self._chat_sessions.pop(phone, None)
-                self.send_autoreply(phone, "Sesión expirada. Escribe Hola para comenzar de nuevo.")
+                self.send_autoreply(
+                    phone,
+                    "⏰ Sesión expirada\n\n"
+                    "👋 Escribe Hola para comenzar de nuevo"
+                )
                 return
 
             if choice == "1":
                 session["step"] = "budget_accept_collect_rut"
                 self.send_autoreply(
                     phone,
-                    "Para crear tu pedido con este presupuesto, envíame tu RUT (ej: 12345678-9).\n"
+                    "📝 Para crear tu pedido, envíame tu RUT\n"
+                    "Ejemplo: 12345678-9\n\n"
                     "Si no estás registrado, te pediremos nombre y apellidos.",
                 )
                 return
@@ -1335,17 +1453,22 @@ class WhatsappClass:
                     self.db.commit()
                 self.send_autoreply(
                     phone,
-                    "Hemos recibido el rechazo del presupuesto.\n"
-                    "Gracias por tu respuesta."
+                    "❌ Hemos recibido el rechazo del presupuesto\n\n"
+                    "🙏 Gracias por tu respuesta."
                     + self._farewell_after_budget_text(),
                 )
                 self._chat_sessions.pop(phone, None)
                 return
             else:
-                self.send_autoreply(phone, "Marca 1 para aceptar el presupuesto o 2 para rechazarlo.")
+                self.send_autoreply(
+                    phone,
+                    "⚠️ Elige una opción\n"
+                    "Usa los botones o escribe 1 / 2.",
+                    buttons=list(self._BTN_BUDGET_ACCEPT),
+                )
                 return
 
-        self.send_autoreply(phone, "Escribe Hola para comenzar de nuevo.")
+        self.send_autoreply(phone, "👋 Escribe Hola para comenzar de nuevo.")
         return
 
     def _handle_text_flow(self, message: dict):
@@ -1365,7 +1488,8 @@ class WhatsappClass:
             self._chat_sessions.pop(phone, None)
             self.send_autoreply(
                 phone,
-                "Listo, conversación finalizada. Escribe Hola cuando quieras volver.\n¡Hasta pronto!",
+                "✅ Conversación finalizada.\n\n"
+                "👋 ¡Hasta pronto! Escribe Hola cuando quieras volver.",
             )
             return
 
@@ -1373,10 +1497,10 @@ class WhatsappClass:
             self._chat_sessions[phone] = self._new_session_dict()
             self.send_autoreply(
                 phone,
-                "¡Hola! ¿En qué te ayudamos?\n"
-                "1) Pedido / compra\n"
-                "2) Solicitar presupuesto\n\n"
-                "En cualquier momento: Salir (o Cancelar) para terminar · Volver para el paso anterior.",
+                "👋 ¡Hola! ¿En qué te ayudamos?\n\n"
+                "Toca un botón o escribe 1 / 2.\n"
+                "💡 Volver y Salir también funcionan escribiéndolos.",
+                buttons=list(self._BTN_MAIN_MENU),
             )
             return
 
@@ -1384,10 +1508,9 @@ class WhatsappClass:
             self._chat_sessions[phone] = self._new_session_dict()
             self.send_autoreply(
                 phone,
-                "Elige una opción:\n"
-                "1) Pedido / compra\n"
-                "2) Solicitar presupuesto\n\n"
-                "Salir / Cancelar = terminar chat · Volver = paso anterior.",
+                "👋 Elige una opción\n\n"
+                "Toca un botón o escribe 1 / 2.",
+                buttons=list(self._BTN_MAIN_MENU),
             )
             return
 
@@ -1395,8 +1518,10 @@ class WhatsappClass:
             if self._is_back_command(text):
                 self.send_autoreply(
                     phone,
-                    "Ya estás en el menú principal. Elige 1 (pedido) o 2 (presupuesto), "
-                    "o escribe Salir para cerrar el chat.",
+                    "ℹ️ Ya estás en el menú principal\n\n"
+                    "Usa los botones o escribe 1 / 2.\n"
+                    "🚪 Salir cierra el chat.",
+                    buttons=list(self._BTN_MAIN_MENU),
                 )
                 return
             choice = text.strip()
@@ -1414,7 +1539,8 @@ class WhatsappClass:
                 session["document_type_id"] = None
                 self.send_autoreply(
                     phone,
-                    "Pedido / compra. Envíame tu RUT (ej: 12345678-9).\n"
+                    "📦 Pedido / compra\n\n"
+                    "📝 Envíame tu RUT (ej: 12345678-9).\n"
                     "Si no estás registrado, te pediremos tus datos después.",
                 )
                 return
@@ -1433,10 +1559,15 @@ class WhatsappClass:
                 session["budget_contact_email"] = None
                 self.send_autoreply(
                     phone,
-                    "Solicitud de presupuesto.\n" + self._build_product_prompt_text(self._get_public_products(None)),
+                    "💰 Solicitud de presupuesto\n\n" + self._build_product_prompt_text(self._get_public_products(None)),
                 )
                 return
-            self.send_autoreply(phone, "Marca 1 para pedido o 2 para presupuesto.")
+            self.send_autoreply(
+                phone,
+                "⚠️ Elige una opción\n"
+                "Usa los botones o escribe 1 / 2.",
+                buttons=list(self._BTN_MAIN_MENU),
+            )
             return
 
         if session.get("flow") == "budget":
@@ -1455,7 +1586,8 @@ class WhatsappClass:
             if not rut_norm:
                 self.send_autoreply(
                     phone,
-                    "No reconozco el RUT. Envíalo así: 12345678-9 (puedes sin puntos)."
+                    "⚠️ No reconozco el RUT\n\n"
+                    "📝 Envíalo así: 12345678-9 (puedes sin puntos)"
                 )
                 return
             session["rut"] = rut_norm
@@ -1467,10 +1599,10 @@ class WhatsappClass:
                 session["step"] = "ask_shipping"
                 self.send_autoreply(
                     phone,
-                    f"¡Encontramos tu registro, RUT {rut_norm}!\n"
-                    "¿Cómo deseas recibir tu pedido?\n"
-                    "1) Sin envío (retiro en tienda)\n"
-                    "2) Con envío a domicilio"
+                    f"✅ ¡Encontramos tu registro, RUT {rut_norm}!\n\n"
+                    "🚚 ¿Cómo deseas recibir tu pedido?\n"
+                    "Usa los botones o escribe 1 / 2.",
+                    buttons=list(self._BTN_SHIPPING),
                 )
                 return
 
@@ -1479,8 +1611,8 @@ class WhatsappClass:
             session["step"] = "collect_first_name"
             self.send_autoreply(
                 phone,
-                f"No encontramos el RUT {rut_norm} en nuestro sistema.\n"
-                "Indica tu nombre (solo nombre)."
+                f"📝 No encontramos el RUT {rut_norm} en nuestro sistema\n\n"
+                "Indica tu nombre (solo nombre).",
             )
             return
 
@@ -1490,20 +1622,20 @@ class WhatsappClass:
                 return
             session["first_name"] = raw_text.strip()
             session["step"] = "collect_last_name"
-            self.send_autoreply(phone, "Ahora tus apellidos.")
+            self.send_autoreply(phone, "📝 Ahora tus apellidos")
             return
 
         if session["step"] == "collect_last_name":
             if len(raw_text) < 2:
-                self.send_autoreply(phone, "Por favor indica tus apellidos.")
+                self.send_autoreply(phone, "📝 Por favor indica tus apellidos")
                 return
             session["last_name"] = raw_text.strip()
             session["step"] = "ask_shipping"
             self.send_autoreply(
                 phone,
-                "¿Cómo deseas recibir tu pedido?\n"
-                "1) Sin envío (retiro en tienda)\n"
-                "2) Con envío a domicilio"
+                "🚚 ¿Cómo deseas recibir tu pedido?\n"
+                "Usa los botones o escribe 1 / 2.",
+                buttons=list(self._BTN_SHIPPING),
             )
             return
 
@@ -1517,8 +1649,8 @@ class WhatsappClass:
                 session["step"] = "selecting_products"
                 self.send_autoreply(
                     phone,
-                    "Perfecto, sin envío (retiro).\n"
-                    "Ahora dime qué productos quieres:\n" + self._build_product_prompt_text(products)
+                    "✅ Perfecto, sin envío (retiro)\n\n"
+                    "📦 Ahora dime qué productos quieres:\n" + self._build_product_prompt_text(products)
                 )
                 return
             if choice in ["2", "2)", "con envio", "con envío", "envio", "envío", "domicilio", "delivery"]:
@@ -1526,15 +1658,27 @@ class WhatsappClass:
                 session["step"] = "collect_address"
                 self.send_autoreply(
                     phone,
-                    "Indica la dirección completa para el envío (calle, número, comuna, referencias)."
+                    "📍 Indica la dirección completa para el envío:\n"
+                    "• Calle y número\n"
+                    "• Comuna\n"
+                    "• Referencias"
                 )
                 return
-            self.send_autoreply(phone, "Marca 1 para sin envío o 2 para con envío.")
+            self.send_autoreply(
+                phone,
+                "⚠️ Elige tipo de entrega\n"
+                "Usa los botones o escribe 1 / 2.",
+                buttons=list(self._BTN_SHIPPING),
+            )
             return
 
         if session["step"] == "collect_address":
             if len(raw_text) < 8:
-                self.send_autoreply(phone, "La dirección parece muy corta. Envíala completa por favor.")
+                self.send_autoreply(
+                    phone,
+                    "⚠️ La dirección parece muy corta\n\n"
+                    "📍 Envíala completa por favor"
+                )
                 return
             session["delivery_address"] = raw_text.strip()
             if session.get("is_new") and not session.get("customer_id"):
@@ -1548,7 +1692,8 @@ class WhatsappClass:
             session["step"] = "selecting_products"
             self.send_autoreply(
                 phone,
-                "Dirección registrada. Ahora tus productos:\n" + self._build_product_prompt_text(products)
+                "✅ Dirección registrada\n\n"
+                "📦 Ahora tus productos:\n" + self._build_product_prompt_text(products)
             )
             return
 
@@ -1564,8 +1709,9 @@ class WhatsappClass:
             session["step"] = "ask_quantity"
             self.send_autoreply(
                 phone,
-                f"Producto: {self._clean_text_for_whatsapp(p['name'])} ({self._format_currency(p['price'])} c/u).\n"
-                "¿Cuántas unidades quieres? (envía solo el número)"
+                f"📦 Producto: {self._clean_text_for_whatsapp(p['name'])}\n"
+                f"💰 Precio: {self._format_currency(p['price'])} c/u\n\n"
+                "🔢 ¿Cuántas unidades quieres? (envía solo el número)",
             )
             return
 
@@ -1584,7 +1730,11 @@ class WhatsappClass:
                 session["step"] = "selecting_products"
                 session.pop("pending_product_id", None)
                 session.pop("pending_product_name", None)
-                self.send_autoreply(phone, "Hubo un problema con el producto. Elige de nuevo.\n" + self._build_product_prompt_text(products))
+                self.send_autoreply(
+                    phone,
+                    "⚠️ Hubo un problema con el producto\n\n"
+                    "🔄 Elige de nuevo:\n" + self._build_product_prompt_text(products)
+                )
                 return
 
             p = products_map[product_id]
@@ -1601,8 +1751,11 @@ class WhatsappClass:
             session["step"] = "ask_more"
             self.send_autoreply(
                 phone,
-                f"Listo: {self._clean_text_for_whatsapp(p['name'])} x {quantity}.\n\n"
-                "¿Quieres agregar otro producto?\n1) Sí\n2) No"
+                f"✅ Listo: {self._clean_text_for_whatsapp(p['name'])} x {quantity}\n\n"
+                "🛒 ¿Quieres agregar otro producto?\n"
+                "Usa los botones o escribe 1 / 2.\n"
+                "💡 Volver / Salir también funcionan.",
+                buttons=list(self._BTN_YES_NO_BACK),
             )
             return
 
@@ -1619,14 +1772,24 @@ class WhatsappClass:
                     session["step"] = "selecting_products"
                     self.send_autoreply(
                         phone,
-                        "Tu carrito está vacío. Agrega al menos un producto.\n\n" + self._build_product_prompt_text(products)
+                        "⚠️ Tu carrito está vacío\n\n"
+                        "📦 Agrega al menos un producto:\n" + self._build_product_prompt_text(products)
                     )
                     return
                 subtotal, shipping_cost, tax, total = self._preview_totals_for_session(session)
                 session["step"] = "review_order"
-                self.send_autoreply(phone, self._build_order_review_text(session, subtotal, shipping_cost, tax, total))
+                self.send_autoreply(
+                    phone,
+                    self._build_order_review_text(session, subtotal, shipping_cost, tax, total),
+                    buttons=list(self._BTN_ORDER_REVIEW),
+                )
                 return
-            self.send_autoreply(phone, "Respuesta inválida. Marca 1 para agregar otro producto o 2 para ver el resumen.")
+            self.send_autoreply(
+                phone,
+                "⚠️ Respuesta inválida\n\n"
+                "Usa los botones o escribe 1 / 2.",
+                buttons=list(self._BTN_YES_NO_BACK),
+            )
             return
 
         if session["step"] == "review_order":
@@ -1634,17 +1797,24 @@ class WhatsappClass:
                 session["step"] = "choose_document"
                 self.send_autoreply(
                     phone,
-                    "Tipo de documento:\n1) Boleta\n2) Factura"
+                    "📄 Tipo de documento\n"
+                    "Usa los botones o escribe 1 / 2.",
+                    buttons=list(self._BTN_DOC_BACK),
                 )
                 return
             if text.strip() == "2":
                 session["step"] = "selecting_products"
                 self.send_autoreply(
                     phone,
-                    "Agrega otro producto por nombre:\n" + self._build_product_prompt_text(products)
+                    "📦 Agrega otro producto por nombre:\n" + self._build_product_prompt_text(products)
                 )
                 return
-            self.send_autoreply(phone, "Marca 1 para confirmar el pedido o 2 para agregar más productos.")
+            self.send_autoreply(
+                phone,
+                "⚠️ Elige una opción\n"
+                "Usa los botones o escribe 1 / 2.",
+                buttons=list(self._BTN_ORDER_REVIEW),
+            )
             return
 
         if session["step"] == "choose_document":
@@ -1654,34 +1824,50 @@ class WhatsappClass:
             elif choice == "2":
                 session["document_type_id"] = 33
             else:
-                self.send_autoreply(phone, "Selecciona 1 (Boleta) o 2 (Factura).")
+                self.send_autoreply(
+                    phone,
+                    "⚠️ Elige documento\n"
+                    "Usa los botones o escribe 1 / 2.",
+                    buttons=list(self._BTN_DOC_BACK),
+                )
                 return
 
             subtotal, shipping_cost, tax, total = self._preview_totals_for_session(session)
             session["step"] = "choose_payment"
             ship_line = ""
             if session.get("shipping_method_id") == 2 and shipping_cost > 0:
-                ship_line = f"Envío: {self._format_currency(shipping_cost)}\n"
+                ship_line = f"🚚 Envío: {self._format_currency(shipping_cost)}\n"
             doc_label = "Boleta" if session["document_type_id"] == 39 else "Factura"
             self.send_autoreply(
                 phone,
-                f"Documento: {doc_label}\n"
-                f"Productos: {self._format_currency(subtotal)}\n"
+                f"📄 Documento: {doc_label}\n"
+                f"📦 Productos: {self._format_currency(subtotal)}\n"
                 f"{ship_line}"
-                f"IVA: {self._format_currency(tax)}\n"
-                f"Total: {self._format_currency(total)}\n\n"
-                "Método de pago:\n1) Efectivo\n2) Transferencia"
+                f"📊 IVA: {self._format_currency(tax)}\n"
+                f"💰 Total: {self._format_currency(total)}\n\n"
+                "💳 Método de pago\n"
+                "Usa los botones o escribe 1 / 2.",
+                buttons=list(self._BTN_PAY_BACK),
             )
             return
 
         if session["step"] == "choose_payment":
             if text.strip() not in ["1", "2"]:
-                self.send_autoreply(phone, "Selecciona 1 (Efectivo) o 2 (Transferencia).")
+                self.send_autoreply(
+                    phone,
+                    "⚠️ Elige método de pago\n"
+                    "Usa los botones o escribe 1 / 2.",
+                    buttons=list(self._BTN_PAY_BACK),
+                )
                 return
 
             sale_result = self._create_sale_from_session(phone, session)
             if not sale_result["ok"]:
-                self.send_autoreply(phone, "No pude crear el pedido. Intenta nuevamente más tarde.")
+                self.send_autoreply(
+                    phone,
+                    "❌ No pude crear el pedido\n\n"
+                    "⏳ Intenta nuevamente más tarde"
+                )
                 self._chat_sessions.pop(phone, None)
                 return
 
@@ -1690,17 +1876,17 @@ class WhatsappClass:
 
             ship_note = ""
             if sale_result.get("shipping_cost"):
-                ship_note = f"Envío: {self._format_currency(sale_result['shipping_cost'])}\n"
+                ship_note = f"🚚 Envío: {self._format_currency(sale_result['shipping_cost'])}\n"
             doc_label = "Boleta" if session.get("document_type_id") == 39 else "Factura"
             pay_label = "Transferencia" if is_transfer else "Efectivo"
 
             msg = (
-                f"Pedido #{sale_id} creado.\n"
-                f"Documento: {doc_label}\n"
-                f"Método de pago indicado: {pay_label}\n"
+                f"🎉 Pedido #{sale_id} creado\n\n"
+                f"📄 Documento: {doc_label}\n"
+                f"💳 Método de pago: {pay_label}\n"
                 f"{ship_note}"
-                f"Total: {self._format_currency(sale_result['total'])}\n\n"
-                "El pedido queda en estado de revisión de pago (efectivo o transferencia) hasta confirmarlo en el sistema."
+                f"💰 Total: {self._format_currency(sale_result['total'])}\n\n"
+                "⏳ El pedido queda en revisión de pago hasta confirmarlo en el sistema."
             )
             if is_transfer:
                 msg += "\n\n" + self._build_payment_info_text()
@@ -2102,8 +2288,8 @@ class WhatsappClass:
                 print(f"❌ Error al aceptar presupuesto {budget_id}: {accept_result.get('message')}")
                 self.send_autoreply(
                     phone,
-                    f"❌ Ocurrió un error al procesar la aceptación del presupuesto: {accept_result.get('message')}"
-            )
+                    f"❌ Ocurrió un error al procesar la aceptación del presupuesto:\n{accept_result.get('message')}"
+                )
             else:
                 sale_id = accept_result.get('sale_id') if isinstance(accept_result, dict) else 'N/A'
                 print(f"[WHATSAPP] ✅ Presupuesto {budget_id} aceptado exitosamente. Sale ID: {sale_id}")
@@ -2292,32 +2478,64 @@ class WhatsappClass:
             traceback.print_exc()
             self.db.rollback()
 
-    def send_autoreply(self, phone: str, text: str):
+    def send_autoreply(self, phone: str, text: str, buttons=None):
+        """
+        Envía texto plano o mensaje interactivo con botones de respuesta (máx. 3).
+        `buttons`: lista de tuplas (id, título_visible); el id es lo que recibimos al pulsar
+        (p. ej. "1", "2", "volver", "salir") para no romper la lógica existente.
+        """
         url = "https://graph.facebook.com/v22.0/790586727468909/messages"
         token = os.getenv("META_TOKEN")
 
         # Normalizar número (respeta números internacionales)
         phone = self._clean_phone_number(phone) or phone
 
-        payload = {
-            "messaging_product": "whatsapp",
-            "to": phone,
-            "type": "text",
-            "text": {
-                "body": text
-            }
-        }
-
         headers = {
             "Authorization": f"Bearer {token}",
-            "Content-Type": "application/json"
+            "Content-Type": "application/json",
         }
 
-        response = requests.post(url, json=payload, headers=headers)
+        response = None
+        message_type_saved = "text"
 
-        print("📨 AUTORESPONDER:", response.status_code, response.json())
-        
-        # Guardar el message_id si el envío fue exitoso
+        if buttons:
+            btn_payload = []
+            for bid, title in buttons[:3]:
+                tid = str(bid)[:256]
+                ttl = self._reply_button_title(title or tid)
+                if not ttl:
+                    ttl = str(tid)[:20]
+                btn_payload.append(
+                    {"type": "reply", "reply": {"id": tid, "title": ttl}}
+                )
+            body_text = (text or "")[:1024]
+            payload = {
+                "messaging_product": "whatsapp",
+                "to": phone,
+                "type": "interactive",
+                "interactive": {
+                    "type": "button",
+                    "body": {"text": body_text},
+                    "action": {"buttons": btn_payload},
+                },
+            }
+            response = requests.post(url, json=payload, headers=headers)
+            print("📨 AUTORESPONDER (interactive):", response.status_code, response.json())
+            message_type_saved = "interactive"
+            if response.status_code != 200:
+                buttons = None
+
+        if not buttons:
+            payload = {
+                "messaging_product": "whatsapp",
+                "to": phone,
+                "type": "text",
+                "text": {"body": text},
+            }
+            response = requests.post(url, json=payload, headers=headers)
+            print("📨 AUTORESPONDER:", response.status_code, response.json())
+            message_type_saved = "text"
+
         if response.status_code == 200:
             response_data = response.json()
             if "messages" in response_data:
@@ -2326,8 +2544,8 @@ class WhatsappClass:
                     self._save_message(
                         message_id=message_id,
                         recipient_phone=phone,
-                        message_type="text",
-                        status="sent"
+                        message_type=message_type_saved,
+                        status="sent",
                     )
 
     def _save_message(self, message_id: str, recipient_phone: str, message_type: str, template_name: str = None, status: str = "sent", budget_id: int = None, sale_id: int = None):
