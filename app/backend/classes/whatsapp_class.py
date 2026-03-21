@@ -1677,7 +1677,16 @@ class WhatsappClass:
             )
             return
 
-        if not session and text in ["hola", "inicio", "start", "menu", "comprar", "buenos dias", "buenas", "hey"]:
+        if text in [
+            "hola",
+            "inicio",
+            "start",
+            "menu",
+            "comprar",
+            "buenos dias",
+            "buenas",
+            "hey",
+        ]:
             self._chat_sessions[phone] = self._new_session_dict()
             self.send_autoreply(
                 phone,
