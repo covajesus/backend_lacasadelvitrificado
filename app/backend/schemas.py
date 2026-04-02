@@ -538,6 +538,14 @@ class UpdateSettings(BaseModel):
     prepaid_discount: Optional[int] = 0
     phone: str
 
+    @validator("phone", pre=True)
+    def phone_as_string(cls, v):
+        if v is None:
+            return ""
+        if not isinstance(v, str):
+            return str(v).strip()
+        return v.strip()
+
 class SalesReportFilter(BaseModel):
     date_from: Optional[str] = None
     date_to: Optional[str] = None
