@@ -1,3 +1,6 @@
+import io
+from contextlib import redirect_stdout, redirect_stderr
+
 from fastapi import HTTPException
 from app.backend.db.models import ShoppingModel, ShoppingProductModel, SupplierModel, LotModel, ProductModel, UnitMeasureModel, CategoryModel, PreInventoryStockModel, UnitFeatureModel, InventoryModel, LotItemModel, SettingModel
 from app.backend.schemas import ShoppingCreateInput
@@ -1070,6 +1073,230 @@ class ShoppingClass:
             traceback.print_exc()
             print(f"{'='*60}\n")
             return {"product_name": f"Error: {str(e)}", "precio_x_litro": 0}
+
+    @staticmethod
+    def _total_customs_expenses_clp_simulator(shopping):
+        """
+        Total gastos importación en CLP como Simulator.vue (totalCustomsExpenses):
+        cada rubro USD * su tipo de dólar (CLP/USD) + comisión ya en CLP.
+        No aplica exchange_rate adicional (igual que el front del simulador).
+        """
+        s = shopping
+
+        def m(a, b):
+            return float(a or 0) * float(b or 0)
+
+        total = (
+            m(s.maritime_freight, s.maritime_freight_dollar)
+            + m(s.tax_explosive_product, s.tax_explosive_product_dollar)
+            + m(s.merchandise_insurance, s.merchandise_insurance_dollar)
+            + m(s.manifest_opening, s.manifest_opening_dollar)
+            + m(s.deconsolidation, s.deconsolidation_dollar)
+            + m(s.land_freight, s.land_freight_dollar)
+            + m(s.provision_funds, s.provision_funds_dollar)
+            + m(s.port_charges, s.port_charges_dollar)
+            + m(s.honoraries, s.honoraries_dollar)
+            + m(s.physical_assessment_expenses, s.physical_assessment_expenses_dollar)
+            + m(s.administrative_expenses, s.administrative_expenses_dollar)
+            + m(s.folder_processing, s.folder_processing_dollar)
+            + m(s.valija_expenses, s.valija_expenses_dollar)
+        )
+        total += float(s.commission or 0)
+        return float(total)
+
+    def get_landed_unit_costs_for_shopping(self, shopping_id, basis="simulator"):
+        """
+        Costo unitario final en CLP (mercancía + gastos prorrateados por valor en CLP).
+
+        basis="simulator" (default): misma fórmula que Simulator.vue — líneas de
+        shoppings_products, cantidad = quantity_to_buy, prepago sobre final_unit_cost,
+        total gastos = USD*dólar por rubro + comisión.
+
+        basis="inventory": misma lógica que calculate_unit_cost_for_product (pre-inventario
+        × quantity_per_package, y total gastos con exchange_rate como en ese método).
+        """
+        basis = (basis or "simulator").strip().lower()
+        if basis not in ("simulator", "inventory"):
+            return {"status": "error", "message": "basis debe ser simulator o inventory"}
+
+        try:
+            shopping = self.db.query(ShoppingModel).filter(ShoppingModel.id == shopping_id).first()
+            if not shopping:
+                return {"status": "error", "message": "Shopping not found"}
+
+            has_prepaid = bool(shopping.prepaid_status_id == 1)
+            settings = self.db.query(SettingModel).first()
+            prepaid_discount = (
+                float(settings.prepaid_discount)
+                if settings and settings.prepaid_discount and has_prepaid
+                else 0.0
+            )
+            prepaid_mult = (1.0 - prepaid_discount / 100.0) if has_prepaid else 1.0
+            euro_value = float(shopping.euro_value or 0)
+
+            if basis == "simulator":
+                total_customs = self._total_customs_expenses_clp_simulator(shopping)
+
+                rows = (
+                    self.db.query(
+                        ShoppingProductModel.product_id,
+                        ShoppingProductModel.quantity,
+                        ShoppingProductModel.quantity_to_buy,
+                        ShoppingProductModel.original_unit_cost,
+                        ShoppingProductModel.discount_percentage,
+                        ShoppingProductModel.final_unit_cost,
+                        ProductModel.product,
+                        ProductModel.code,
+                        ShoppingProductModel.unit_measure_id,
+                    )
+                    .join(ProductModel, ProductModel.id == ShoppingProductModel.product_id)
+                    .filter(ShoppingProductModel.shopping_id == shopping_id)
+                    .order_by(ShoppingProductModel.id)
+                    .all()
+                )
+
+                if not rows:
+                    return {
+                        "status": "success",
+                        "basis": "simulator",
+                        "shopping_id": shopping_id,
+                        "euro_value": euro_value,
+                        "exchange_rate": float(shopping.exchange_rate) if shopping.exchange_rate is not None else None,
+                        "prepaid_status_id": shopping.prepaid_status_id,
+                        "prepaid_discount_percentage": prepaid_discount,
+                        "total_customs_expenses_clp": int(round(total_customs)),
+                        "data": [],
+                        "note": "No hay líneas de producto en esta compra.",
+                    }
+
+                line_payloads = []
+                for row in rows:
+                    qty = float(row.quantity_to_buy or 0)
+                    final_stored = float(row.final_unit_cost or 0)
+                    final_eur = final_stored * prepaid_mult
+                    product_amount_clp = final_eur * qty * euro_value if euro_value else 0.0
+                    line_payloads.append(
+                        {
+                            "row": row,
+                            "qty": qty,
+                            "final_stored_eur": final_stored,
+                            "final_eur": final_eur,
+                            "product_amount_clp": product_amount_clp,
+                        }
+                    )
+
+                total_productos_clp = sum(p["product_amount_clp"] for p in line_payloads)
+
+                data = []
+                for p in line_payloads:
+                    row = p["row"]
+                    qty = p["qty"]
+                    pac = p["product_amount_clp"]
+                    pct = (pac / total_productos_clp) if total_productos_clp > 0 else 0.0
+                    precio_envio = total_customs * pct
+                    envio_mas = precio_envio + pac
+                    precio_x = (envio_mas / qty) if qty > 0 else 0.0
+                    data.append(
+                        {
+                            "product_id": row.product_id,
+                            "code": row.code,
+                            "product": row.product,
+                            "unit_measure_id": row.unit_measure_id,
+                            "quantity_packages": int(row.quantity or 0),
+                            "quantity_to_buy": qty,
+                            "final_unit_cost_eur_db": round(p["final_stored_eur"], 6),
+                            "final_unit_cost_eur_after_prepaid": round(p["final_eur"], 6),
+                            "precio_x_litro_clp": int(round(float(precio_x))),
+                            "envio_mas_mercancia_clp": int(round(float(envio_mas))),
+                            "precio_envio_clp": int(round(float(precio_envio))),
+                            "product_amount_clp": int(round(float(pac))),
+                            "participacion_pct": round(float(pct * 100.0), 4),
+                            "original_unit_cost_eur": round(float(row.original_unit_cost or 0), 4),
+                            "discount_percentage": float(row.discount_percentage or 0),
+                            "total_euros_line": round(p["final_eur"] * qty, 2) if qty else 0.0,
+                        }
+                    )
+
+                return {
+                    "status": "success",
+                    "basis": "simulator",
+                    "shopping_id": shopping_id,
+                    "euro_value": euro_value,
+                    "exchange_rate": float(shopping.exchange_rate) if shopping.exchange_rate is not None else None,
+                    "prepaid_status_id": shopping.prepaid_status_id,
+                    "prepaid_discount_percentage": prepaid_discount,
+                    "total_customs_expenses_clp": int(round(total_customs)),
+                    "data": data,
+                }
+
+            # basis == "inventory"
+            pre_rows = (
+                self.db.query(
+                    PreInventoryStockModel.product_id,
+                    PreInventoryStockModel.stock,
+                    ProductModel.product,
+                    ProductModel.code,
+                )
+                .join(ProductModel, ProductModel.id == PreInventoryStockModel.product_id)
+                .filter(PreInventoryStockModel.shopping_id == shopping_id)
+                .order_by(PreInventoryStockModel.product_id)
+                .all()
+            )
+
+            if not pre_rows:
+                return {
+                    "status": "success",
+                    "basis": "inventory",
+                    "shopping_id": shopping_id,
+                    "euro_value": euro_value,
+                    "exchange_rate": float(shopping.exchange_rate) if shopping.exchange_rate is not None else None,
+                    "prepaid_status_id": shopping.prepaid_status_id,
+                    "prepaid_discount_percentage": prepaid_discount,
+                    "total_customs_expenses_clp": None,
+                    "data": [],
+                    "note": "Sin filas de pre-inventario no se aplica calculate_unit_cost_for_product.",
+                }
+
+            data = []
+            for row in pre_rows:
+                stock = float(row.stock or 0)
+                sink = io.StringIO()
+                with redirect_stdout(sink), redirect_stderr(sink):
+                    calc = self.calculate_unit_cost_for_product(shopping_id, row.product_id, stock)
+                name = str(calc.get("product_name") or "")
+                err = name.startswith("Error:")
+                data.append(
+                    {
+                        "product_id": row.product_id,
+                        "code": row.code,
+                        "product": row.product,
+                        "stock_packages": stock,
+                        "precio_x_litro_clp": int(round(float(calc.get("precio_x_litro") or 0))),
+                        "envio_mas_mercancia_clp": int(round(float(calc.get("envio_mas_mercancia") or 0))),
+                        "precio_envio_clp": int(round(float(calc.get("precio_envio") or 0))),
+                        "product_amount_clp": int(round(float(calc.get("product_amount_clp") or 0))),
+                        "participacion_pct": round(float(calc.get("percentage") or 0), 4),
+                        "final_unit_cost_eur": round(float(calc.get("final_unit_cost") or 0), 6),
+                        "total_euros": round(float(calc.get("total_euros") or 0), 2),
+                        "original_unit_cost_eur": round(float(calc.get("original_unit_cost") or 0), 4),
+                        "discount_percentage": float(calc.get("discount_percentage") or 0),
+                        "calc_error": err,
+                    }
+                )
+
+            return {
+                "status": "success",
+                "basis": "inventory",
+                "shopping_id": shopping_id,
+                "euro_value": euro_value,
+                "exchange_rate": float(shopping.exchange_rate) if shopping.exchange_rate is not None else None,
+                "prepaid_status_id": shopping.prepaid_status_id,
+                "prepaid_discount_percentage": prepaid_discount,
+                "total_customs_expenses_clp": None,
+                "data": data,
+            }
+        except Exception as e:
+            return {"status": "error", "message": str(e)}
 
     def test_calculate_unit_costs(self, shopping_id):
         """

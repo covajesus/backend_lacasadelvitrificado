@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from app.backend.db.database import get_db
 from sqlalchemy.orm import Session
 from app.backend.schemas import UserLogin, PreInventoryStocks, ShoppingCreateInput, UpdateShopping, ShoppingList, StorePaymentDocuments, SendCustomsCompanyInput, StoreCustomsCompanyDocuments
@@ -32,6 +32,32 @@ def get_shopping_products(shopping_id: int, db: Session = Depends(get_db)):
     data = ShoppingClass(db).get_shopping_products_detail(shopping_id)
 
     return {"message": data}
+
+
+@shoppings.get("/landed_unit_costs/{shopping_id}")
+def get_landed_unit_costs(
+    shopping_id: int,
+    basis: str = Query(
+        "simulator",
+        description="simulator = misma lógica que Simulator.vue (líneas OC + quantity_to_buy); "
+        "inventory = pre-inventario + calculate_unit_cost_for_product (crear inventario).",
+    ),
+    session_user: UserLogin = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Costo unitario final en CLP (mercancía + gastos prorrateados por participación en CLP).
+
+    Por defecto ``basis=simulator`` alinea con el Simulador de Precios del front.
+    Use ``basis=inventory`` para el costo usado al crear inventario desde pre-inventario.
+    """
+    result = ShoppingClass(db).get_landed_unit_costs_for_shopping(shopping_id, basis=basis)
+    if result.get("status") == "error":
+        if result.get("message") == "Shopping not found":
+            raise HTTPException(status_code=404, detail=result.get("message"))
+        raise HTTPException(status_code=400, detail=result.get("message", "Error"))
+    return {"message": result}
+
 
 @shoppings.get("/edit/{id}")
 def edit(id: int, session_user: UserLogin = Depends(get_current_active_user), db: Session = Depends(get_db)):
