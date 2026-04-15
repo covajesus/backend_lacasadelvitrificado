@@ -10,11 +10,30 @@ import json
 import bcrypt
 import hashlib
 
+# RUT de la empresa: no permitir login de shopping (solo RUT sin contraseña).
+_BLOCKED_SHOPPING_LOGIN_RUT = "77176777-K"
+
+
+def _normalize_rut_for_compare(rut: str) -> str:
+    if not rut:
+        return ""
+    return str(rut).strip().upper().replace(".", "").replace(" ", "")
+
+
 class AuthenticationClass:
     def __init__(self, db):
         self.db = db
 
     def authenticate_shopping_login(self, identification_number):
+        if _normalize_rut_for_compare(identification_number) == _normalize_rut_for_compare(
+            _BLOCKED_SHOPPING_LOGIN_RUT
+        ):
+            raise HTTPException(
+                status_code=401,
+                detail="Contraseña incorrecta",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+
         user = UserClass(self.db).get('rut', identification_number)
         
         # Verificar si user es un string de error en lugar de JSON
@@ -35,16 +54,39 @@ class AuthenticationClass:
         return response_data
     
     def authenticate_user(self, email, password):
-        user = UserClass(self.db).get('email', email)
+        user = UserClass(self.db).get("email", email)
         print(user)
-        response_data = json.loads(user)
 
-        if not user:
-            raise HTTPException(status_code=401, detail="Could not validate credentials", headers={"WWW-Authenticate": "Bearer"})
+        if not user or not isinstance(user, str) or not user.strip().startswith("{"):
+            raise HTTPException(
+                status_code=401,
+                detail="Contraseña incorrecta",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+
+        try:
+            response_data = json.loads(user)
+        except (json.JSONDecodeError, ValueError):
+            raise HTTPException(
+                status_code=401,
+                detail="Contraseña incorrecta",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+
+        if not response_data or "user_data" not in response_data:
+            raise HTTPException(
+                status_code=401,
+                detail="Contraseña incorrecta",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
 
         if not self.verify_password(password, response_data["user_data"]["hashed_password"]):
-            raise HTTPException(status_code=401, detail="Could not validate credentials", headers={"WWW-Authenticate": "Bearer"})
-        
+            raise HTTPException(
+                status_code=401,
+                detail="Contraseña incorrecta",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+
         return response_data
         
     def verify_password(self, plain_password, hashed_password):

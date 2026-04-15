@@ -1,6 +1,5 @@
 from app.backend.db.models import UserModel
 from fastapi import HTTPException
-from app.backend.auth.auth_user import pwd_context
 from app.backend.classes.user_class import UserClass
 from app.backend.classes.customer_class import CustomerClass
 from datetime import datetime, timedelta
@@ -9,37 +8,89 @@ import os
 from jose import jwt
 import json
 import bcrypt
+import hashlib
+
+# RUT de la empresa: no permitir login de shopping (solo RUT sin contraseña).
+_BLOCKED_SHOPPING_LOGIN_RUT = "77176777-K"
+
+
+def _normalize_rut_for_compare(rut: str) -> str:
+    if not rut:
+        return ""
+    return str(rut).strip().upper().replace(".", "").replace(" ", "")
+
 
 class AuthenticationClass:
     def __init__(self, db):
         self.db = db
 
     def authenticate_shopping_login(self, identification_number):
+        if _normalize_rut_for_compare(identification_number) == _normalize_rut_for_compare(
+            _BLOCKED_SHOPPING_LOGIN_RUT
+        ):
+            raise HTTPException(
+                status_code=401,
+                detail="Contraseña incorrecta",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+
         user = UserClass(self.db).get('rut', identification_number)
-        response_data = json.loads(user)
+        
+        # Verificar si user es un string de error en lugar de JSON
+        if not user or not isinstance(user, str) or not user.strip().startswith('{'):
+            raise HTTPException(status_code=401, detail="Could not validate credentials", headers={"WWW-Authenticate": "Bearer"})
+        
+        try:
+            response_data = json.loads(user)
+        except (json.JSONDecodeError, ValueError) as e:
+            # Si no es JSON válido, significa que no se encontró el usuario
+            raise HTTPException(status_code=401, detail="Could not validate credentials", headers={"WWW-Authenticate": "Bearer"})
 
         print(response_data)
 
-        if not user:
+        if not response_data or "user_data" not in response_data:
             raise HTTPException(status_code=401, detail="Could not validate credentials", headers={"WWW-Authenticate": "Bearer"})
 
         return response_data
     
     def authenticate_user(self, email, password):
-        user = UserClass(self.db).get('email', email)
+        user = UserClass(self.db).get("email", email)
         print(user)
-        response_data = json.loads(user)
 
-        if not user:
-            raise HTTPException(status_code=401, detail="Could not validate credentials", headers={"WWW-Authenticate": "Bearer"})
+        if not user or not isinstance(user, str) or not user.strip().startswith("{"):
+            raise HTTPException(
+                status_code=401,
+                detail="Contraseña incorrecta",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+
+        try:
+            response_data = json.loads(user)
+        except (json.JSONDecodeError, ValueError):
+            raise HTTPException(
+                status_code=401,
+                detail="Contraseña incorrecta",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+
+        if not response_data or "user_data" not in response_data:
+            raise HTTPException(
+                status_code=401,
+                detail="Contraseña incorrecta",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
 
         if not self.verify_password(password, response_data["user_data"]["hashed_password"]):
-            raise HTTPException(status_code=401, detail="Could not validate credentials", headers={"WWW-Authenticate": "Bearer"})
-        
+            raise HTTPException(
+                status_code=401,
+                detail="Contraseña incorrecta",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+
         return response_data
         
     def verify_password(self, plain_password, hashed_password):
-        return pwd_context.verify(plain_password, hashed_password)
+        return bcrypt.checkpw(plain_password.encode('utf-8'), hashed_password.encode('utf-8'))
     
     def create_token(self, data: dict, time_expire: Union[datetime, None] = None):
         data_copy = data.copy()
@@ -79,3 +130,41 @@ class AuthenticationClass:
         hashed_string = bcrypt.hashpw(encoded_string, salt)
 
         return hashed_string
+
+    def validate_budget_token(self, token_md5, budget_id):
+        """
+        Valida el token MD5 para login automático desde WhatsApp
+        Retorna el usuario admin si el token es válido
+        """
+        # Buscar usuario admin (rol_id 1 o 2)
+        admin_user = (
+            self.db.query(UserModel)
+            .filter((UserModel.rol_id == 1) | (UserModel.rol_id == 2))
+            .first()
+        )
+
+        if not admin_user:
+            raise HTTPException(status_code=401, detail="Usuario admin no encontrado")
+
+        # Generar el token esperado
+        token_string = f"{budget_id}_{admin_user.rut}_{admin_user.id}"
+        expected_token = hashlib.md5(token_string.encode()).hexdigest()
+
+        # Validar el token
+        if token_md5 != expected_token:
+            raise HTTPException(status_code=401, detail="Token inválido")
+
+        # Generar token JWT para el usuario
+        token_expires = timedelta(minutes=9999999)
+        jwt_token = self.create_token({'sub': str(admin_user.rut)}, token_expires)
+
+        return {
+            "access_token": jwt_token,
+            "user_id": admin_user.id,
+            "rut": admin_user.rut,
+            "rol_id": admin_user.rol_id,
+            "full_name": admin_user.full_name,
+            "email": admin_user.email,
+            "token_type": "bearer",
+            "budget_id": budget_id
+        }
