@@ -563,8 +563,13 @@ class InventoryClass:
                 inventory_id = new_inventory.id
                 print(f"[+] Nuevo inventario creado con ID: {inventory_id}")
             else:
-                # Usar el inventario existente
+                # Usar el inventario existente: alinear cabecera con el formulario (antes no se
+                # actualizaba ``location_id`` y quedaba la ubicación antigua al agregar un lote).
                 inventory_id = existing_inventory.id
+                existing_inventory.location_id = inventory_inputs.location_id
+                existing_inventory.minimum_stock = inventory_inputs.minimum_stock
+                existing_inventory.maximum_stock = inventory_inputs.maximum_stock
+                existing_inventory.last_update = datetime.now()
                 print(f"[+] Usando inventario existente con ID: {inventory_id}")
 
             product = self.db.query(ProductModel).filter(ProductModel.id == inventory_inputs.product_id).first()

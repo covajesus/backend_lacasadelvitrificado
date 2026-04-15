@@ -57,6 +57,25 @@ class SaleClass:
             return 0
         return int(order_qty) * self._quantity_per_package(product_id)
 
+    def _sale_line_packages_for_fifo_slice(self, product_id, process_qty, packages_remaining):
+        """
+        Paquetes a registrar en ``sales_products.quantity`` para un corte FIFO (``process_qty`` = unidades base).
+        Usa división entera para no inflar varias líneas; el remanente se suma a la última línea creada.
+        """
+        pq = int(process_qty)
+        if pq <= 0 or packages_remaining <= 0:
+            return 0
+        qpp = self._quantity_per_package(product_id)
+        if qpp <= 1:
+            return min(packages_remaining, pq)
+        return min(packages_remaining, pq // qpp)
+
+    @staticmethod
+    def _apply_pending_packages_to_last_line(last_sale_product, pending):
+        if last_sale_product is None or pending <= 0:
+            return
+        last_sale_product.quantity = int(last_sale_product.quantity or 0) + int(pending)
+
     def _sale_movement_reverse_base_units(self, sale_id, sales_product, inventory_movement):
         """
         Unidades base a devolver al revertir una venta.
@@ -108,7 +127,7 @@ class SaleClass:
                         CustomerModel.social_reason.label("customer_name"),
                     )
                     .join(CustomerModel, CustomerModel.id == SaleModel.customer_id, isouter=True)
-                    .order_by(SaleModel.added_date.desc())
+                    .order_by(SaleModel.id.desc())
                 )
             else:
                 query = (
@@ -124,7 +143,7 @@ class SaleClass:
                     )
                     .join(CustomerModel, CustomerModel.id == SaleModel.customer_id, isouter=True)
                     .filter(SaleModel.customer_id == customer.id if customer else None)
-                    .order_by(SaleModel.added_date.desc())
+                    .order_by(SaleModel.id.desc())
                 )
 
             if page > 0:
@@ -649,11 +668,7 @@ class SaleClass:
                         if effective_qty <= 0:
                             continue
 
-                        # Precio por unidad de inventario (línea = pedido × precio unitario de lista / unidades base)
-                        line_money = float(quantity) * float(product_price or 0)
-                        unit_price_base = (
-                            int(round(line_money / effective_qty)) if effective_qty else int(product_price or 0)
-                        )
+                        price_per_package = int(product_price or 0)
 
                         quantity_to_process = effective_qty
                         total_processed = 0
@@ -671,6 +686,9 @@ class SaleClass:
 
                         # Obligatorio: ``unit_cost`` del movimiento de salida solo desde ``inventories_movements``.
                         movement_unit_cost = sale_acceptance_unit_cost_from_movements(self.db, product_id)
+
+                        packages_remaining = packages_ordered
+                        last_new_sale_product = None
 
                         # Procesar lotes disponibles (saldo = suma de movimientos)
                         for lot_item, lot, inv_id, lot_balance in available_lots:
@@ -706,23 +724,31 @@ class SaleClass:
                             self.db.flush()
                             print(f"[CHANGE_STATUS] Movimiento de inventario creado: inventory_id={inventory.id}, quantity={process_qty * -1}, lot_item_id={lot_item.id}")
 
+                            sale_line_qty = self._sale_line_packages_for_fifo_slice(
+                                product_id, process_qty, packages_remaining
+                            )
+                            packages_remaining -= sale_line_qty
+
                             new_sale_product = SaleProductModel(
                                 sale_id=existing_sale.id,
                                 product_id=product_id,
                                 inventory_movement_id=inventory_movement.id,
                                 inventory_id=inventory.id,
                                 lot_item_id=lot_item.id,
-                                quantity=process_qty,
-                                price=unit_price_base,
+                                quantity=sale_line_qty,
+                                price=price_per_package,
                             )
                             self.db.add(new_sale_product)
                             self.db.flush()
+                            last_new_sale_product = new_sale_product
 
                             quantity_to_process -= process_qty
                             total_processed += process_qty
 
                             if quantity_to_process <= 0:
                                 break
+
+                        self._apply_pending_packages_to_last_line(last_new_sale_product, packages_remaining)
 
                 # Si no hay productos sin procesar, buscar presupuesto aceptado del mismo cliente
                 if not sale_products_unprocessed:
@@ -772,6 +798,13 @@ class SaleClass:
                                 if effective_qty <= 0:
                                     continue
 
+                                line_total = float(product.total or 0)
+                                price_per_package = (
+                                    int(round(line_total / packages_ordered))
+                                    if packages_ordered > 0
+                                    else int(product.total or 0)
+                                )
+
                                 quantity_to_process = effective_qty
                                 total_processed = 0
 
@@ -783,6 +816,9 @@ class SaleClass:
                                     return {"status": "error", "message": error_msg}
 
                                 movement_uc_budget = sale_acceptance_unit_cost_from_movements(self.db, product_id)
+
+                                packages_remaining = packages_ordered
+                                last_budget_sale_product = None
 
                                 for lot_item, lot, inv_id, lot_balance in available_lots:
                                     if quantity_to_process <= 0:
@@ -816,10 +852,10 @@ class SaleClass:
                                     self.db.add(inventory_movement)
                                     self.db.flush()
 
-                                    line_total = float(product.total or 0)
-                                    unit_price = (
-                                        int(round(line_total / effective_qty)) if effective_qty > 0 else int(product.total or 0)
+                                    sale_line_qty = self._sale_line_packages_for_fifo_slice(
+                                        product_id, process_qty, packages_remaining
                                     )
+                                    packages_remaining -= sale_line_qty
 
                                     sale_product = SaleProductModel(
                                         sale_id=existing_sale.id,
@@ -827,18 +863,21 @@ class SaleClass:
                                         inventory_movement_id=inventory_movement.id,
                                         inventory_id=inventory.id,
                                         lot_item_id=lot_item.id,
-                                        quantity=process_qty,
-                                        price=unit_price
+                                        quantity=sale_line_qty,
+                                        price=price_per_package,
                                     )
 
                                     self.db.add(sale_product)
                                     self.db.flush()
+                                    last_budget_sale_product = sale_product
 
                                     quantity_to_process -= process_qty
                                     total_processed += process_qty
 
                                     if quantity_to_process <= 0:
                                         break
+
+                                self._apply_pending_packages_to_last_line(last_budget_sale_product, packages_remaining)
 
             existing_sale.status_id = status_id
             existing_sale.updated_date = datetime.utcnow()
