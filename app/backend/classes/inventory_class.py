@@ -8,11 +8,13 @@ from app.backend.db.models import (
     InventoryAuditModel,
     MovementTypeModel,
     SaleProductModel,
+    UnitFeatureModel,
 )
 from datetime import datetime
 from sqlalchemy import func
 
 from app.backend.classes.inventory_stock import (
+    AVERAGE_UNIT_COST_EXCLUDED_MOVEMENT_TYPE_IDS,
     stock_sum_for_inventory,
     stock_sum_for_product,
     average_unit_cost_for_product,
@@ -21,6 +23,18 @@ from app.backend.classes.inventory_stock import (
 class InventoryClass:
     def __init__(self, db):
         self.db = db
+
+    def _quantity_per_package_for_product(self, product_id: int) -> int:
+        """``unit_features.quantity_per_package``; si no hay fila o es 0 → 1."""
+        row = (
+            self.db.query(UnitFeatureModel)
+            .filter(UnitFeatureModel.product_id == product_id)
+            .first()
+        )
+        if row and row.quantity_per_package:
+            q = int(row.quantity_per_package)
+            return q if q > 0 else 1
+        return 1
 
     def get_all(self, page=0, items_per_page=10):
         try:
@@ -131,17 +145,30 @@ class InventoryClass:
 
             stock = stock_sum_for_inventory(self.db, id)
 
-            # Mismo criterio que ``update``: primer movimiento del inventario define el lote editable.
-            movement_lot_item_id = (
-                self.db.query(InventoryMovementModel.lot_item_id)
+            # Fila de referencia para edición: preferir primera **no salida** (entrada/ajuste).
+            ref_mov = (
+                self.db.query(InventoryMovementModel)
                 .filter(InventoryMovementModel.inventory_id == inv.id)
-                .order_by(InventoryMovementModel.id)
-                .limit(1)
-                .scalar()
+                .filter(
+                    ~InventoryMovementModel.movement_type_id.in_(
+                        AVERAGE_UNIT_COST_EXCLUDED_MOVEMENT_TYPE_IDS
+                    )
+                )
+                .order_by(InventoryMovementModel.id.asc())
+                .first()
             )
+            if ref_mov is None:
+                ref_mov = (
+                    self.db.query(InventoryMovementModel)
+                    .filter(InventoryMovementModel.inventory_id == inv.id)
+                    .order_by(InventoryMovementModel.id.asc())
+                    .first()
+                )
+            inventory_movement_id = ref_mov.id if ref_mov else None
+            movement_lot_item_id = ref_mov.lot_item_id if ref_mov else None
 
             lot_item = None
-            if movement_lot_item_id:
+            if movement_lot_item_id is not None:
                 lot_item = self.db.query(LotItemModel).filter_by(id=movement_lot_item_id).first()
 
             if not lot_item:
@@ -168,10 +195,14 @@ class InventoryClass:
                         lot_number = lot.lot_number
                         arrival_date = lot.arrival_date.isoformat() if lot.arrival_date else None
 
-            unit_cost = int(average_unit_cost_for_product(self.db, inv.product_id))
+            if ref_mov is not None and ref_mov.unit_cost is not None:
+                unit_cost = int(ref_mov.unit_cost)
+            else:
+                unit_cost = int(average_unit_cost_for_product(self.db, inv.product_id))
 
             inventory_data = {
                 "id": inv.id,
+                "inventory_movement_id": inventory_movement_id,
                 "lot_item_id": lot_item_id,
                 "product_id": inv.product_id,
                 "location_id": inv.location_id,
@@ -205,16 +236,56 @@ class InventoryClass:
             inventory.maximum_stock = int(inventory_inputs.maximum_stock)
             inventory.last_update = datetime.now()
 
-            lot_item_id = (
-                self.db.query(InventoryMovementModel.lot_item_id)
+            new_uc = int(inventory_inputs.unit_cost or 0)
+
+            first_mov = (
+                self.db.query(InventoryMovementModel)
                 .filter(InventoryMovementModel.inventory_id == inventory.id)
-                .order_by(InventoryMovementModel.id)
-                .limit(1)
-                .scalar()
+                .filter(
+                    ~InventoryMovementModel.movement_type_id.in_(
+                        AVERAGE_UNIT_COST_EXCLUDED_MOVEMENT_TYPE_IDS
+                    )
+                )
+                .order_by(InventoryMovementModel.id.asc())
+                .first()
             )
-            if lot_item_id:
+            if first_mov is None:
+                first_mov = (
+                    self.db.query(InventoryMovementModel)
+                    .filter(InventoryMovementModel.inventory_id == inventory.id)
+                    .order_by(InventoryMovementModel.id.asc())
+                    .first()
+                )
+
+            req_mid = inventory_inputs.inventory_movement_id
+            if req_mid is not None:
+                try:
+                    req_mid = int(req_mid)
+                except (TypeError, ValueError):
+                    req_mid = None
+
+            target_mov = None
+            if req_mid is not None:
+                target_mov = (
+                    self.db.query(InventoryMovementModel)
+                    .filter(
+                        InventoryMovementModel.id == req_mid,
+                        InventoryMovementModel.inventory_id == inventory.id,
+                    )
+                    .first()
+                )
+
+            # Costo: solo la fila ``inventories_movements.id`` indicada (no salidas 2/3).
+            if target_mov is not None and target_mov.movement_type_id not in AVERAGE_UNIT_COST_EXCLUDED_MOVEMENT_TYPE_IDS:
+                target_mov.unit_cost = new_uc
+
+            ref_mov = target_mov or first_mov
+            lot_item_id = ref_mov.lot_item_id if ref_mov else None
+            lot_item_for_private = None
+            if lot_item_id is not None:
                 lot_item = self.db.query(LotItemModel).filter_by(id=lot_item_id).first()
                 if lot_item:
+                    lot_item_for_private = lot_item
                     lot = self.db.query(LotModel).filter_by(id=lot_item.lot_id).first()
                     if lot:
                         product = self.db.query(ProductModel).filter(ProductModel.id == inventory_inputs.product_id).first()
@@ -224,16 +295,15 @@ class InventoryClass:
                         lot.updated_date = datetime.now()
                     lot_item.product_id = inventory_inputs.product_id
                     lot_item.public_sale_price = inventory_inputs.public_sale_price
-                    lot_item.private_sale_price = inventory_inputs.private_sale_price
                     lot_item.updated_date = datetime.now()
 
                 current = stock_sum_for_inventory(self.db, inventory.id)
                 target = int(inventory_inputs.stock or 0)
                 delta = target - current
                 if delta != 0:
-                    movement_uc = int(
+                    movement_uc = new_uc or int(
                         average_unit_cost_for_product(self.db, inventory_inputs.product_id)
-                        or int(inventory_inputs.unit_cost or 0)
+                        or 0
                     )
                     self.db.add(
                         InventoryMovementModel(
@@ -246,6 +316,22 @@ class InventoryClass:
                             added_date=datetime.now(),
                         )
                     )
+
+            # Precio privado = costo medio × paquete; mismo valor en **todos** los ``lot_items`` del producto
+            if lot_item_for_private is not None:
+                self.db.flush()
+                pid = int(inventory_inputs.product_id)
+                avg_uc = int(average_unit_cost_for_product(self.db, pid) or 0)
+                qpp = self._quantity_per_package_for_product(pid)
+                new_private = float(int(round(float(avg_uc) * float(qpp))))
+                now = datetime.now()
+                self.db.query(LotItemModel).filter(LotItemModel.product_id == pid).update(
+                    {
+                        LotItemModel.private_sale_price: new_private,
+                        LotItemModel.updated_date: now,
+                    },
+                    synchronize_session=False,
+                )
 
             self.db.commit()
             self.db.refresh(inventory)

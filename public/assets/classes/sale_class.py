@@ -5,11 +5,17 @@ from app.backend.classes.inventory_stock import (
     fifo_lots_available,
     stock_sum_for_product,
     average_unit_cost_for_product,
-    last_add_entry_unit_cost_for_inventory_lot,
+    sale_acceptance_unit_cost_from_movements,
 )
 from datetime import datetime
+from zoneinfo import ZoneInfo
 from sqlalchemy import func
 from app.backend.classes.whatsapp_class import WhatsappClass
+
+
+def _inventory_movement_added_at():
+    return datetime.now(ZoneInfo("America/Santiago")).replace(tzinfo=None)
+
 
 class Product:
     def __init__(self, id, quantity):
@@ -421,16 +427,19 @@ class SaleClass:
                     reverse_quantity = self._sale_movement_reverse_base_units(
                         sale_id, sales_product, inventory_movement
                     )
-                    
+
+                    # Mismo criterio que al aceptar pago: costo medio desde ``inventories_movements``.
+                    return_uc = sale_acceptance_unit_cost_from_movements(self.db, sales_product.product_id)
+
                     # Crear nuevo movimiento de inventario inverso
                     reverse_movement = InventoryMovementModel(
                         inventory_id=inventory_movement.inventory_id,
                         lot_item_id=inventory_movement.lot_item_id,
                         movement_type_id=1,  # Tipo entrada
                         quantity=reverse_quantity,
-                        unit_cost=inventory_movement.unit_cost,
+                        unit_cost=return_uc,
                         reason="Reversa de venta",
-                        added_date=datetime.now()
+                        added_date=_inventory_movement_added_at(),
                     )
                     self.db.add(reverse_movement)
                     self.db.commit()
@@ -655,6 +664,9 @@ class SaleClass:
                         self.db.delete(sale_product)
                         self.db.flush()
 
+                        # Obligatorio: ``unit_cost`` del movimiento de salida solo desde ``inventories_movements``.
+                        movement_unit_cost = sale_acceptance_unit_cost_from_movements(self.db, product_id)
+
                         # Procesar lotes disponibles (saldo = suma de movimientos)
                         for lot_item, lot, inv_id, lot_balance in available_lots:
                             if quantity_to_process <= 0:
@@ -676,12 +688,6 @@ class SaleClass:
                                 print(f"[CHANGE_STATUS] ERROR: {error_msg}")
                                 return {"status": "error", "message": error_msg}
 
-                            # Costo del último ingreso por alta de producto/lote en esta capa; si no, costo medio kardex.
-                            layer_uc = last_add_entry_unit_cost_for_inventory_lot(self.db, inv_id, lot_item.id)
-                            if layer_uc <= 0:
-                                layer_uc = int(average_unit_cost_for_product(self.db, product_id))
-                            movement_unit_cost = layer_uc
-
                             inventory_movement = InventoryMovementModel(
                                 inventory_id=inventory.id,
                                 lot_item_id=lot_item.id,
@@ -689,7 +695,7 @@ class SaleClass:
                                 quantity=(process_qty * -1),
                                 unit_cost=movement_unit_cost,
                                 reason=f"Venta|base={process_qty}|pkgo={packages_ordered}",
-                                added_date=datetime.utcnow()
+                                added_date=_inventory_movement_added_at(),
                             )
                             self.db.add(inventory_movement)
                             self.db.flush()
@@ -771,6 +777,8 @@ class SaleClass:
                                     print(f"[CHANGE_STATUS] ERROR: {error_msg}")
                                     return {"status": "error", "message": error_msg}
 
+                                movement_uc_budget = sale_acceptance_unit_cost_from_movements(self.db, product_id)
+
                                 for lot_item, lot, inv_id, lot_balance in available_lots:
                                     if quantity_to_process <= 0:
                                         break
@@ -791,11 +799,6 @@ class SaleClass:
                                         print(f"[CHANGE_STATUS] ERROR: {error_msg}")
                                         return {"status": "error", "message": error_msg}
 
-                                    layer_uc_b = last_add_entry_unit_cost_for_inventory_lot(self.db, inv_id, lot_item.id)
-                                    if layer_uc_b <= 0:
-                                        layer_uc_b = int(average_unit_cost_for_product(self.db, product_id))
-                                    movement_uc_budget = layer_uc_b
-
                                     inventory_movement = InventoryMovementModel(
                                         inventory_id=inventory.id,
                                         lot_item_id=lot_item.id,
@@ -803,7 +806,7 @@ class SaleClass:
                                         quantity=(process_qty * -1),
                                         unit_cost=movement_uc_budget,
                                         reason=f"Venta desde presupuesto|base={process_qty}|pkgo={packages_ordered}",
-                                        added_date=datetime.utcnow()
+                                        added_date=_inventory_movement_added_at(),
                                     )
                                     self.db.add(inventory_movement)
                                     self.db.flush()

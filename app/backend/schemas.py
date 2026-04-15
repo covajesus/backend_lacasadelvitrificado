@@ -523,6 +523,9 @@ class StoreInventory(BaseModel):
     lot_number: str
     arrival_date: date
     shopping_id: Optional[int] = None  # Para cálculo automático de unit_cost
+    # Edición: fila concreta en ``inventories_movements`` (solo esa fila recibe ``unit_cost``).
+    inventory_movement_id: Optional[int] = None
+    lot_item_id: Optional[int] = None
 
 class UpdateSettings(BaseModel):
     tax_value: int
