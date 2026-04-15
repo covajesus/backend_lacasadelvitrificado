@@ -30,7 +30,7 @@ class AuthenticationClass:
         ):
             raise HTTPException(
                 status_code=401,
-                detail="Contraseña incorrecta",
+                detail="El usuario con el rut 77176777-K no tiene permitido el acceso por este medio",
                 headers={"WWW-Authenticate": "Bearer"},
             )
 
