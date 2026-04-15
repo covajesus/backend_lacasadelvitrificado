@@ -2,11 +2,26 @@ import io
 from contextlib import redirect_stdout, redirect_stderr
 
 from fastapi import HTTPException
-from app.backend.db.models import ShoppingModel, ShoppingProductModel, SupplierModel, LotModel, ProductModel, UnitMeasureModel, CategoryModel, PreInventoryStockModel, UnitFeatureModel, InventoryModel, LotItemModel, SettingModel
+from app.backend.db.models import (
+    ShoppingModel,
+    ShoppingProductModel,
+    SupplierModel,
+    LotModel,
+    ProductModel,
+    UnitMeasureModel,
+    CategoryModel,
+    PreInventoryStockModel,
+    UnitFeatureModel,
+    InventoryModel,
+    LotItemModel,
+    SettingModel,
+    InventoryMovementModel,
+)
 from app.backend.schemas import ShoppingCreateInput
 from app.backend.classes.product_class import ProductClass
+from app.backend.classes.inventory_stock import average_unit_cost_for_product
 from datetime import datetime
-from sqlalchemy import or_
+from sqlalchemy import or_, and_, func
 
 class ShoppingClass:
     def __init__(self, db):
@@ -1352,6 +1367,15 @@ class ShoppingClass:
 
     def get_inventories_by_shopping_id(self, shopping_id):
         try:
+            mov_bal = (
+                self.db.query(
+                    InventoryMovementModel.inventory_id.label("inv_id"),
+                    InventoryMovementModel.lot_item_id.label("lid"),
+                    func.coalesce(func.sum(InventoryMovementModel.quantity), 0).label("mov_qty"),
+                )
+                .group_by(InventoryMovementModel.inventory_id, InventoryMovementModel.lot_item_id)
+                .subquery()
+            )
             # Buscar directamente productos del shopping sin depender del lot_number en PreInventoryStockModel
             # porque el lot_number en PreInventoryStockModel puede no coincidir con el lot_number real del LotModel
             inventories_data = (
@@ -1363,15 +1387,21 @@ class ShoppingClass:
                     LotItemModel.public_sale_price,
                     LotItemModel.private_sale_price,
                     LotModel.arrival_date,
-                    LotItemModel.quantity,
-                    LotItemModel.unit_cost,
+                    func.coalesce(mov_bal.c.mov_qty, 0).label("quantity"),
                     LotModel.lot_number,
-                    LotItemModel.id.label("lot_item_id")
+                    LotItemModel.id.label("lot_item_id"),
                 )
                 .join(LotItemModel, LotItemModel.product_id == InventoryModel.product_id)
                 .join(LotModel, LotModel.id == LotItemModel.lot_id)
                 .join(ProductModel, ProductModel.id == InventoryModel.product_id)
                 .join(PreInventoryStockModel, PreInventoryStockModel.product_id == InventoryModel.product_id)
+                .outerjoin(
+                    mov_bal,
+                    and_(
+                        mov_bal.c.inv_id == InventoryModel.id,
+                        mov_bal.c.lid == LotItemModel.id,
+                    ),
+                )
                 .filter(PreInventoryStockModel.shopping_id == shopping_id)
                 .order_by(InventoryModel.product_id, LotItemModel.id.desc())
                 .all()
@@ -1397,7 +1427,7 @@ class ShoppingClass:
                     "product_name": item.product_name,
                     "product_code": item.product_code,
                     "quantity": item.quantity,
-                    "unit_cost": float(item.unit_cost) if item.unit_cost else 0,
+                    "unit_cost": float(average_unit_cost_for_product(self.db, item.product_id)),
                     "public_sale_price": float(item.public_sale_price) if item.public_sale_price else 0,
                     "private_sale_price": float(item.private_sale_price) if item.private_sale_price else 0,
                     "arrival_date": item.arrival_date.strftime("%Y-%m-%d") if item.arrival_date else None,

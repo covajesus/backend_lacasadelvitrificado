@@ -1,4 +1,15 @@
-from app.backend.db.models import ProductModel, SupplierModel, UnitFeatureModel, CategoryModel, LotModel, LotItemModel, UnitMeasureModel, InventoryLotItemModel, CustomerProductDiscountModel
+from app.backend.db.models import (
+    ProductModel,
+    SupplierModel,
+    UnitFeatureModel,
+    CategoryModel,
+    LotModel,
+    LotItemModel,
+    UnitMeasureModel,
+    CustomerProductDiscountModel,
+    InventoryModel,
+    InventoryMovementModel,
+)
 from app.backend.classes.file_class import FileClass
 from datetime import datetime
 from sqlalchemy import func, or_
@@ -6,6 +17,55 @@ from sqlalchemy import func, or_
 class ProductClass:
     def __init__(self, db):
         self.db = db
+
+    def _movement_stock_by_product_subquery(self):
+        """
+        Stock por producto = suma de ``inventories_movements.quantity`` solo del inventario
+        con mayor ``inventories.id`` por SKU (misma regla que ``KardexClass.get_all``).
+        """
+        latest_inv_sq = (
+            self.db.query(
+                InventoryModel.product_id.label("product_id"),
+                func.max(InventoryModel.id).label("latest_inventory_id"),
+            )
+            .group_by(InventoryModel.product_id)
+            .subquery()
+        )
+        stock_per_inv_sq = (
+            self.db.query(
+                InventoryMovementModel.inventory_id.label("inventory_id"),
+                func.coalesce(func.sum(InventoryMovementModel.quantity), 0).label("stock_sum"),
+            )
+            .group_by(InventoryMovementModel.inventory_id)
+            .subquery()
+        )
+        return (
+            self.db.query(
+                latest_inv_sq.c.product_id.label("product_id"),
+                func.coalesce(stock_per_inv_sq.c.stock_sum, 0).label("movement_stock"),
+            )
+            .select_from(latest_inv_sq)
+            .outerjoin(
+                stock_per_inv_sq,
+                stock_per_inv_sq.c.inventory_id == latest_inv_sq.c.latest_inventory_id,
+            )
+            .subquery()
+        )
+
+    def _sum_movement_quantity_for_product(self, product_id):
+        latest_id = (
+            self.db.query(func.max(InventoryModel.id))
+            .filter(InventoryModel.product_id == product_id)
+            .scalar()
+        )
+        if latest_id is None:
+            return 0
+        row = (
+            self.db.query(func.coalesce(func.sum(InventoryMovementModel.quantity), 0))
+            .filter(InventoryMovementModel.inventory_id == latest_id)
+            .scalar()
+        )
+        return int(row or 0)
 
     def get_all(self, page=0, items_per_page=10, supplier_id=None, product_id=None):
         try:
@@ -187,6 +247,7 @@ class ProductClass:
 
     def sale_list_by_category(self, category_id):
         try:
+            movement_stock_sq = self._movement_stock_by_product_subquery()
 
             if category_id == 0 or category_id is None:
                 data = (
@@ -204,7 +265,7 @@ class ProductClass:
                         ProductModel.description,
                         func.max(LotItemModel.public_sale_price).label("public_sale_price"),
                         func.max(LotItemModel.private_sale_price).label("private_sale_price"),
-                        func.sum(LotItemModel.quantity).label("total_stock"),
+                        func.coalesce(func.max(movement_stock_sq.c.movement_stock), 0).label("total_stock"),
                         func.group_concat(LotModel.lot_number.op('ORDER BY')(LotModel.lot_number)).label("lot_numbers")
                     )
                     .join(UnitMeasureModel, UnitMeasureModel.id == ProductModel.unit_measure_id, isouter=True)
@@ -212,6 +273,7 @@ class ProductClass:
                     .join(CategoryModel, CategoryModel.id == ProductModel.category_id, isouter=True)
                     .join(LotItemModel, LotItemModel.product_id == ProductModel.id)
                     .join(LotModel, LotModel.id == LotItemModel.lot_id)
+                    .outerjoin(movement_stock_sq, movement_stock_sq.c.product_id == ProductModel.id)
                     .group_by(
                         ProductModel.id,
                         ProductModel.code,
@@ -225,6 +287,7 @@ class ProductClass:
                         ProductModel.short_description,
                         ProductModel.description
                     )
+                    .having(func.coalesce(func.max(movement_stock_sq.c.movement_stock), 0) > 0)
                     .order_by(ProductModel.product)
                 )
             else:
@@ -288,6 +351,7 @@ class ProductClass:
         
     def sale_list(self, category_id):
         try:
+            movement_stock_sq = self._movement_stock_by_product_subquery()
 
             if category_id == 0 or category_id is None:
                 data = (
@@ -305,7 +369,7 @@ class ProductClass:
                         ProductModel.description,
                         func.max(LotItemModel.public_sale_price).label("public_sale_price"),
                         func.max(LotItemModel.private_sale_price).label("private_sale_price"),
-                        func.sum(LotItemModel.quantity).label("total_stock"),
+                        func.coalesce(func.max(movement_stock_sq.c.movement_stock), 0).label("total_stock"),
                         func.group_concat(LotModel.lot_number.op('ORDER BY')(LotModel.lot_number)).label("lot_numbers")
                     )
                     .join(UnitMeasureModel, UnitMeasureModel.id == ProductModel.unit_measure_id, isouter=True)
@@ -313,6 +377,7 @@ class ProductClass:
                     .join(CategoryModel, CategoryModel.id == ProductModel.category_id, isouter=True)
                     .join(LotItemModel, LotItemModel.product_id == ProductModel.id)
                     .join(LotModel, LotModel.id == LotItemModel.lot_id)
+                    .outerjoin(movement_stock_sq, movement_stock_sq.c.product_id == ProductModel.id)
                     .group_by(
                         ProductModel.id,
                         ProductModel.code,
@@ -326,6 +391,7 @@ class ProductClass:
                         ProductModel.short_description,
                         ProductModel.description
                     )
+                    .having(func.coalesce(func.max(movement_stock_sq.c.movement_stock), 0) > 0)
                     .order_by(ProductModel.product)
                 )
             else:
@@ -344,7 +410,7 @@ class ProductClass:
                         ProductModel.description,
                         func.max(LotItemModel.public_sale_price).label("public_sale_price"),
                         func.max(LotItemModel.private_sale_price).label("private_sale_price"),
-                        func.sum(LotItemModel.quantity).label("total_stock"),
+                        func.coalesce(func.max(movement_stock_sq.c.movement_stock), 0).label("total_stock"),
                         func.group_concat(LotModel.lot_number.op('ORDER BY')(LotModel.lot_number)).label("lot_numbers")
                     )
                     .join(UnitMeasureModel, UnitMeasureModel.id == ProductModel.unit_measure_id, isouter=True)
@@ -352,6 +418,7 @@ class ProductClass:
                     .join(CategoryModel, CategoryModel.id == ProductModel.category_id, isouter=True)
                     .join(LotItemModel, LotItemModel.product_id == ProductModel.id)
                     .join(LotModel, LotModel.id == LotItemModel.lot_id)
+                    .outerjoin(movement_stock_sq, movement_stock_sq.c.product_id == ProductModel.id)
                     .filter(ProductModel.category_id == category_id)
                     .group_by(
                         ProductModel.id,
@@ -366,6 +433,7 @@ class ProductClass:
                         ProductModel.short_description,
                         ProductModel.description
                     )
+                    .having(func.coalesce(func.max(movement_stock_sq.c.movement_stock), 0) > 0)
                     .order_by(ProductModel.product)
                 )
 
@@ -397,6 +465,7 @@ class ProductClass:
         
     def sale_data(self, id):
         try:
+            movement_stock_sq = self._movement_stock_by_product_subquery()
             # Consulta del producto
             data_query = (
                 self.db.query(
@@ -413,11 +482,12 @@ class ProductClass:
                     ProductModel.catalog,
                     func.max(LotItemModel.public_sale_price).label("public_sale_price"),
                     func.max(LotItemModel.private_sale_price).label("private_sale_price"),
-                    func.sum(LotItemModel.quantity).label("total_stock"),
+                    func.coalesce(func.max(movement_stock_sq.c.movement_stock), 0).label("total_stock"),
                     func.group_concat(LotModel.lot_number.op('ORDER BY')(LotModel.lot_number)).label("lot_numbers")
                 )
                 .join(LotItemModel, LotItemModel.product_id == ProductModel.id)
                 .join(LotModel, LotModel.id == LotItemModel.lot_id)
+                .outerjoin(movement_stock_sq, movement_stock_sq.c.product_id == ProductModel.id)
                 .filter(ProductModel.id == id)
                 .group_by(
                     ProductModel.id,
@@ -563,15 +633,7 @@ class ProductClass:
                         "updated_date": features.updated_date,
                     }
 
-            # Obtener cantidad en inventario desde inventories_lots (InventoryLotItemModel)
-            inventory_quantity = (
-                self.db.query(func.sum(InventoryLotItemModel.quantity))
-                .join(LotItemModel, LotItemModel.id == InventoryLotItemModel.lot_item_id)
-                .filter(LotItemModel.product_id == id)
-                .scalar()
-            )
-
-            product_data["inventory"] = int(inventory_quantity) if inventory_quantity else 0
+            product_data["inventory"] = self._sum_movement_quantity_for_product(id)
 
             return {"product_data": product_data}
 
@@ -681,15 +743,7 @@ class ProductClass:
                         "updated_date": features.updated_date,
                     }
 
-            # Obtener cantidad en inventario
-            inventory_quantity = (
-                self.db.query(func.sum(InventoryLotItemModel.quantity))
-                .join(LotItemModel, LotItemModel.id == InventoryLotItemModel.lot_item_id)
-                .filter(LotItemModel.product_id == id)
-                .scalar()
-            )
-
-            product_data["inventory"] = int(inventory_quantity) if inventory_quantity else 0
+            product_data["inventory"] = self._sum_movement_quantity_for_product(id)
 
             return {"product_data": product_data}
 

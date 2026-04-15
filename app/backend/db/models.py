@@ -329,20 +329,8 @@ class LotItemModel(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     lot_id = Column(Integer)
     product_id = Column(Integer)
-    quantity = Column(Integer)
-    unit_cost = Column(Integer)
-    public_sale_price = Column(Integer)
-    private_sale_price = Column(Integer)
-    added_date = Column(DateTime())
-    updated_date = Column(DateTime())
-
-class InventoryLotItemModel(Base):
-    __tablename__ = 'inventories_lots'
-
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    inventory_id = Column(Integer, ForeignKey('inventories.id'))
-    lot_item_id = Column(Integer, ForeignKey('lots.id'))
-    quantity = Column(Integer)
+    public_sale_price = Column(Float)
+    private_sale_price = Column(Float)
     added_date = Column(DateTime())
     updated_date = Column(DateTime())
 
@@ -385,16 +373,6 @@ class SupplierCategoryModel(Base):
     category_id = Column(Integer, ForeignKey('categories.id'))
     added_date = Column(DateTime(), default=datetime.now)
     updated_date = Column(DateTime())
-
-class KardexValuesModel(Base):
-    __tablename__ = 'kardex_values'
-
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    product_id = Column(Integer, ForeignKey('products.id'))
-    quantity = Column(Integer, default=0)
-    average_cost = Column(Integer, default=0)
-    added_date = Column(DateTime(), default=datetime.now)
-    updated_date = Column(DateTime(), default=datetime.now)
 
 class LogsModel(Base):
     __tablename__ = 'logs'

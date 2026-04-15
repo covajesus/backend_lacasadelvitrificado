@@ -13,10 +13,14 @@ kardex = APIRouter(
 @kardex.get("/")
 def index(page: int = 0, items_per_page: int = 10, session_user: UserLogin = Depends(get_current_active_user), db: Session = Depends(get_db)):
     """
-    Obtener todos los registros de kardex con paginación.
-    
-    - **page**: Número de página (0 para obtener todos)
-    - **items_per_page**: Elementos por página (por defecto 10)
+    Listado tipo inventario/kardex (usado en frontend /inventarios).
+
+    Cantidad = suma de ``inventories_movements`` por producto; costo medio derivado de movimientos.
+    Precios máximos público/privado desde ``lot_items``. ``inventory_id`` = inventario con mayor ``id`` por SKU.
+    ``kardex_values_id`` en la respuesta coincide con ``product_id`` (compatibilidad con el cliente).
+
+    - **page**: 0 = sin paginar (todos); >=1 pagina con offset.
+    - **items_per_page**: tamaño de página cuando ``page`` >= 1.
     """
     data = KardexClass(db).get_all(page, items_per_page)
     return {"message": data}
@@ -24,8 +28,8 @@ def index(page: int = 0, items_per_page: int = 10, session_user: UserLogin = Dep
 @kardex.get("/product/{product_id}")
 def get_by_product(product_id: int, session_user: UserLogin = Depends(get_current_active_user), db: Session = Depends(get_db)):
     """
-    Obtener registro de kardex por ID de producto.
-    
+    Kardex por producto: saldos y costo desde ``inventories_movements``, mismo criterio que el listado.
+
     - **product_id**: ID del producto
     """
     data = KardexClass(db).get_by_product_id(product_id)
@@ -34,13 +38,7 @@ def get_by_product(product_id: int, session_user: UserLogin = Depends(get_curren
 @kardex.get("/summary")
 def get_summary(session_user: UserLogin = Depends(get_current_active_user), db: Session = Depends(get_db)):
     """
-    Obtener resumen general del kardex.
-    
-    Incluye:
-    - Total de productos en kardex
-    - Cantidad total en inventario
-    - Valor total del inventario
-    - Costo promedio general
+    Resumen: productos con inventario, cantidad total en movimientos, valor y costo medio global.
     """
     data = KardexClass(db).get_summary()
     return {"message": data}

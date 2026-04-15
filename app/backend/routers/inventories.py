@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException, Query
 from app.backend.db.database import get_db
 from sqlalchemy.orm import Session
 from app.backend.schemas import UserLogin, StoreInventory, InventoryList, AddAdjustmentInput, RemoveAdjustmentInput, PreInventoryStocks
@@ -24,6 +24,19 @@ def store(inventory_inputs: StoreInventory, session_user: UserLogin = Depends(ge
 
     return {"message": data}
 
+
+@inventories.post("/update/{id}")
+def update_inventory(
+    id: int,
+    inventory_inputs: StoreInventory,
+    session_user: UserLogin = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+):
+    data = InventoryClass(db).update(id, inventory_inputs)
+    if isinstance(data, dict) and data.get("status") == "error":
+        raise HTTPException(status_code=400, detail=data.get("message", "Error"))
+    return {"message": data}
+
 @inventories.post("/pre_save_inventory_quantities/{shopping_id}")
 def pre_save_inventory_quantities(
     shopping_id: int,
@@ -45,6 +58,39 @@ def edit(id: int, session_user: UserLogin = Depends(get_current_active_user), db
     data = InventoryClass(db).get(id)
 
     return {"message": data}
+
+
+@inventories.get("/inventories_movements/{product_id}")
+def inventories_movements_by_product(
+    product_id: int,
+    session_user: UserLogin = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Lista todos los movimientos de inventario (``inventories_movements``) de todos los
+    inventarios asociados al **product_id**.
+    """
+    data = InventoryClass(db).get_movements_by_product_id(product_id)
+    if isinstance(data, dict) and data.get("status") == "error":
+        raise HTTPException(status_code=404, detail=data.get("message", "Error"))
+    return {"message": data}
+
+
+@inventories.delete("/movements/{movement_id}")
+def delete_inventory_movement(
+    movement_id: int,
+    product_id: int = Query(..., description="ID del producto (vista movimientos)"),
+    session_user: UserLogin = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Elimina un registro de ``inventories_movements`` si pertenece a un inventario de ``product_id``.
+    """
+    data = InventoryClass(db).delete_movement_by_id(movement_id, product_id)
+    if isinstance(data, dict) and data.get("status") == "error":
+        raise HTTPException(status_code=400, detail=data.get("message", "Error"))
+    return {"message": data}
+
 
 @inventories.post("/add_adjustment")
 def add_adjustment(inventory_inputs: AddAdjustmentInput, session_user: UserLogin = Depends(get_current_active_user), db: Session = Depends(get_db)):

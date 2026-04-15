@@ -559,3 +559,17 @@ def sales_report(
             status_code=500,
             detail=f"Error al generar el informe de ventas: {str(e)}"
         )
+
+
+@sales.get("/last_product_line/{product_id}")
+def last_product_line_for_inventory_form(
+    product_id: int,
+    session_user: UserLogin = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Última línea de venta procesada (``sales_products`` + movimiento) para precargar costo/precios
+    en formularios de inventario según el último despacho, no el primero.
+    """
+    data = SaleClass(db).last_sales_product_snapshot_for_product(product_id)
+    return {"message": data}

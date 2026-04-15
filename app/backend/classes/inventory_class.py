@@ -1,6 +1,22 @@
-from app.backend.db.models import InventoryModel, ProductModel, LotModel, LotItemModel, PreInventoryStockModel, InventoryLotItemModel, InventoryMovementModel, InventoryAuditModel, KardexValuesModel
+from app.backend.db.models import (
+    InventoryModel,
+    ProductModel,
+    LotModel,
+    LotItemModel,
+    PreInventoryStockModel,
+    InventoryMovementModel,
+    InventoryAuditModel,
+    MovementTypeModel,
+    SaleProductModel,
+)
 from datetime import datetime
 from sqlalchemy import func
+
+from app.backend.classes.inventory_stock import (
+    stock_sum_for_inventory,
+    stock_sum_for_product,
+    average_unit_cost_for_product,
+)
 
 class InventoryClass:
     def __init__(self, db):
@@ -8,6 +24,18 @@ class InventoryClass:
 
     def get_all(self, page=0, items_per_page=10):
         try:
+            stock_sq = (
+                self.db.query(
+                    InventoryModel.product_id.label("pid"),
+                    func.coalesce(func.sum(InventoryMovementModel.quantity), 0).label("stock_sum"),
+                )
+                .join(
+                    InventoryMovementModel,
+                    InventoryMovementModel.inventory_id == InventoryModel.id,
+                )
+                .group_by(InventoryModel.product_id)
+                .subquery()
+            )
             query = (
                 self.db.query(
                     func.min(InventoryModel.id).label("id"),
@@ -20,12 +48,12 @@ class InventoryClass:
                     ProductModel.product,
                     func.min(LotItemModel.public_sale_price).label("public_sale_price"),
                     func.min(LotItemModel.private_sale_price).label("private_sale_price"),
-                    func.avg(LotItemModel.unit_cost).label("average_cost"),
-                    func.avg(LotItemModel.quantity).label("stock"),
+                    func.coalesce(func.max(stock_sq.c.stock_sum), 0).label("stock"),
                 )
                 .join(ProductModel, ProductModel.id == InventoryModel.product_id, isouter=True)
                 .join(LotItemModel, LotItemModel.product_id == ProductModel.id, isouter=True)
                 .join(LotModel, LotModel.id == LotItemModel.lot_id, isouter=True)
+                .outerjoin(stock_sq, stock_sq.c.pid == InventoryModel.product_id)
                 .group_by(InventoryModel.product_id, ProductModel.product, LotModel.lot_number)
                 .order_by(func.min(InventoryModel.id))
             )
@@ -42,20 +70,23 @@ class InventoryClass:
                 if not data:
                     return {"status": "error", "message": "No data found"}
 
-                serialized_data = [{
-                    "id": inventory.id,
-                    "product_id": inventory.product_id,
-                    "location_id": inventory.location_id,
-                    "public_sale_price": inventory.public_sale_price,
-                    "private_sale_price": inventory.private_sale_price,
-                    "minimum_stock": inventory.minimum_stock,
-                    "stock": inventory.stock,
-                    "maximum_stock": inventory.maximum_stock,
-                    "added_date": inventory.added_date.strftime('%Y-%m-%d %H:%M:%S') if inventory.added_date else None,
-                    "last_update": inventory.last_update.strftime('%Y-%m-%d %H:%M:%S') if inventory.last_update else None,
-                    "product": inventory.product,
-                    "average_cost": round(inventory.average_cost, 2) if inventory.average_cost is not None else None
-                } for inventory in data]
+                serialized_data = []
+                for inventory in data:
+                    ac = average_unit_cost_for_product(self.db, inventory.product_id)
+                    serialized_data.append({
+                        "id": inventory.id,
+                        "product_id": inventory.product_id,
+                        "location_id": inventory.location_id,
+                        "public_sale_price": inventory.public_sale_price,
+                        "private_sale_price": inventory.private_sale_price,
+                        "minimum_stock": inventory.minimum_stock,
+                        "stock": inventory.stock,
+                        "maximum_stock": inventory.maximum_stock,
+                        "added_date": inventory.added_date.strftime('%Y-%m-%d %H:%M:%S') if inventory.added_date else None,
+                        "last_update": inventory.last_update.strftime('%Y-%m-%d %H:%M:%S') if inventory.last_update else None,
+                        "product": inventory.product,
+                        "average_cost": round(float(ac), 2) if ac else None,
+                    })
 
                 return {
                     "total_items": total_items,
@@ -68,20 +99,23 @@ class InventoryClass:
             else:
                 data = query.all()
 
-                serialized_data = [{
-                    "id": inventory.id,
-                    "product_id": inventory.product_id,
-                    "location_id": inventory.location_id,
-                    "public_sale_price": inventory.public_sale_price,
-                    "private_sale_price": inventory.private_sale_price,
-                    "minimum_stock": inventory.minimum_stock,
-                    "stock": inventory.stock,
-                    "maximum_stock": inventory.maximum_stock,
-                    "added_date": inventory.added_date.strftime('%Y-%m-%d %H:%M:%S') if inventory.added_date else None,
-                    "last_update": inventory.last_update.strftime('%Y-%m-%d %H:%M:%S') if inventory.last_update else None,
-                    "product": inventory.product,
-                    "average_cost": round(inventory.average_cost, 2) if inventory.average_cost is not None else None
-                } for inventory in data]
+                serialized_data = []
+                for inventory in data:
+                    ac = average_unit_cost_for_product(self.db, inventory.product_id)
+                    serialized_data.append({
+                        "id": inventory.id,
+                        "product_id": inventory.product_id,
+                        "location_id": inventory.location_id,
+                        "public_sale_price": inventory.public_sale_price,
+                        "private_sale_price": inventory.private_sale_price,
+                        "minimum_stock": inventory.minimum_stock,
+                        "stock": inventory.stock,
+                        "maximum_stock": inventory.maximum_stock,
+                        "added_date": inventory.added_date.strftime('%Y-%m-%d %H:%M:%S') if inventory.added_date else None,
+                        "last_update": inventory.last_update.strftime('%Y-%m-%d %H:%M:%S') if inventory.last_update else None,
+                        "product": inventory.product,
+                        "average_cost": round(float(ac), 2) if ac else None,
+                    })
 
                 return serialized_data
 
@@ -91,42 +125,67 @@ class InventoryClass:
     
     def get(self, id):
         try:
-            data_query = (
-                self.db.query(
-                    InventoryModel.id,
-                    InventoryModel.product_id,
-                    InventoryModel.location_id,
-                    LotItemModel.quantity.label("stock"),
-                    InventoryModel.minimum_stock,
-                    InventoryModel.maximum_stock,
-                    LotItemModel.id.label("lot_item_id"),
-                    LotItemModel.public_sale_price,
-                    LotItemModel.private_sale_price,
-                    LotItemModel.unit_cost
-                )
-                .join(ProductModel, ProductModel.id == InventoryModel.product_id, isouter=True)
-                .join(LotItemModel, LotItemModel.product_id == ProductModel.id, isouter=True)
-                .order_by(InventoryModel.id)
-            ).filter(InventoryModel.id == id).first()
-
-            if data_query:
-                inventory_data = {
-                    "id": data_query.id,
-                    "lot_item_id": data_query.lot_item_id,
-                    "product_id": data_query.product_id,
-                    "location_id": data_query.location_id,
-                    "stock": data_query.stock,
-                    "minimum_stock": data_query.minimum_stock,
-                    "maximum_stock": data_query.maximum_stock,
-                    "public_sale_price": data_query.public_sale_price,
-                    "private_sale_price": data_query.private_sale_price,
-                    "unit_cost": data_query.unit_cost
-                }
-
-                return {"inventory_data": inventory_data}
-
-            else:
+            inv = self.db.query(InventoryModel).filter(InventoryModel.id == id).first()
+            if not inv:
                 return {"error": "No se encontraron datos para el campo especificado."}
+
+            stock = stock_sum_for_inventory(self.db, id)
+
+            # Mismo criterio que ``update``: primer movimiento del inventario define el lote editable.
+            movement_lot_item_id = (
+                self.db.query(InventoryMovementModel.lot_item_id)
+                .filter(InventoryMovementModel.inventory_id == inv.id)
+                .order_by(InventoryMovementModel.id)
+                .limit(1)
+                .scalar()
+            )
+
+            lot_item = None
+            if movement_lot_item_id:
+                lot_item = self.db.query(LotItemModel).filter_by(id=movement_lot_item_id).first()
+
+            if not lot_item:
+                lot_item = (
+                    self.db.query(LotItemModel)
+                    .filter(LotItemModel.product_id == inv.product_id)
+                    .order_by(LotItemModel.id.desc())
+                    .first()
+                )
+
+            lot_number = None
+            arrival_date = None
+            public_sale_price = None
+            private_sale_price = None
+            lot_item_id = None
+
+            if lot_item:
+                lot_item_id = lot_item.id
+                public_sale_price = lot_item.public_sale_price
+                private_sale_price = lot_item.private_sale_price
+                if lot_item.lot_id:
+                    lot = self.db.query(LotModel).filter_by(id=lot_item.lot_id).first()
+                    if lot:
+                        lot_number = lot.lot_number
+                        arrival_date = lot.arrival_date.isoformat() if lot.arrival_date else None
+
+            unit_cost = int(average_unit_cost_for_product(self.db, inv.product_id))
+
+            inventory_data = {
+                "id": inv.id,
+                "lot_item_id": lot_item_id,
+                "product_id": inv.product_id,
+                "location_id": inv.location_id,
+                "stock": stock,
+                "minimum_stock": inv.minimum_stock,
+                "maximum_stock": inv.maximum_stock,
+                "public_sale_price": public_sale_price,
+                "private_sale_price": private_sale_price,
+                "unit_cost": unit_cost,
+                "lot_number": lot_number,
+                "arrival_date": arrival_date,
+            }
+
+            return {"inventory_data": inventory_data}
 
         except Exception as e:
             error_message = str(e)
@@ -142,36 +201,51 @@ class InventoryClass:
             # Actualizar campos del inventario
             inventory.product_id = inventory_inputs.product_id
             inventory.location_id = inventory_inputs.location_id
-            inventory.minimum_stock = inventory_inputs.minimum_stock
-            inventory.maximum_stock = inventory_inputs.maximum_stock
+            inventory.minimum_stock = int(inventory_inputs.minimum_stock)
+            inventory.maximum_stock = int(inventory_inputs.maximum_stock)
             inventory.last_update = datetime.now()
 
-            # Obtener relaciones
-            inventory_lot = self.db.query(InventoryLotItemModel).filter_by(inventory_id=inventory.id).first()
-            if inventory_lot:
-                lot_item = self.db.query(LotItemModel).filter_by(id=inventory_lot.lot_item_id).first()
+            lot_item_id = (
+                self.db.query(InventoryMovementModel.lot_item_id)
+                .filter(InventoryMovementModel.inventory_id == inventory.id)
+                .order_by(InventoryMovementModel.id)
+                .limit(1)
+                .scalar()
+            )
+            if lot_item_id:
+                lot_item = self.db.query(LotItemModel).filter_by(id=lot_item_id).first()
                 if lot_item:
                     lot = self.db.query(LotModel).filter_by(id=lot_item.lot_id).first()
-
-                    # Actualizar lote
                     if lot:
                         product = self.db.query(ProductModel).filter(ProductModel.id == inventory_inputs.product_id).first()
                         lot.supplier_id = product.supplier_id if product else None
                         lot.lot_number = inventory_inputs.lot_number
                         lot.arrival_date = inventory_inputs.arrival_date
                         lot.updated_date = datetime.now()
-
-                    # Actualizar ítem del lote
                     lot_item.product_id = inventory_inputs.product_id
-                    lot_item.quantity = inventory_inputs.stock
-                    lot_item.unit_cost = inventory_inputs.unit_cost
                     lot_item.public_sale_price = inventory_inputs.public_sale_price
                     lot_item.private_sale_price = inventory_inputs.private_sale_price
                     lot_item.updated_date = datetime.now()
 
-                # Actualizar inventario-lote relación
-                inventory_lot.quantity = inventory_inputs.stock
-                inventory_lot.updated_date = datetime.now()
+                current = stock_sum_for_inventory(self.db, inventory.id)
+                target = int(inventory_inputs.stock or 0)
+                delta = target - current
+                if delta != 0:
+                    movement_uc = int(
+                        average_unit_cost_for_product(self.db, inventory_inputs.product_id)
+                        or int(inventory_inputs.unit_cost or 0)
+                    )
+                    self.db.add(
+                        InventoryMovementModel(
+                            inventory_id=inventory.id,
+                            lot_item_id=lot_item_id,
+                            movement_type_id=4,
+                            quantity=delta,
+                            unit_cost=movement_uc,
+                            reason="Ajuste por actualización de inventario",
+                            added_date=datetime.now(),
+                        )
+                    )
 
             self.db.commit()
             self.db.refresh(inventory)
@@ -220,33 +294,8 @@ class InventoryClass:
             print(f"    - Precio público promedio: {avg_public_price}")
             print(f"    - Precio privado promedio: {avg_private_price}")
 
-            # Obtener costo del kardex
-            kardex_record = (
-                self.db.query(KardexValuesModel)
-                .filter(KardexValuesModel.product_id == product_id)
-                .first()
-            )
-
-            if not kardex_record:
-                return {"status": "error", "message": "No se encontró registro de kardex para este producto."}
-
-            unit_cost = kardex_record.average_cost
-            print(f"[+] Costo obtenido del kardex: {unit_cost}")
-
-            # Reducir cantidad en kardex SIN actualizar costo promedio
-            new_quantity = kardex_record.quantity - inventory_inputs.stock
-            if new_quantity < 0:
-                new_quantity = 0
-
-            kardex_record.quantity = new_quantity
-            kardex_record.updated_date = datetime.now()
-            self.db.commit()
-
-            print(f"[+] Kardex actualizado para producto {product_id}:")
-            print(f"    - Cantidad anterior: {kardex_record.quantity + inventory_inputs.stock}")
-            print(f"    - Cantidad removida: {inventory_inputs.stock}")
-            print(f"    - Nueva cantidad: {new_quantity}")
-            print(f"    - Costo promedio se mantiene: {kardex_record.average_cost}")
+            unit_cost = int(average_unit_cost_for_product(self.db, product_id))
+            print(f"[+] Costo medio desde movimientos: {unit_cost}")
 
             # Registrar el movimiento de inventario (solo aquí)
             inventory_movement = InventoryMovementModel(
@@ -263,15 +312,9 @@ class InventoryClass:
 
             return {
                 "status": "success",
-                "message": "Ajuste de inventario (salida) registrado correctamente. Kardex actualizado.",
+                "message": "Ajuste de inventario (salida) registrado correctamente.",
                 "inventory_id": inventory.id,
                 "movement_id": inventory_movement.id,
-                "kardex_updated": {
-                    "previous_quantity": kardex_record.quantity + inventory_inputs.stock,
-                    "removed_quantity": inventory_inputs.stock,
-                    "new_quantity": new_quantity,
-                    "average_cost": kardex_record.average_cost
-                }
             }
 
         except Exception as e:
@@ -326,12 +369,10 @@ class InventoryClass:
             )
 
             if not lot_item:
-                # Crear nuevo lot_item
+                # Crear nuevo lot_item; el saldo queda en inventories_movements
                 lot_item = LotItemModel(
                     lot_id=lot.id,
                     product_id=product_id,
-                    quantity=inventory_inputs.stock,
-                    unit_cost=inventory_inputs.unit_cost,
                     public_sale_price=inventory_inputs.public_sale_price,
                     private_sale_price=inventory_inputs.private_sale_price,
                     added_date=datetime.now(),
@@ -343,58 +384,16 @@ class InventoryClass:
                 print(f"[+] Nuevo lot_item creado para producto {product_id}")
             else:
                 # Actualizar lot_item existente
-                lot_item.quantity = lot_item.quantity + inventory_inputs.stock
-                lot_item.unit_cost = inventory_inputs.unit_cost
                 lot_item.public_sale_price = inventory_inputs.public_sale_price
                 lot_item.private_sale_price = inventory_inputs.private_sale_price
                 lot_item.updated_date = datetime.now()
                 self.db.commit()
                 print(f"[+] Lot_item actualizado para producto {product_id}")
 
-            # Buscar o crear inventory_lot
-            inventory_lot = (
-                self.db.query(InventoryLotItemModel)
-                .filter(InventoryLotItemModel.inventory_id == inventory.id)
-                .filter(InventoryLotItemModel.lot_item_id == lot_item.id)
-                .first()
+            movement_unit_cost = self.weighted_unit_cost_after_purchase(
+                product_id, inventory_inputs.stock, inventory_inputs.unit_cost
             )
-
-            if not inventory_lot:
-                # Crear nuevo inventory_lot
-                inventory_lot = InventoryLotItemModel(
-                    inventory_id=inventory.id,
-                    lot_item_id=lot_item.id,
-                    quantity=inventory_inputs.stock,
-                    added_date=datetime.now(),
-                    updated_date=datetime.now()
-                )
-                self.db.add(inventory_lot)
-                self.db.commit()
-                self.db.refresh(inventory_lot)
-                print(f"[+] Nuevo inventory_lot creado")
-            else:
-                # Actualizar inventory_lot existente
-                inventory_lot.quantity = inventory_lot.quantity + inventory_inputs.stock
-                inventory_lot.updated_date = datetime.now()
-                self.db.commit()
-                print(f"[+] Inventory_lot actualizado")
-
-            # Actualizar kardex con la nueva cantidad y recalcular costo promedio
-            self.update_kardex_values(
-                product_id=product_id,
-                new_quantity=inventory_inputs.stock,
-                new_unit_cost=inventory_inputs.unit_cost
-            )
-
-            # Obtener unit_cost del kardex para el movimiento (si existe)
-            kardex_record = (
-                self.db.query(KardexValuesModel)
-                .filter(KardexValuesModel.product_id == product_id)
-                .first()
-            )
-            
-            movement_unit_cost = kardex_record.average_cost if kardex_record else inventory_inputs.unit_cost
-            print(f"[+] Unit cost para movimiento: {movement_unit_cost} (del kardex: {kardex_record.average_cost if kardex_record else 'N/A'})")
+            print(f"[+] Unit cost para movimiento (ponderado desde movimientos): {movement_unit_cost}")
 
             # Registrar el movimiento de inventario
             inventory_movement = InventoryMovementModel(
@@ -411,11 +410,10 @@ class InventoryClass:
 
             return {
                 "status": "success",
-                "message": "Ajuste de inventario registrado correctamente. Kardex actualizado.",
+                "message": "Ajuste de inventario registrado correctamente.",
                 "inventory_id": inventory.id,
                 "lot_id": lot.id,
                 "lot_item_id": lot_item.id,
-                "inventory_lot_id": inventory_lot.id
             }
 
         except Exception as e:
@@ -437,81 +435,23 @@ class InventoryClass:
             self.db.rollback()
             return {"status": "error", "message": str(e)}
     
-    def update_kardex_values(self, product_id, new_quantity, new_unit_cost):
+    def weighted_unit_cost_after_purchase(self, product_id, incoming_qty, incoming_unit_cost):
         """
-        Actualiza los valores del kardex para un producto específico.
-        Calcula el costo promedio usando el método kardex.
-        
-        Ejemplo:
-        Saldo inicial: 100 unidades × 36.000 = 3.600.000
-        Compra: 50 unidades × 42.000 = 2.100.000
-        Nuevo total disponible:
-        - Unidades: 100 + 50 = 150
-        - Valor: 3.600.000 + 2.100.000 = 5.700.000
-        - Costo promedio unitario nuevo: 5.700.000 / 150 = 38.000
+        Costo medio unitario después de una entrada de mercadería, usando saldo y costo
+        actuales derivados de ``inventories_movements`` (misma lógica que el kardex histórico).
         """
-        try:
-            # Buscar el registro de kardex existente para este producto
-            kardex_record = (
-                self.db.query(KardexValuesModel)
-                .filter(KardexValuesModel.product_id == product_id)
-                .first()
-            )
-            
-            if kardex_record:
-                # Calcular el nuevo costo promedio usando kardex
-                current_quantity = kardex_record.quantity
-                current_average_cost = float(kardex_record.average_cost)
-                
-                # Calcular valores actuales
-                current_total_value = current_quantity * current_average_cost
-                new_total_value = new_quantity * new_unit_cost
-                
-                # Nuevos totales
-                new_total_quantity = current_quantity + new_quantity
-                new_total_value_sum = current_total_value + new_total_value
-                
-                # Calcular nuevo costo promedio
-                if new_total_quantity > 0:
-                    new_average_cost = new_total_value_sum / new_total_quantity
-                else:
-                    new_average_cost = new_unit_cost
-                
-                # Actualizar el registro existente
-                kardex_record.quantity = new_total_quantity
-                kardex_record.average_cost = int(round(new_average_cost))
-                kardex_record.updated_date = datetime.now()
-                
-                print(f"[+] Kardex actualizado para producto {product_id}:")
-                print(f"    - Cantidad anterior: {current_quantity}")
-                print(f"    - Cantidad nueva: {new_quantity}")
-                print(f"    - Total cantidad: {new_total_quantity}")
-                print(f"    - Costo promedio anterior: {current_average_cost}")
-                print(f"    - Costo promedio nuevo: {new_average_cost}")
-                
-            else:
-                # Crear nuevo registro de kardex
-                kardex_record = KardexValuesModel(
-                    product_id=product_id,
-                    quantity=new_quantity,
-                    average_cost=int(round(new_unit_cost)),
-                    added_date=datetime.now(),
-                    updated_date=datetime.now()
-                )
-                self.db.add(kardex_record)
-                
-                print(f"[+] Nuevo kardex creado para producto {product_id}:")
-                print(f"    - Cantidad: {new_quantity}")
-                print(f"    - Costo promedio: {new_unit_cost}")
-            
-            self.db.commit()
-            return kardex_record
-            
-        except Exception as e:
-            self.db.rollback()
-            print(f"[!] Error actualizando kardex para producto {product_id}: {str(e)}")
-            raise e
-        
+        current_qty = stock_sum_for_product(self.db, product_id)
+        current_avg = average_unit_cost_for_product(self.db, product_id) if current_qty > 0 else 0
+        iq = int(incoming_qty or 0)
+        ic = float(incoming_unit_cost or 0)
+        new_total_qty = current_qty + iq
+        if iq <= 0:
+            return int(round(current_avg)) if current_qty > 0 else 0
+        if new_total_qty <= 0:
+            return int(round(ic))
+        new_avg = (current_qty * float(current_avg) + iq * ic) / float(new_total_qty)
+        return int(round(new_avg))
+
     def store(self, inventory_inputs):
         try:
             # Verificar si el producto ya existe en la tabla inventory (solo por product_id)
@@ -571,8 +511,6 @@ class InventoryClass:
             new_lot_item = LotItemModel(
                 lot_id=new_lot.id,
                 product_id=inventory_inputs.product_id,
-                quantity=inventory_inputs.stock,
-                unit_cost=inventory_inputs.unit_cost,
                 public_sale_price=inventory_inputs.public_sale_price,
                 private_sale_price=inventory_inputs.private_sale_price,
                 added_date=datetime.now(),
@@ -584,36 +522,10 @@ class InventoryClass:
             self.db.commit()
             self.db.refresh(new_lot_item)
 
-            # Actualizar kardex_values con el nuevo lote
-            self.update_kardex_values(
-                product_id=inventory_inputs.product_id,
-                new_quantity=inventory_inputs.stock,
-                new_unit_cost=inventory_inputs.unit_cost
+            movement_unit_cost = self.weighted_unit_cost_after_purchase(
+                inventory_inputs.product_id, inventory_inputs.stock, inventory_inputs.unit_cost
             )
-
-            # Crear lote asociado
-            new_inventory_lot = InventoryLotItemModel(
-                inventory_id=inventory_id,  # Usar el inventory_id (nuevo o existente)
-                lot_item_id=new_lot_item.id,
-                quantity=inventory_inputs.stock,
-                added_date=datetime.now(),
-                updated_date=datetime.now()
-            )
-            self.db.add(new_inventory_lot)
-
-            # Confirmar transacción
-            self.db.commit()
-            self.db.refresh(new_inventory_lot)
-
-            # Obtener unit_cost del kardex para el movimiento (si existe)
-            kardex_record = (
-                self.db.query(KardexValuesModel)
-                .filter(KardexValuesModel.product_id == inventory_inputs.product_id)
-                .first()
-            )
-            
-            movement_unit_cost = kardex_record.average_cost if kardex_record else inventory_inputs.unit_cost
-            print(f"[+] Unit cost para movimiento: {movement_unit_cost} (del kardex: {kardex_record.average_cost if kardex_record else 'N/A'})")
+            print(f"[+] Unit cost para movimiento (ponderado desde movimientos): {movement_unit_cost}")
 
             # Crear lote asociado
             new_inventory_movement = InventoryMovementModel(
@@ -653,7 +565,6 @@ class InventoryClass:
                 "inventory_id": inventory_id,
                 "lot_id": new_lot.id,
                 "lot_item_id": new_lot_item.id,
-                "inventory_lot_id": new_inventory_lot.id
             }
 
         except Exception as e:
@@ -667,38 +578,37 @@ class InventoryClass:
             if not inventory:
                 return {"status": "error", "message": "Inventario no encontrado."}
 
-            # Buscar vínculos con lotes
-            inventory_lot = self.db.query(InventoryLotItemModel).filter_by(inventory_id=inventory.id).first()
+            movements = (
+                self.db.query(InventoryMovementModel)
+                .filter(InventoryMovementModel.inventory_id == inventory.id)
+                .all()
+            )
+            lot_item_ids = {m.lot_item_id for m in movements if m.lot_item_id is not None}
+            for movement in movements:
+                self.db.delete(movement)
+            self.db.flush()
 
-            if inventory_lot:
-                # Buscar movimientos del inventario
-                movements = self.db.query(InventoryMovementModel).filter_by(
-                    inventory_id=inventory.id,
-                    lot_item_id=inventory_lot.lot_item_id
-                ).all()
-                for movement in movements:
-                    self.db.delete(movement)
+            audits = self.db.query(InventoryAuditModel).filter_by(inventory_id=inventory.id).all()
+            for audit in audits:
+                self.db.delete(audit)
 
-                # Buscar auditorías
-                audits = self.db.query(InventoryAuditModel).filter_by(inventory_id=inventory.id).all()
-                for audit in audits:
-                    self.db.delete(audit)
-
-                # Buscar lot_item
-                lot_item = self.db.query(LotItemModel).filter_by(id=inventory_lot.lot_item_id).first()
+            for lid in lot_item_ids:
+                if (
+                    self.db.query(InventoryMovementModel)
+                    .filter(InventoryMovementModel.lot_item_id == lid)
+                    .count()
+                    > 0
+                ):
+                    continue
+                lot_item = self.db.query(LotItemModel).filter_by(id=lid).first()
                 if lot_item:
-                    # Buscar lote
-                    lot = self.db.query(LotModel).filter_by(id=lot_item.lot_id).first()
-
-                    # Eliminar lot_item
+                    lot_id = lot_item.lot_id
                     self.db.delete(lot_item)
-
-                    # Eliminar lote si existe
-                    if lot:
-                        self.db.delete(lot)
-
-                # Eliminar vínculo inventario-lote
-                self.db.delete(inventory_lot)
+                    self.db.flush()
+                    if lot_id and not self.db.query(LotItemModel).filter_by(lot_id=lot_id).first():
+                        lot = self.db.query(LotModel).filter_by(id=lot_id).first()
+                        if lot:
+                            self.db.delete(lot)
 
             # Eliminar inventario
             self.db.delete(inventory)
@@ -708,6 +618,104 @@ class InventoryClass:
 
             return {"status": "success", "message": "Inventario y relaciones eliminadas correctamente."}
 
+        except Exception as e:
+            self.db.rollback()
+            return {"status": "error", "message": str(e)}
+
+    def get_movements_by_product_id(self, product_id: int):
+        """
+        Todos los registros de ``inventories_movements`` cuyo ``inventory_id`` pertenece
+        a un inventario del ``product_id`` indicado.
+        """
+        try:
+            if not self.db.query(ProductModel.id).filter(ProductModel.id == product_id).first():
+                return {"status": "error", "message": "Producto no encontrado."}
+
+            rows = (
+                self.db.query(
+                    InventoryMovementModel.id,
+                    InventoryMovementModel.inventory_id,
+                    InventoryMovementModel.lot_item_id,
+                    InventoryMovementModel.movement_type_id,
+                    InventoryMovementModel.quantity,
+                    InventoryMovementModel.unit_cost,
+                    InventoryMovementModel.reason,
+                    InventoryMovementModel.added_date,
+                    MovementTypeModel.movement_type.label("movement_type"),
+                )
+                .join(InventoryModel, InventoryModel.id == InventoryMovementModel.inventory_id)
+                .outerjoin(
+                    MovementTypeModel,
+                    MovementTypeModel.id == InventoryMovementModel.movement_type_id,
+                )
+                .filter(InventoryModel.product_id == product_id)
+                .order_by(
+                    InventoryMovementModel.added_date.desc(),
+                    InventoryMovementModel.id.desc(),
+                )
+                .all()
+            )
+
+            return [
+                {
+                    "id": row.id,
+                    "inventory_id": row.inventory_id,
+                    "lot_item_id": row.lot_item_id,
+                    "movement_type_id": row.movement_type_id,
+                    "movement_type": row.movement_type,
+                    "quantity": int(row.quantity) if row.quantity is not None else 0,
+                    "unit_cost": int(row.unit_cost) if row.unit_cost is not None else 0,
+                    "reason": row.reason,
+                    "added_date": row.added_date.strftime("%Y-%m-%d %H:%M:%S")
+                    if row.added_date
+                    else None,
+                }
+                for row in rows
+            ]
+        except Exception as e:
+            return {"status": "error", "message": str(e)}
+
+    def delete_movement_by_id(self, movement_id: int, product_id: int):
+        """
+        Elimina una fila de ``inventories_movements`` si su inventario es del ``product_id``.
+        No recalcula costos agregados ni lotes; solo borra el registro del movimiento.
+
+        No permite borrar si existe una fila en ``sales_products`` que referencia el movimiento.
+        """
+        try:
+            if not self.db.query(ProductModel.id).filter(ProductModel.id == product_id).first():
+                return {"status": "error", "message": "Producto no encontrado."}
+
+            mov = (
+                self.db.query(InventoryMovementModel)
+                .filter(InventoryMovementModel.id == movement_id)
+                .first()
+            )
+            if not mov:
+                return {"status": "error", "message": "Movimiento no encontrado."}
+
+            inv = (
+                self.db.query(InventoryModel)
+                .filter(InventoryModel.id == mov.inventory_id)
+                .first()
+            )
+            if not inv or int(inv.product_id) != int(product_id):
+                return {"status": "error", "message": "El movimiento no corresponde a este producto."}
+
+            linked = (
+                self.db.query(SaleProductModel)
+                .filter(SaleProductModel.inventory_movement_id == movement_id)
+                .first()
+            )
+            if linked:
+                return {
+                    "status": "error",
+                    "message": "No se puede eliminar: el movimiento está vinculado a una venta.",
+                }
+
+            self.db.delete(mov)
+            self.db.commit()
+            return {"status": "success", "message": "Movimiento eliminado correctamente."}
         except Exception as e:
             self.db.rollback()
             return {"status": "error", "message": str(e)}

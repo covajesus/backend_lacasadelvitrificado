@@ -518,7 +518,7 @@ class StoreInventory(BaseModel):
     unit_cost: int
     public_sale_price: int
     private_sale_price: int
-    minimum_stock: int
+    minimum_stock: int = Field(ge=0, description="Stock mínimo de alerta; 0 permitido")
     maximum_stock: int
     lot_number: str
     arrival_date: date

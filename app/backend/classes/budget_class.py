@@ -11,8 +11,6 @@ from app.backend.db.models import (
     LotItemModel,
     LotModel,
     InventoryMovementModel,
-    KardexValuesModel,
-    InventoryLotItemModel,
     CustomerProductDiscountModel
 )
 from app.backend.classes.whatsapp_class import WhatsappClass

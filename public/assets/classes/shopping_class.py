@@ -1,16 +1,681 @@
+import io
+from contextlib import redirect_stdout, redirect_stderr
+
 from fastapi import HTTPException
-from app.backend.db.models import ShoppingModel, ShoppingProductModel, KilogramFeatureModel, LiterFeatureModel
+from app.backend.db.models import (
+    ShoppingModel,
+    ShoppingProductModel,
+    SupplierModel,
+    LotModel,
+    ProductModel,
+    UnitMeasureModel,
+    CategoryModel,
+    PreInventoryStockModel,
+    UnitFeatureModel,
+    InventoryModel,
+    LotItemModel,
+    SettingModel,
+    InventoryMovementModel,
+)
+from app.backend.schemas import ShoppingCreateInput
+from app.backend.classes.product_class import ProductClass
+from app.backend.classes.inventory_stock import average_unit_cost_for_product
 from datetime import datetime
+from sqlalchemy import or_, and_, func
 
 class ShoppingClass:
     def __init__(self, db):
         self.db = db
 
+    def list_all(self):
+        try:
+            data = (
+                self.db.query(
+                    ShoppingModel.id,
+                    ShoppingModel.shopping_number,
+                    ShoppingModel.supplier_id,
+                    ShoppingModel.status_id,
+                    ShoppingModel.email,
+                    ShoppingModel.total,
+                    SupplierModel.supplier,
+                    ShoppingModel.added_date
+                )
+                .join(SupplierModel, SupplierModel.id == ShoppingModel.supplier_id)
+                .order_by(ShoppingModel.id.desc())
+                .all()
+            )
+
+            return [{
+                "id": shopping.id,
+                "shopping_number": shopping.shopping_number,
+                "supplier_id": shopping.supplier_id,
+                "status_id": shopping.status_id,
+                "email": shopping.email,
+                "total": str(shopping.total),
+                "supplier": shopping.supplier,
+                "added_date": shopping.added_date.strftime("%d-%m-%Y")
+            } for shopping in data]
+
+        except Exception as e:
+            return {"status": "error", "message": str(e)}
+
+    def confirm(self, id):
+        existing_shopping = self.db.query(ShoppingModel).filter(ShoppingModel.id == id).one_or_none()
+
+        if not existing_shopping:
+            return "No data found"
+
+        try:
+            existing_shopping.status_id = 2
+            existing_shopping.updated_date = datetime.utcnow()
+
+            self.db.commit()
+            self.db.refresh(existing_shopping)
+            return "Shopping updated successfully"
+        except Exception as e:
+            self.db.rollback()
+            error_message = str(e)
+            return {"status": "error", "message": error_message}
+    
+    def send_customs_company_email(self, id, email):
+        existing_shopping = self.db.query(ShoppingModel).filter(ShoppingModel.id == id).one_or_none()
+
+        if not existing_shopping:
+            return "No data found"
+
+        try:
+            existing_shopping.status_id = 3
+            existing_shopping.customs_company_email = email
+            existing_shopping.updated_date = datetime.utcnow()
+
+            self.db.commit()
+            self.db.refresh(existing_shopping)
+            return "Shopping updated successfully"
+        except Exception as e:
+            self.db.rollback()
+            error_message = str(e)
+            return {"status": "error", "message": error_message}
+        
+    def get_shopping_data(self, shopping_id: int) -> ShoppingCreateInput:
+        shopping = self.db.query(ShoppingModel).filter(ShoppingModel.id == shopping_id).first()
+        if not shopping:
+            raise HTTPException(status_code=404, detail="Shopping not found")
+
+        shopping_products = (
+            self.db.query(ShoppingProductModel)
+            .filter(ShoppingProductModel.shopping_id == shopping_id)
+            .all()
+        )
+
+        products = []
+        for sp in shopping_products:
+            product = ProductClass(self.db).get(sp.product_id)
+            if not product:
+                continue
+            category_id = product["product_data"]["category_id"]
+
+            products.append({
+                "product_id": sp.product_id,
+                "unit_measure_id": sp.unit_measure_id,
+                "quantity": sp.quantity,
+                "original_unit_cost": sp.original_unit_cost,
+                "final_unit_cost": sp.final_unit_cost,
+                "category_id": category_id,
+                "total_amount": sp.total_amount,
+                "quantity_to_buy": sp.quantity_to_buy,
+                "discount_percentage": sp.discount_percentage
+            })
+
+        return ShoppingCreateInput(
+            shopping_number=shopping.shopping_number,
+            supplier_id=shopping.supplier_id,
+            email=shopping.email,
+            total=float(shopping.total),
+            products=products
+        )
+        
+    def get_all(self, page=0, items_per_page=10):
+        try:
+            query = (
+                self.db.query(
+                    ShoppingModel.id,
+                    ShoppingModel.shopping_number,
+                    ShoppingModel.supplier_id,
+                    ShoppingModel.status_id,
+                    ShoppingModel.email,
+                    ShoppingModel.total,
+                    SupplierModel.supplier,
+                    ShoppingModel.added_date
+                )
+                .join(SupplierModel, SupplierModel.id == ShoppingModel.supplier_id)
+                .order_by(ShoppingModel.id.desc())
+            )
+
+            if page > 0:
+                total_items = query.count()
+                total_pages = (total_items + items_per_page - 1)
+
+                if page < 1 or page > total_pages:
+                    return {"status": "error", "message": "Invalid page number"}
+
+                data = query.offset((page - 1) * items_per_page).limit(items_per_page).all()
+
+                if not data:
+                    return {"status": "error", "message": "No data found"}
+
+                serialized_data = [{
+                    "id": shopping.id,
+                    "shopping_number": shopping.shopping_number,
+                    "supplier_id": shopping.supplier_id,
+                    "status_id": shopping.status_id,
+                    "email": shopping.email,
+                    "total": str(shopping.total),
+                    "supplier": shopping.supplier,
+                    "added_date": shopping.added_date.strftime("%d-%m-%Y")
+                } for shopping in data]
+
+                return {
+                    "total_items": total_items,
+                    "total_pages": total_pages,
+                    "current_page": page,
+                    "items_per_page": items_per_page,
+                    "data": serialized_data
+                }
+
+            else:
+                data = query.all()
+
+                serialized_data = [{
+                    "id": shopping.id,
+                    "shopping_number": shopping.shopping_number,
+                    "supplier_id": shopping.supplier_id,
+                    "status_id": shopping.status_id,
+                    "email": shopping.email,
+                    "total": str(shopping.total),
+                    "supplier": shopping.supplier,
+                    "added_date": shopping.added_date.strftime("%d-%m-%Y")
+                } for shopping in data]
+
+                return serialized_data
+
+        except Exception as e:
+            error_message = str(e)
+            return {"status": "error", "message": error_message}
+    
+    def get_list(self):
+        try:
+            query = (
+                self.db.query(
+                    ShoppingModel.id,
+                    ShoppingModel.shopping_number,
+                    ShoppingModel.supplier_id,
+                    ShoppingModel.status_id,
+                    ShoppingModel.prepaid_status_id,
+                    ShoppingModel.email,
+                    ShoppingModel.total,
+                    SupplierModel.supplier,
+                    ShoppingModel.added_date
+                )
+                .join(SupplierModel, SupplierModel.id == ShoppingModel.supplier_id)
+                .order_by(ShoppingModel.id.desc())
+            )
+
+            data = query.all()
+
+            serialized_data = [{
+                "id": shopping.id,
+                "shopping_number": shopping.shopping_number,
+                "supplier_id": shopping.supplier_id,
+                "status_id": shopping.status_id,
+                "prepaid_status_id": shopping.prepaid_status_id,
+                "email": shopping.email,
+                "total": str(shopping.total),
+                "supplier": shopping.supplier,
+                "added_date": shopping.added_date.strftime("%d-%m-%Y")
+            } for shopping in data]
+
+            return serialized_data
+
+        except Exception as e:
+            error_message = str(e)
+            return {"status": "error", "message": error_message}
+    
+    def get_shopping_products_detail(self, shopping_id):
+        try:
+            query = (
+                self.db.query(
+                    ShoppingProductModel.id,
+                    ShoppingProductModel.shopping_id,
+                    ShoppingProductModel.product_id,
+                    ShoppingProductModel.unit_measure_id,
+                    ShoppingProductModel.quantity,
+                    ShoppingProductModel.quantity_to_buy,
+                    ShoppingProductModel.original_unit_cost,
+                    ShoppingProductModel.discount_percentage,
+                    ShoppingProductModel.final_unit_cost,
+                    ShoppingProductModel.total_amount,
+                    ProductModel.product,
+                    ProductModel.code,
+                    UnitMeasureModel.unit_measure,
+                    CategoryModel.category,
+                    ShoppingProductModel.added_date
+                )
+                .join(ProductModel, ProductModel.id == ShoppingProductModel.product_id)
+                .join(UnitMeasureModel, UnitMeasureModel.id == ShoppingProductModel.unit_measure_id)
+                .join(CategoryModel, CategoryModel.id == ProductModel.category_id)
+                .filter(ShoppingProductModel.shopping_id == shopping_id)
+                .order_by(ShoppingProductModel.id)
+            )
+
+            data = query.all()
+
+            if not data:
+                return {"status": "error", "message": "No products found for this shopping"}
+
+            serialized_data = [{
+                "id": item.id,
+                "shopping_id": item.shopping_id,
+                "product_id": item.product_id,
+                "product": item.product,
+                "code": item.code,
+                "unit_measure_id": item.unit_measure_id,
+                "unit_measure": item.unit_measure,
+                "category": item.category,
+                "quantity": item.quantity,
+                "quantity_to_buy": str(item.quantity_to_buy) if item.quantity_to_buy else "0",
+                "original_unit_cost": str(item.original_unit_cost) if item.original_unit_cost else "0",
+                "discount_percentage": item.discount_percentage,
+                "final_unit_cost": str(item.final_unit_cost) if item.final_unit_cost else "0",
+                "total_amount": str(item.total_amount) if item.total_amount else "0",
+                "added_date": item.added_date.strftime("%d-%m-%Y %H:%M:%S") if item.added_date else None
+            } for item in data]
+
+            return serialized_data
+
+        except Exception as e:
+            error_message = str(e)
+            return {"status": "error", "message": error_message}
+    
+    def get_pre_inventory_products(self, id, page=0, items_per_page=10000):
+        try:
+            # Obtener el shopping para verificar si tiene prepago
+            shopping = self.db.query(ShoppingModel).filter(ShoppingModel.id == id).first()
+            if not shopping:
+                return {"status": "error", "message": "Shopping not found"}
+            
+            # Verificar si tiene prepago (prepaid_status_id == 1)
+            has_prepaid = shopping.prepaid_status_id == 1 if shopping.prepaid_status_id else False
+            
+            # Obtener porcentaje de descuento desde settings
+            settings = self.db.query(SettingModel).first()
+            prepaid_discount_percentage = float(settings.prepaid_discount) if settings and settings.prepaid_discount and has_prepaid else 0.0
+            
+            query = (
+                self.db.query(
+                    ShoppingProductModel.product_id,
+                    ShoppingProductModel.quantity,
+                    ShoppingProductModel.quantity_to_buy,
+                    ShoppingProductModel.unit_measure_id,
+                    UnitMeasureModel.unit_measure,
+                    ProductModel.product,
+                    CategoryModel.category,
+                    ProductModel.code,
+                    ShoppingProductModel.original_unit_cost,
+                    ShoppingProductModel.discount_percentage,
+                    ShoppingProductModel.total_amount,
+                    ShoppingProductModel.final_unit_cost,
+                    PreInventoryStockModel.stock,
+                    PreInventoryStockModel.lot_number
+                )
+                .join(PreInventoryStockModel, PreInventoryStockModel.product_id == ShoppingProductModel.product_id)
+                .join(ProductModel, ProductModel.id == ShoppingProductModel.product_id)
+                .join(UnitMeasureModel, UnitMeasureModel.id == ShoppingProductModel.unit_measure_id)
+                .join(CategoryModel, CategoryModel.id == ProductModel.category_id)
+                .filter(ShoppingProductModel.shopping_id == id)
+                .filter(PreInventoryStockModel.shopping_id == id)
+                .order_by(ShoppingProductModel.id)
+            )
+
+            if page > 0:
+                total_items = query.count()
+                total_pages = (total_items + items_per_page - 1)
+
+                if page < 1 or page > total_pages:
+                    return {"status": "error", "message": "Invalid page number"}
+
+                data = query.offset((page - 1) * items_per_page).limit(items_per_page).all()
+
+                if not data:
+                    return {"status": "error", "message": "No data found"}
+
+                serialized_data = []
+                for shopping_product in data:
+                    # Calcular final_unit_cost considerando descuento de prepago
+                    final_unit_cost = shopping_product.final_unit_cost or 0
+                    if has_prepaid and prepaid_discount_percentage > 0:
+                        final_unit_cost = final_unit_cost * (1 - prepaid_discount_percentage / 100)
+                    # Redondear a 2 decimales
+                    final_unit_cost = round(final_unit_cost, 2)
+                    
+                    serialized_data.append({
+                        "product_id": shopping_product.product_id,
+                        "quantity": shopping_product.quantity,
+                        "unit_measure_id": shopping_product.unit_measure_id,
+                        "unit_measure": shopping_product.unit_measure,
+                        "product": shopping_product.product,
+                        "code": shopping_product.code,
+                        "original_unit_cost": shopping_product.original_unit_cost,
+                        "final_unit_cost": final_unit_cost,
+                        "quantity_to_buy": shopping_product.quantity_to_buy,
+                        "category": shopping_product.category,
+                        "discount_percentage": shopping_product.discount_percentage,
+                        "total_amount": shopping_product.total_amount,
+                        "stock": shopping_product.stock,
+                        "lot_number": shopping_product.lot_number
+                    })
+
+                return {
+                    "total_items": total_items,
+                    "total_pages": total_pages,
+                    "current_page": page,
+                    "items_per_page": items_per_page,
+                    "data": serialized_data
+                }
+
+            else:
+                data = query.all()
+
+                serialized_data = []
+                for shopping_product in data:
+                    # Calcular final_unit_cost considerando descuento de prepago
+                    final_unit_cost = shopping_product.final_unit_cost or 0
+                    if has_prepaid and prepaid_discount_percentage > 0:
+                        final_unit_cost = final_unit_cost * (1 - prepaid_discount_percentage / 100)
+                    # Redondear a 2 decimales
+                    final_unit_cost = round(final_unit_cost, 2)
+                    
+                    serialized_data.append({
+                        "product_id": shopping_product.product_id,
+                        "quantity": shopping_product.quantity,
+                        "unit_measure_id": shopping_product.unit_measure_id,
+                        "unit_measure": shopping_product.unit_measure,
+                        "product": shopping_product.product,
+                        "code": shopping_product.code,
+                        "original_unit_cost": shopping_product.original_unit_cost,
+                        "quantity_to_buy": shopping_product.quantity_to_buy,
+                        "category": shopping_product.category,
+                        "discount_percentage": shopping_product.discount_percentage,
+                        "total_amount": shopping_product.total_amount,
+                        "final_unit_cost": final_unit_cost,
+                        "stock": shopping_product.stock,
+                        "lot_number": shopping_product.lot_number
+                    })
+
+                return serialized_data
+
+        except Exception as e:
+            error_message = str(e)
+            return {"status": "error", "message": error_message}
+        
+    def get_products(self, id, page=0, items_per_page=10000):
+        try:
+            query = (
+                self.db.query(
+                    ShoppingProductModel.product_id,
+                    ShoppingProductModel.quantity,
+                    ShoppingProductModel.quantity_to_buy,
+                    ShoppingProductModel.unit_measure_id,
+                    UnitMeasureModel.unit_measure,
+                    ProductModel.product,
+                    UnitFeatureModel.quantity_per_package,
+                    CategoryModel.category,
+                    ProductModel.code,
+                    ShoppingProductModel.original_unit_cost,
+                    ShoppingProductModel.discount_percentage,
+                    ShoppingProductModel.total_amount,
+                    ShoppingProductModel.final_unit_cost
+                )
+                .join(ProductModel, ProductModel.id == ShoppingProductModel.product_id)
+                .join(UnitMeasureModel, UnitMeasureModel.id == ShoppingProductModel.unit_measure_id)
+                .join(CategoryModel, CategoryModel.id == ProductModel.category_id)
+                .outerjoin(UnitFeatureModel, UnitFeatureModel.product_id == ShoppingProductModel.product_id)
+                .filter(ShoppingProductModel.shopping_id == id)
+                .order_by(ShoppingProductModel.id)
+            )
+
+            if page > 0:
+                total_items = query.count()
+                total_pages = (total_items + items_per_page - 1)
+
+                if page < 1 or page > total_pages:
+                    return {"status": "error", "message": "Invalid page number"}
+
+                data = query.offset((page - 1) * items_per_page).limit(items_per_page).all()
+
+                if not data:
+                    return {"status": "error", "message": "No data found"}
+
+                serialized_data = [{
+                    "product_id": shopping_product.product_id,
+                    "quantity": shopping_product.quantity,
+                    "unit_measure_id": shopping_product.unit_measure_id,
+                    "unit_measure": shopping_product.unit_measure,
+                    "product": shopping_product.product,
+                    "quantity_per_package": shopping_product.quantity_per_package,
+                    "code": shopping_product.code,
+                    "original_unit_cost": shopping_product.original_unit_cost,
+                    "final_unit_cost": shopping_product.final_unit_cost,
+                    "quantity_to_buy": shopping_product.quantity_to_buy,
+                    "category": shopping_product.category,
+                    "discount_percentage": shopping_product.discount_percentage,
+                    "total_amount": shopping_product.total_amount
+                } for shopping_product in data]
+
+                return {
+                    "total_items": total_items,
+                    "total_pages": total_pages,
+                    "current_page": page,
+                    "items_per_page": items_per_page,
+                    "data": serialized_data
+                }
+
+            else:
+                data = query.all()
+
+                serialized_data = [{
+                    "product_id": shopping_product.product_id,
+                    "quantity": shopping_product.quantity,
+                    "unit_measure_id": shopping_product.unit_measure_id,
+                    "unit_measure": shopping_product.unit_measure,
+                    "product": shopping_product.product,
+                    "quantity_per_package": shopping_product.quantity_per_package,
+                    "code": shopping_product.code,
+                    "original_unit_cost": shopping_product.original_unit_cost,
+                    "quantity_to_buy": shopping_product.quantity_to_buy,
+                    "category": shopping_product.category,
+                    "discount_percentage": shopping_product.discount_percentage,
+                    "total_amount": shopping_product.total_amount,
+                    "final_unit_cost": shopping_product.final_unit_cost
+                } for shopping_product in data]
+
+                return serialized_data
+
+        except Exception as e:
+            error_message = str(e)
+            return {"status": "error", "message": error_message}
+        
+    def get(self, id):
+        try:
+            data_query = self.db.query(ShoppingModel).filter(ShoppingModel.id == id).first()
+
+            if not data_query:
+                return {"error": "No se encontraron datos para la compra especificado."}
+            
+            # Obtener el nombre del proveedor
+            supplier = self.db.query(SupplierModel.supplier).filter(SupplierModel.id == data_query.supplier_id).first()
+
+            shopping_data = {
+                "id": data_query.id,
+                "shopping_number": data_query.shopping_number,
+                "supplier_id": data_query.supplier_id,
+                "status_id": data_query.status_id,
+                "email": data_query.email,
+                "total": str(data_query.total) if data_query.total else None,
+                "supplier": supplier.supplier if supplier else None,
+                "added_date": data_query.added_date.strftime("%d-%m-%Y") if data_query.added_date else None,
+                "prepaid_status_id": data_query.prepaid_status_id,
+                "maritime_freight": data_query.maritime_freight,
+                "merchandise_insurance": data_query.merchandise_insurance,
+                "manifest_opening": data_query.manifest_opening,
+                "deconsolidation": data_query.deconsolidation,
+                "land_freight": data_query.land_freight,
+                "provision_funds": data_query.provision_funds,
+                "port_charges": data_query.port_charges,
+                "tax_explosive_product": data_query.tax_explosive_product,
+                "honoraries": data_query.honoraries,
+                "physical_assessment_expenses": data_query.physical_assessment_expenses,
+                "administrative_expenses": data_query.administrative_expenses,
+                "folder_processing": data_query.folder_processing,
+                "valija_expenses": data_query.valija_expenses,
+                "wire_transfer_amount": data_query.wire_transfer_amount,
+                "wire_transfer_date": data_query.wire_transfer_date.strftime("%Y-%m-%d") if data_query.wire_transfer_date else None,
+                "commission": data_query.commission,
+                "exchange_rate": data_query.exchange_rate,
+                "extra_expenses": data_query.extra_expenses,
+                "euro_value": data_query.euro_value,
+                "payment_support": data_query.payment_support,
+                "customs_company_support": data_query.customs_company_support,
+                "maritime_freight_dollar": data_query.maritime_freight_dollar,
+                "merchandise_insurance_dollar": data_query.merchandise_insurance_dollar,
+                "manifest_opening_dollar": data_query.manifest_opening_dollar,
+                "deconsolidation_dollar": data_query.deconsolidation_dollar,
+                "land_freight_dollar": data_query.land_freight_dollar,
+                "provision_funds_dollar": data_query.provision_funds_dollar,
+                "port_charges_dollar": data_query.port_charges_dollar,
+                "honoraries_dollar": data_query.honoraries_dollar,
+                "physical_assessment_expenses_dollar": data_query.physical_assessment_expenses_dollar,
+                "administrative_expenses_dollar": data_query.administrative_expenses_dollar,
+                "folder_processing_dollar": data_query.folder_processing_dollar,
+                "valija_expenses_dollar": data_query.valija_expenses_dollar,
+                "tax_explosive_product_dollar": data_query.tax_explosive_product_dollar,
+                "updated_date": data_query.updated_date.strftime("%d-%m-%Y %H:%M:%S") if data_query.updated_date else None
+            }
+
+            return {"shopping_data": shopping_data}
+
+        except Exception as e:
+            return {"error": str(e)}
+
+    def store_payment_documents(self, id, form_data):
+        try:
+            shopping = self.db.query(ShoppingModel).filter(ShoppingModel.id == id).first()
+            if not shopping:
+                return {"error": "Shopping not found"}
+
+            print("Payment documents:", form_data)
+
+            shopping.euro_value = form_data.euro_value
+            shopping.status_id = 5
+
+            self.db.commit()
+            return {"message": "Payment documents stored successfully"}
+        except Exception as e:
+            return {"error": str(e)}
+         
+    def _parse_number(self, value):
+        """
+        Convierte un valor con formato europeo/latinoamericano a float.
+        Maneja diferentes formatos:
+        - Formato europeo: 930,89 -> 930.89
+        - Formato con miles: 1.234,56 -> 1234.56
+        - Formato inglés: 930.89 -> 930.89
+        """
+        if value is None or value == '':
+            return None
+        
+        value_str = str(value).strip()
+        
+        # Si está vacío después de quitar espacios
+        if not value_str:
+            return None
+        
+        # Detectar el último separador para saber cuál es el decimal
+        last_comma_pos = value_str.rfind(',')
+        last_dot_pos = value_str.rfind('.')
+        
+        if last_comma_pos > last_dot_pos:
+            # La coma es el separador decimal (formato europeo: 930,89 o 1.234,56)
+            # Quitar todos los puntos (separadores de miles) y reemplazar coma por punto
+            value_str = value_str.replace('.', '').replace(',', '.')
+        elif last_dot_pos > last_comma_pos:
+            # El punto es el separador decimal (formato inglés: 930.89 o 1,234.89)
+            # Quitar todas las comas (separadores de miles)
+            value_str = value_str.replace(',', '')
+        elif ',' in value_str:
+            # Solo tiene comas, asumir formato europeo
+            value_str = value_str.replace(',', '.')
+        # Si solo tiene puntos o no tiene separadores, usar tal cual
+        
+        try:
+            return float(value_str) if value_str else None
+        except ValueError:
+            return None
+
+    def store_customs_company_documents(self, id, form_data):
+        try:
+            shopping = self.db.query(ShoppingModel).filter(ShoppingModel.id == id).first()
+            if not shopping:
+                return {"error": "Shopping not found"}
+            
+            print("Customs company documents:", form_data)
+
+            # Parsear valores numéricos USD
+            shopping.maritime_freight = self._parse_number(form_data.maritime_freight)
+            shopping.merchandise_insurance = self._parse_number(form_data.merchandise_insurance)
+            shopping.manifest_opening = self._parse_number(form_data.manifest_opening)
+            shopping.deconsolidation = self._parse_number(form_data.deconsolidation)
+            shopping.land_freight = self._parse_number(form_data.land_freight)
+            shopping.provision_funds = self._parse_number(form_data.provision_funds)
+            shopping.port_charges = self._parse_number(form_data.port_charges)
+            shopping.honoraries = self._parse_number(form_data.honoraries)
+            shopping.physical_assessment_expenses = self._parse_number(form_data.physical_assessment_expenses)
+            shopping.administrative_expenses = self._parse_number(form_data.administrative_expenses)
+            shopping.folder_processing = self._parse_number(form_data.folder_processing)
+            shopping.valija_expenses = self._parse_number(form_data.valija_expenses)
+            shopping.tax_explosive_product = self._parse_number(form_data.tax_explosive_product)
+            shopping.commission = self._parse_number(form_data.commission)
+
+            # Parsear valores de dólar específicos
+            shopping.maritime_freight_dollar = self._parse_number(form_data.maritime_freight_dollar)
+            shopping.merchandise_insurance_dollar = self._parse_number(form_data.merchandise_insurance_dollar)
+            shopping.manifest_opening_dollar = self._parse_number(form_data.manifest_opening_dollar)
+            shopping.deconsolidation_dollar = self._parse_number(form_data.deconsolidation_dollar)
+            shopping.land_freight_dollar = self._parse_number(form_data.land_freight_dollar)
+            shopping.provision_funds_dollar = self._parse_number(form_data.provision_funds_dollar)
+            shopping.port_charges_dollar = self._parse_number(form_data.port_charges_dollar)
+            shopping.honoraries_dollar = self._parse_number(form_data.honoraries_dollar)
+            shopping.physical_assessment_expenses_dollar = self._parse_number(form_data.physical_assessment_expenses_dollar)
+            shopping.administrative_expenses_dollar = self._parse_number(form_data.administrative_expenses_dollar)
+            shopping.folder_processing_dollar = self._parse_number(form_data.folder_processing_dollar)
+            shopping.valija_expenses_dollar = self._parse_number(form_data.valija_expenses_dollar)
+            shopping.tax_explosive_product_dollar = self._parse_number(form_data.tax_explosive_product_dollar)
+
+            # Actualizar status
+            shopping.status_id = 4
+
+            self.db.commit()
+            return {"message": "Customs company documents stored successfully"}
+        except Exception as e:
+            return {"error": str(e)}
+
     def store(self, data):
         try:
             new_shopping = ShoppingModel(
+                    shopping_number=data.shopping_number,
                     supplier_id=data.supplier_id,
                     email=data.email,
+                    prepaid_status_id=data.prepaid_status_id,
+                    status_id=1,
                     total=data.total,
                     added_date=datetime.utcnow(),
                     updated_date=datetime.utcnow()
@@ -21,23 +686,16 @@ class ShoppingClass:
             self.db.refresh(new_shopping)
 
             for product in data.products:
-                if product.unit_measure_id == 1:
-                    kilogram_features = self.db.query(KilogramFeatureModel).filter(KilogramFeatureModel.product_id == product.product_id).first()
-
-                    quantity_per_package = kilogram_features.quantity_per_package * product.quantity
-                elif product.unit_measure_id == 2:
-                    liter_features = self.db.query(LiterFeatureModel).filter(LiterFeatureModel.product_id == product.product_id).first()
-                
-                    quantity_per_package = liter_features.quantity_per_package * product.quantity
-                else:
-                    quantity_per_package = product.quantity 
-                
                 new_shopping_product = ShoppingProductModel(
                     shopping_id=new_shopping.id,
                     product_id=product.product_id,
                     unit_measure_id=product.unit_measure_id,
                     quantity=product.quantity,
-                    quantity_per_package=quantity_per_package,
+                    quantity_to_buy=product.quantity_to_buy,
+                    original_unit_cost=product.original_unit_cost,
+                    discount_percentage=product.discount_percentage,
+                    final_unit_cost=product.final_unit_cost,
+                    total_amount=product.total_amount,
                     added_date=datetime.utcnow(),
                     updated_date=datetime.utcnow()
                 )
@@ -49,3 +707,810 @@ class ShoppingClass:
         except Exception as e:
             print("Error:", e)
             raise HTTPException(status_code=500, detail="Error to store shopping")
+
+    def save_pre_inventory_quantities(self, shopping_id, items):
+        try:
+            existing_shopping = self.db.query(ShoppingModel).filter(ShoppingModel.id == shopping_id).one_or_none()
+
+            if not existing_shopping:
+                raise HTTPException(status_code=404, detail="Shopping not found")
+            
+            existing_shopping.status_id = 6
+            existing_shopping.updated_date = datetime.utcnow()
+            self.db.commit()
+            self.db.refresh(existing_shopping)
+           
+            last_lot = self.db.query(LotModel.lot_number).order_by(LotModel.lot_number.desc()).first()
+
+            next_lot_number = last_lot.lot_number + 1 if last_lot else 1
+            
+            for item in items:
+                new_pre_inventory = PreInventoryStockModel(
+                    shopping_id=shopping_id,
+                    product_id=item.product_id,
+                    lot_number=next_lot_number,
+                    stock=item.stock,
+                    added_date=datetime.utcnow(),
+                    updated_date=datetime.utcnow()
+                )
+                self.db.add(new_pre_inventory)
+            self.db.commit()
+            return {"message": "Pre-inventory quantities saved successfully"}
+        except Exception as e:
+            print("Error:", e)
+            raise HTTPException(status_code=500, detail="Error to save pre-inventory quantities")
+
+    def update(self, id, data):
+        """
+        Actualiza una compra existente y sus productos asociados
+        """
+        try:
+            existing_shopping = self.db.query(ShoppingModel).filter(ShoppingModel.id == id).one_or_none()
+
+            if not existing_shopping:
+                return {"status": "error", "message": "Shopping not found"}
+
+            # Actualizar solo los datos que se guardan en la base de datos
+            existing_shopping.shopping_number = data.shopping_number
+            existing_shopping.supplier_id = data.supplier_id
+            existing_shopping.email = data.email  # Solo el email principal
+            existing_shopping.total = data.total
+            existing_shopping.updated_date = datetime.utcnow()
+            
+            # Solo actualizar prepaid_status_id si está presente
+            if hasattr(data, 'prepaid_status_id') and data.prepaid_status_id:
+                existing_shopping.prepaid_status_id = data.prepaid_status_id
+
+            self.db.commit()
+            self.db.refresh(existing_shopping)
+
+            # Eliminar productos existentes
+            existing_products = self.db.query(ShoppingProductModel).filter(
+                ShoppingProductModel.shopping_id == id
+            ).all()
+            
+            for product in existing_products:
+                self.db.delete(product)
+            
+            self.db.commit()
+
+            # Agregar nuevos productos
+            for product in data.products:
+                new_shopping_product = ShoppingProductModel(
+                    shopping_id=id,
+                    product_id=product.product_id,
+                    unit_measure_id=product.unit_measure_id,
+                    quantity=product.quantity,
+                    quantity_to_buy=product.quantity_to_buy,
+                    original_unit_cost=product.original_unit_cost,
+                    discount_percentage=product.discount_percentage,
+                    final_unit_cost=product.final_unit_cost,
+                    total_amount=product.total_amount,
+                    added_date=datetime.utcnow(),
+                    updated_date=datetime.utcnow()
+                )
+                self.db.add(new_shopping_product)
+            
+            self.db.commit()
+
+            return {"status": "success", "message": "Shopping updated successfully", "shopping_id": id}
+
+        except Exception as e:
+            self.db.rollback()
+            print("Error:", e)
+            return {"status": "error", "message": str(e)}
+
+    def calculate_unit_cost_for_product(self, shopping_id, product_id, quantity):
+        """
+        Calcula el unit_cost para un producto específico basado en:
+        1. final_unit_cost del producto convertido de euros a pesos
+        2. Costo de envío distribuido proporcionalmente por valor en CLP
+        3. Costo final por litro/peso/unidad según la unidad de medida
+        Devuelve: {"product_name": str, "precio_x_litro": float}
+        """
+        try:
+            # Obtener los datos del shopping con todos los costos de envío
+            shopping = self.db.query(ShoppingModel).filter(ShoppingModel.id == shopping_id).first()
+            if not shopping:
+                return {"product_name": "Error", "precio_x_litro": 0}
+
+            # Obtener el nombre del producto
+            product = self.db.query(ProductModel).filter(ProductModel.id == product_id).first()
+            product_name = product.product if product else "Producto no encontrado"
+
+            # Obtener el exchange_rate para convertir euros a pesos
+            exchange_rate = shopping.exchange_rate or 1
+
+            # Obtener el producto y su final_unit_cost del shopping
+            shopping_product = (
+                self.db.query(ShoppingProductModel)
+                .filter(
+                    ShoppingProductModel.shopping_id == shopping_id,
+                    ShoppingProductModel.product_id == product_id
+                )
+                .first()
+            )
+
+            if not shopping_product:
+                print(f"ERROR: ShoppingProduct no encontrado para shopping_id={shopping_id}, product_id={product_id}")
+                return {"product_name": product_name, "precio_x_litro": 0}
+
+            # Obtener final_unit_cost original
+            final_unit_cost_euros_original = shopping_product.final_unit_cost or 0
+            
+            # Verificar si tiene prepago y aplicar descuento
+            has_prepaid = shopping.prepaid_status_id == 1 if shopping.prepaid_status_id else False
+            prepaid_discount_percentage = 0
+            
+            if has_prepaid:
+                # Obtener porcentaje de descuento desde settings
+                settings = self.db.query(SettingModel).first()
+                if settings and settings.prepaid_discount:
+                    prepaid_discount_percentage = float(settings.prepaid_discount)
+                    # Aplicar descuento: multiplicar por (1 - descuento/100)
+                    final_unit_cost_euros = final_unit_cost_euros_original * (1 - prepaid_discount_percentage / 100)
+                    print(f"  - Prepaid activo: descuento {prepaid_discount_percentage}% aplicado")
+                    print(f"  - final_unit_cost_euros_original: {final_unit_cost_euros_original}")
+                    print(f"  - final_unit_cost_euros con descuento: {final_unit_cost_euros}")
+                else:
+                    final_unit_cost_euros = final_unit_cost_euros_original
+            else:
+                final_unit_cost_euros = final_unit_cost_euros_original
+
+            # Obtener el exchange_rate para dólares (usar el mismo que para euros por ahora)
+            dollar_exchange_rate = exchange_rate
+            
+            # Calcular el total de costos de envío multiplicando cada campo por su valor en dólares
+            # y convirtiendo a pesos, luego sumando la comisión (que ya está en pesos)
+            total_shipping_costs = (
+                (shopping.maritime_freight or 0) * (shopping.maritime_freight_dollar or 0) * dollar_exchange_rate +
+                (shopping.merchandise_insurance or 0) * (shopping.merchandise_insurance_dollar or 0) * dollar_exchange_rate +
+                (shopping.manifest_opening or 0) * (shopping.manifest_opening_dollar or 0) * dollar_exchange_rate +
+                (shopping.deconsolidation or 0) * (shopping.deconsolidation_dollar or 0) * dollar_exchange_rate +
+                (shopping.land_freight or 0) * (shopping.land_freight_dollar or 0) * dollar_exchange_rate +
+                (shopping.provision_funds or 0) * (shopping.provision_funds_dollar or 0) * dollar_exchange_rate +
+                (shopping.port_charges or 0) * (shopping.port_charges_dollar or 0) * dollar_exchange_rate +
+                (shopping.tax_explosive_product or 0) * (shopping.tax_explosive_product_dollar or 0) * dollar_exchange_rate +
+                (shopping.honoraries or 0) * (shopping.honoraries_dollar or 0) * dollar_exchange_rate +
+                (shopping.physical_assessment_expenses or 0) * (shopping.physical_assessment_expenses_dollar or 0) * dollar_exchange_rate +
+                (shopping.administrative_expenses or 0) * (shopping.administrative_expenses_dollar or 0) * dollar_exchange_rate +
+                (shopping.folder_processing or 0) * (shopping.folder_processing_dollar or 0) * dollar_exchange_rate +
+                (shopping.valija_expenses or 0) * (shopping.valija_expenses_dollar or 0) * dollar_exchange_rate +
+                (shopping.commission or 0)  # La comisión ya está en pesos, no se multiplica
+            )
+
+            # Obtener euro_value del shopping
+            euro_value = shopping.euro_value or 1
+            
+            # Verificar si tiene prepago y obtener descuento
+            has_prepaid = shopping.prepaid_status_id == 1 if shopping.prepaid_status_id else False
+            prepaid_discount_percentage = 0
+            if has_prepaid:
+                settings = self.db.query(SettingModel).first()
+                if settings and settings.prepaid_discount:
+                    prepaid_discount_percentage = float(settings.prepaid_discount)
+
+            # Recorrer pre_inventory_stocks y calcular el valor en CLP de cada producto
+            pre_inventory_stocks = (
+                self.db.query(PreInventoryStockModel)
+                .filter(PreInventoryStockModel.shopping_id == shopping_id)
+                .all()
+            )
+
+            # Calcular productAmountCLP (en pesos chilenos) para cada producto y el total
+            # Fórmula: productAmountCLP = final_unit_cost * stock * euro_value
+            product_amounts_clp = {}  # {product_id: productAmountCLP}
+            total_productos_clp = 0
+            
+            for pre_stock in pre_inventory_stocks:
+                # Obtener el stock (cantidad de paquetes)
+                stock_quantity = pre_stock.stock or 0
+                
+                # Obtener final_unit_cost de shopping_products
+                shopping_product_item = (
+                    self.db.query(ShoppingProductModel)
+                    .filter(
+                        ShoppingProductModel.shopping_id == shopping_id,
+                        ShoppingProductModel.product_id == pre_stock.product_id
+                    )
+                    .first()
+                )
+                
+                if shopping_product_item:
+                    final_unit_cost_original = shopping_product_item.final_unit_cost or 0
+                    
+                    # Aplicar descuento de prepago si aplica
+                    if has_prepaid and prepaid_discount_percentage > 0:
+                        final_unit_cost = final_unit_cost_original * (1 - prepaid_discount_percentage / 100)
+                    else:
+                        final_unit_cost = final_unit_cost_original
+                    
+                    # Obtener quantity_per_package de UnitFeatureModel (todos los tipos de unidades usan esta tabla)
+                    quantity_per_package = 1  # Default
+                    unit_feature = self.db.query(UnitFeatureModel).filter(
+                        UnitFeatureModel.product_id == pre_stock.product_id
+                    ).first()
+                    if unit_feature:
+                        quantity_per_package = unit_feature.quantity_per_package or 1
+                    
+                    # Calcular cantidad real (stock_quantity es paquetes, multiplicar por quantity_per_package)
+                    real_quantity = stock_quantity * quantity_per_package
+                    
+                    # Multiplicar final_unit_cost * cantidad_real * euro_value (en CLP/pesos chilenos)
+                    product_amount_clp = final_unit_cost * real_quantity * euro_value
+                    print(f"  Producto {pre_stock.product_id}: product_amount_clp = final_unit_cost * real_quantity * euro_value")
+                    print(f"    stock_quantity (paquetes): {stock_quantity}")
+                    print(f"    quantity_per_package: {quantity_per_package}")
+                    print(f"    real_quantity = {stock_quantity} * {quantity_per_package} = {real_quantity}")
+                    print(f"    product_amount_clp = {final_unit_cost} * {real_quantity} * {euro_value} = {product_amount_clp}")
+                    product_amounts_clp[pre_stock.product_id] = product_amount_clp
+                    total_productos_clp += product_amount_clp
+
+            # Calcular el porcentaje de participación de cada producto en CLP
+            # Fórmula: percentage = productAmountCLP / totalProductosCLP
+            # Ajustar el último porcentaje para que la suma sea exactamente 1.0 (100%)
+            product_percentages = {}  # {product_id: percentage}
+            product_ids_list = list(product_amounts_clp.keys())
+            
+            # Calcular porcentajes para todos excepto el último
+            for i, product_id_item in enumerate(product_ids_list):
+                product_amount_clp = product_amounts_clp[product_id_item]
+                if i < len(product_ids_list) - 1:
+                    # Calcular porcentaje normal
+                    percentage = (product_amount_clp / total_productos_clp) if total_productos_clp > 0 else 0
+                    product_percentages[product_id_item] = percentage
+                else:
+                    # Para el último producto, calcular la diferencia para que la suma sea exactamente 1.0
+                    sum_so_far = sum(product_percentages.values())
+                    percentage = 1.0 - sum_so_far
+                    product_percentages[product_id_item] = max(0, percentage)  # Asegurar que no sea negativo
+
+            # Calcular el precio de envío proporcional usando el porcentaje de participación en CLP
+            # Fórmula según el código Vue:
+            # 1. productAmountCLP = final_unit_cost * qty * euro_value
+            # 2. percentage = productAmountCLP / totalProductosCLP
+            # 3. precioEnvio = totalCustomsExpenses * percentage
+            # 4. envioMasMercancia = precioEnvio + productAmountCLP
+            # 5. precioXLitro = envioMasMercancia / cantidad
+            
+            # Obtener datos adicionales del producto
+            original_unit_cost = shopping_product.original_unit_cost or 0
+            discount_percentage = shopping_product.discount_percentage or 0
+            
+            print(f"\n{'='*60}")
+            print(f"PRODUCTO: {product_name} (ID: {product_id})")
+            print(f"{'='*60}")
+            print(f"  - original_unit_cost: {original_unit_cost}")
+            print(f"  - discount_percentage: {discount_percentage}%")
+            print(f"  - final_unit_cost_euros: {final_unit_cost_euros}")
+            print(f"  - quantity (parámetro): {quantity}")
+            print(f"  - euro_value: {euro_value}")
+            print(f"  - total_shipping_costs: {total_shipping_costs}")
+            print(f"  - total_productos_clp: {total_productos_clp}")
+            
+            # Obtener el stock real del pre_inventory_stocks para este producto (debe coincidir con el usado en porcentajes)
+            pre_stock_product = (
+                self.db.query(PreInventoryStockModel)
+                .filter(
+                    PreInventoryStockModel.shopping_id == shopping_id,
+                    PreInventoryStockModel.product_id == product_id
+                )
+                .first()
+            )
+            
+            # Obtener quantity_per_package de UnitFeatureModel (todos los tipos de unidades usan esta tabla)
+            quantity_per_package = 1  # Default
+            unit_feature = self.db.query(UnitFeatureModel).filter(
+                UnitFeatureModel.product_id == product_id
+            ).first()
+            if unit_feature:
+                quantity_per_package = unit_feature.quantity_per_package or 1
+            
+            # Usar el stock del pre_inventory_stocks si existe, sino usar quantity
+            stock_quantity = pre_stock_product.stock if pre_stock_product else quantity
+            print(f"  - stock_quantity (paquetes de pre_inventory_stocks): {stock_quantity}")
+            print(f"  - quantity_per_package: {quantity_per_package}")
+            
+            # Calcular cantidad real (stock_quantity es paquetes, multiplicar por quantity_per_package)
+            real_quantity = stock_quantity * quantity_per_package
+            print(f"  - real_quantity = {stock_quantity} * {quantity_per_package} = {real_quantity}")
+            
+            # Calcular valores base usando la cantidad real (debe ser el mismo usado para calcular porcentajes)
+            total_euros = final_unit_cost_euros * real_quantity
+            product_amount_clp = final_unit_cost_euros * real_quantity * euro_value
+            
+            print(f"\n  CÁLCULOS BASE:")
+            print(f"  - total_euros = final_unit_cost_euros * real_quantity")
+            print(f"    total_euros = {final_unit_cost_euros} * {real_quantity} = {total_euros}")
+            print(f"  - product_amount_clp = final_unit_cost_euros * real_quantity * euro_value")
+            print(f"    product_amount_clp = {final_unit_cost_euros} * {real_quantity} * {euro_value} = {product_amount_clp}")
+            
+            # Calcular porcentaje y precio de envío
+            percentage = 0
+            precio_envio = 0
+            envio_mas_mercancia = 0
+            precio_x_litro = 0
+            
+            if total_productos_clp > 0 and product_id in product_percentages:
+                # Obtener el porcentaje de participación del producto basado en su valor en CLP
+                percentage = product_percentages[product_id]
+                
+                print(f"\n  CÁLCULO DE PORCENTAJE Y ENVÍO:")
+                print(f"  - percentage (del diccionario): {percentage} ({percentage * 100:.2f}%)")
+                
+                # Calcular el precio de envío total del producto (totalCustomsExpenses * percentage)
+                precio_envio = total_shipping_costs * percentage
+                print(f"  - precio_envio = total_shipping_costs * percentage")
+                print(f"    precio_envio = {total_shipping_costs} * {percentage} = {precio_envio}")
+                
+                # Calcular envioMasMercancia = precioEnvio + productAmountCLP
+                envio_mas_mercancia = precio_envio + product_amount_clp
+                print(f"  - envio_mas_mercancia = precio_envio + product_amount_clp")
+                print(f"    envio_mas_mercancia = {precio_envio} + {product_amount_clp} = {envio_mas_mercancia}")
+                
+                # Calcular precioXLitro = envioMasMercancia / cantidad_real
+                precio_x_litro = envio_mas_mercancia / real_quantity if real_quantity > 0 else 0
+                print(f"  - precio_x_litro = envio_mas_mercancia / real_quantity")
+                print(f"    precio_x_litro = {envio_mas_mercancia} / {real_quantity} = {precio_x_litro}")
+            else:
+                # Si no hay datos de envío, calcular solo el costo del producto convertido por unidad
+                print(f"\n  SIN DATOS DE ENVÍO:")
+                precio_x_litro = product_amount_clp / real_quantity if real_quantity > 0 else 0
+                envio_mas_mercancia = product_amount_clp
+                print(f"  - precio_x_litro = product_amount_clp / real_quantity")
+                print(f"    precio_x_litro = {product_amount_clp} / {real_quantity} = {precio_x_litro}")
+            
+            print(f"\n  RESULTADO FINAL:")
+            print(f"  - precio_x_litro: {precio_x_litro}")
+            print(f"{'='*60}\n")
+
+            return {
+                "product_name": product_name,
+                "quantity": quantity,
+                "original_unit_cost": original_unit_cost,
+                "discount_percentage": discount_percentage,
+                "final_unit_cost": final_unit_cost_euros,
+                "total_euros": total_euros,
+                "product_amount_clp": product_amount_clp,
+                "percentage": percentage * 100,  # Convertir a porcentaje
+                "precio_envio": precio_envio,
+                "envio_mas_mercancia": envio_mas_mercancia,
+                "precio_x_litro": precio_x_litro
+            }
+
+        except Exception as e:
+            import traceback
+            print(f"\n{'='*60}")
+            print(f"ERROR en calculate_unit_cost_for_product para producto {product_id}:")
+            print(f"{'='*60}")
+            print(f"Error: {str(e)}")
+            print(f"Traceback:")
+            traceback.print_exc()
+            print(f"{'='*60}\n")
+            return {"product_name": f"Error: {str(e)}", "precio_x_litro": 0}
+
+    @staticmethod
+    def _total_customs_expenses_clp_simulator(shopping):
+        """
+        Total gastos importación en CLP como Simulator.vue (totalCustomsExpenses):
+        cada rubro USD * su tipo de dólar (CLP/USD) + comisión ya en CLP.
+        No aplica exchange_rate adicional (igual que el front del simulador).
+        """
+        s = shopping
+
+        def m(a, b):
+            return float(a or 0) * float(b or 0)
+
+        total = (
+            m(s.maritime_freight, s.maritime_freight_dollar)
+            + m(s.tax_explosive_product, s.tax_explosive_product_dollar)
+            + m(s.merchandise_insurance, s.merchandise_insurance_dollar)
+            + m(s.manifest_opening, s.manifest_opening_dollar)
+            + m(s.deconsolidation, s.deconsolidation_dollar)
+            + m(s.land_freight, s.land_freight_dollar)
+            + m(s.provision_funds, s.provision_funds_dollar)
+            + m(s.port_charges, s.port_charges_dollar)
+            + m(s.honoraries, s.honoraries_dollar)
+            + m(s.physical_assessment_expenses, s.physical_assessment_expenses_dollar)
+            + m(s.administrative_expenses, s.administrative_expenses_dollar)
+            + m(s.folder_processing, s.folder_processing_dollar)
+            + m(s.valija_expenses, s.valija_expenses_dollar)
+        )
+        total += float(s.commission or 0)
+        return float(total)
+
+    def get_landed_unit_costs_for_shopping(self, shopping_id, basis="simulator"):
+        """
+        Costo unitario final en CLP (mercancía + gastos prorrateados por valor en CLP).
+
+        basis="simulator" (default): misma fórmula que Simulator.vue — líneas de
+        shoppings_products, cantidad = quantity_to_buy, prepago sobre final_unit_cost,
+        total gastos = USD*dólar por rubro + comisión.
+
+        basis="inventory": misma lógica que calculate_unit_cost_for_product (pre-inventario
+        × quantity_per_package, y total gastos con exchange_rate como en ese método).
+        """
+        basis = (basis or "simulator").strip().lower()
+        if basis not in ("simulator", "inventory"):
+            return {"status": "error", "message": "basis debe ser simulator o inventory"}
+
+        try:
+            shopping = self.db.query(ShoppingModel).filter(ShoppingModel.id == shopping_id).first()
+            if not shopping:
+                return {"status": "error", "message": "Shopping not found"}
+
+            has_prepaid = bool(shopping.prepaid_status_id == 1)
+            settings = self.db.query(SettingModel).first()
+            prepaid_discount = (
+                float(settings.prepaid_discount)
+                if settings and settings.prepaid_discount and has_prepaid
+                else 0.0
+            )
+            prepaid_mult = (1.0 - prepaid_discount / 100.0) if has_prepaid else 1.0
+            euro_value = float(shopping.euro_value or 0)
+
+            if basis == "simulator":
+                total_customs = self._total_customs_expenses_clp_simulator(shopping)
+
+                rows = (
+                    self.db.query(
+                        ShoppingProductModel.product_id,
+                        ShoppingProductModel.quantity,
+                        ShoppingProductModel.quantity_to_buy,
+                        ShoppingProductModel.original_unit_cost,
+                        ShoppingProductModel.discount_percentage,
+                        ShoppingProductModel.final_unit_cost,
+                        ProductModel.product,
+                        ProductModel.code,
+                        ShoppingProductModel.unit_measure_id,
+                    )
+                    .join(ProductModel, ProductModel.id == ShoppingProductModel.product_id)
+                    .filter(ShoppingProductModel.shopping_id == shopping_id)
+                    .order_by(ShoppingProductModel.id)
+                    .all()
+                )
+
+                if not rows:
+                    return {
+                        "status": "success",
+                        "basis": "simulator",
+                        "shopping_id": shopping_id,
+                        "euro_value": euro_value,
+                        "exchange_rate": float(shopping.exchange_rate) if shopping.exchange_rate is not None else None,
+                        "prepaid_status_id": shopping.prepaid_status_id,
+                        "prepaid_discount_percentage": prepaid_discount,
+                        "total_customs_expenses_clp": int(round(total_customs)),
+                        "data": [],
+                        "note": "No hay líneas de producto en esta compra.",
+                    }
+
+                line_payloads = []
+                for row in rows:
+                    qty = float(row.quantity_to_buy or 0)
+                    final_stored = float(row.final_unit_cost or 0)
+                    final_eur = final_stored * prepaid_mult
+                    product_amount_clp = final_eur * qty * euro_value if euro_value else 0.0
+                    line_payloads.append(
+                        {
+                            "row": row,
+                            "qty": qty,
+                            "final_stored_eur": final_stored,
+                            "final_eur": final_eur,
+                            "product_amount_clp": product_amount_clp,
+                        }
+                    )
+
+                total_productos_clp = sum(p["product_amount_clp"] for p in line_payloads)
+
+                data = []
+                for p in line_payloads:
+                    row = p["row"]
+                    qty = p["qty"]
+                    pac = p["product_amount_clp"]
+                    pct = (pac / total_productos_clp) if total_productos_clp > 0 else 0.0
+                    precio_envio = total_customs * pct
+                    envio_mas = precio_envio + pac
+                    precio_x = (envio_mas / qty) if qty > 0 else 0.0
+                    data.append(
+                        {
+                            "product_id": row.product_id,
+                            "code": row.code,
+                            "product": row.product,
+                            "unit_measure_id": row.unit_measure_id,
+                            "quantity_packages": int(row.quantity or 0),
+                            "quantity_to_buy": qty,
+                            "final_unit_cost_eur_db": round(p["final_stored_eur"], 6),
+                            "final_unit_cost_eur_after_prepaid": round(p["final_eur"], 6),
+                            "precio_x_litro_clp": int(round(float(precio_x))),
+                            "envio_mas_mercancia_clp": int(round(float(envio_mas))),
+                            "precio_envio_clp": int(round(float(precio_envio))),
+                            "product_amount_clp": int(round(float(pac))),
+                            "participacion_pct": round(float(pct * 100.0), 4),
+                            "original_unit_cost_eur": round(float(row.original_unit_cost or 0), 4),
+                            "discount_percentage": float(row.discount_percentage or 0),
+                            "total_euros_line": round(p["final_eur"] * qty, 2) if qty else 0.0,
+                        }
+                    )
+
+                return {
+                    "status": "success",
+                    "basis": "simulator",
+                    "shopping_id": shopping_id,
+                    "euro_value": euro_value,
+                    "exchange_rate": float(shopping.exchange_rate) if shopping.exchange_rate is not None else None,
+                    "prepaid_status_id": shopping.prepaid_status_id,
+                    "prepaid_discount_percentage": prepaid_discount,
+                    "total_customs_expenses_clp": int(round(total_customs)),
+                    "data": data,
+                }
+
+            # basis == "inventory"
+            pre_rows = (
+                self.db.query(
+                    PreInventoryStockModel.product_id,
+                    PreInventoryStockModel.stock,
+                    ProductModel.product,
+                    ProductModel.code,
+                )
+                .join(ProductModel, ProductModel.id == PreInventoryStockModel.product_id)
+                .filter(PreInventoryStockModel.shopping_id == shopping_id)
+                .order_by(PreInventoryStockModel.product_id)
+                .all()
+            )
+
+            if not pre_rows:
+                return {
+                    "status": "success",
+                    "basis": "inventory",
+                    "shopping_id": shopping_id,
+                    "euro_value": euro_value,
+                    "exchange_rate": float(shopping.exchange_rate) if shopping.exchange_rate is not None else None,
+                    "prepaid_status_id": shopping.prepaid_status_id,
+                    "prepaid_discount_percentage": prepaid_discount,
+                    "total_customs_expenses_clp": None,
+                    "data": [],
+                    "note": "Sin filas de pre-inventario no se aplica calculate_unit_cost_for_product.",
+                }
+
+            data = []
+            for row in pre_rows:
+                stock = float(row.stock or 0)
+                sink = io.StringIO()
+                with redirect_stdout(sink), redirect_stderr(sink):
+                    calc = self.calculate_unit_cost_for_product(shopping_id, row.product_id, stock)
+                name = str(calc.get("product_name") or "")
+                err = name.startswith("Error:")
+                data.append(
+                    {
+                        "product_id": row.product_id,
+                        "code": row.code,
+                        "product": row.product,
+                        "stock_packages": stock,
+                        "precio_x_litro_clp": int(round(float(calc.get("precio_x_litro") or 0))),
+                        "envio_mas_mercancia_clp": int(round(float(calc.get("envio_mas_mercancia") or 0))),
+                        "precio_envio_clp": int(round(float(calc.get("precio_envio") or 0))),
+                        "product_amount_clp": int(round(float(calc.get("product_amount_clp") or 0))),
+                        "participacion_pct": round(float(calc.get("percentage") or 0), 4),
+                        "final_unit_cost_eur": round(float(calc.get("final_unit_cost") or 0), 6),
+                        "total_euros": round(float(calc.get("total_euros") or 0), 2),
+                        "original_unit_cost_eur": round(float(calc.get("original_unit_cost") or 0), 4),
+                        "discount_percentage": float(calc.get("discount_percentage") or 0),
+                        "calc_error": err,
+                    }
+                )
+
+            return {
+                "status": "success",
+                "basis": "inventory",
+                "shopping_id": shopping_id,
+                "euro_value": euro_value,
+                "exchange_rate": float(shopping.exchange_rate) if shopping.exchange_rate is not None else None,
+                "prepaid_status_id": shopping.prepaid_status_id,
+                "prepaid_discount_percentage": prepaid_discount,
+                "total_customs_expenses_clp": None,
+                "data": data,
+            }
+        except Exception as e:
+            return {"status": "error", "message": str(e)}
+
+    def test_calculate_unit_costs(self, shopping_id):
+        """
+        Función de prueba para mostrar el cálculo de unit_cost para todos los productos de un shopping
+        """
+        print(f"\n=== CALCULANDO UNIT_COSTS PARA SHOPPING {shopping_id} ===\n")
+        
+        try:
+            # Obtener todos los productos del pre-inventario
+            pre_inventory_products = (
+                self.db.query(
+                    PreInventoryStockModel.product_id,
+                    PreInventoryStockModel.stock,
+                    ProductModel.product
+                )
+                .join(ProductModel, ProductModel.id == PreInventoryStockModel.product_id)
+                .filter(PreInventoryStockModel.shopping_id == shopping_id)
+                .all()
+            )
+
+            if not pre_inventory_products:
+                print("No se encontraron productos en el pre-inventario")
+                return
+
+            total_calculated_cost = 0
+            
+            for item in pre_inventory_products:
+                result_calc = self.calculate_unit_cost_for_product(
+                    shopping_id, 
+                    item.product_id, 
+                    item.stock
+                )
+                
+                # Obtener el precio_x_litro del resultado (ahora devuelve un diccionario)
+                unit_cost = result_calc.get("precio_x_litro", 0)
+                product_name = result_calc.get("product_name", item.product)
+                
+                total_product_cost = unit_cost * item.stock
+                total_calculated_cost += total_product_cost
+                
+                print(f"\nRESUMEN - {product_name}:")
+                print(f"  - Product ID: {item.product_id}")
+                print(f"  - Cantidad: {item.stock}")
+                print(f"  - COSTO TOTAL (producto + envío): ${unit_cost:.2f}")
+                print(f"  - Costo total del producto: ${total_product_cost:.2f}")
+                print("-" * 50)
+
+            print(f"\nTOTAL DE COSTOS DISTRIBUIDOS (PESOS): ${total_calculated_cost:.2f}")
+            print(f"=== FIN DEL CÁLCULO ===\n")
+
+        except Exception as e:
+            print(f"Error en test_calculate_unit_costs: {e}")
+
+    def get_inventories_by_shopping_id(self, shopping_id):
+        try:
+            mov_bal = (
+                self.db.query(
+                    InventoryMovementModel.inventory_id.label("inv_id"),
+                    InventoryMovementModel.lot_item_id.label("lid"),
+                    func.coalesce(func.sum(InventoryMovementModel.quantity), 0).label("mov_qty"),
+                )
+                .group_by(InventoryMovementModel.inventory_id, InventoryMovementModel.lot_item_id)
+                .subquery()
+            )
+            # Buscar directamente productos del shopping sin depender del lot_number en PreInventoryStockModel
+            # porque el lot_number en PreInventoryStockModel puede no coincidir con el lot_number real del LotModel
+            inventories_data = (
+                self.db.query(
+                    InventoryModel.id.label("inventory_id"),
+                    InventoryModel.product_id,
+                    ProductModel.product.label("product_name"),
+                    ProductModel.code.label("product_code"),
+                    LotItemModel.public_sale_price,
+                    LotItemModel.private_sale_price,
+                    LotModel.arrival_date,
+                    func.coalesce(mov_bal.c.mov_qty, 0).label("quantity"),
+                    LotModel.lot_number,
+                    LotItemModel.id.label("lot_item_id"),
+                )
+                .join(LotItemModel, LotItemModel.product_id == InventoryModel.product_id)
+                .join(LotModel, LotModel.id == LotItemModel.lot_id)
+                .join(ProductModel, ProductModel.id == InventoryModel.product_id)
+                .join(PreInventoryStockModel, PreInventoryStockModel.product_id == InventoryModel.product_id)
+                .outerjoin(
+                    mov_bal,
+                    and_(
+                        mov_bal.c.inv_id == InventoryModel.id,
+                        mov_bal.c.lid == LotItemModel.id,
+                    ),
+                )
+                .filter(PreInventoryStockModel.shopping_id == shopping_id)
+                .order_by(InventoryModel.product_id, LotItemModel.id.desc())
+                .all()
+            )
+            
+            if not inventories_data:
+                return {"status": "success", "message": "No se encontraron inventarios para este shopping", "data": []}
+            
+            # Deduplicar por producto_id manualmente (tomar el primer lot_item por producto)
+            products_seen = set()
+            formatted_data = []
+            
+            for item in inventories_data:
+                # Si ya procesamos este producto, saltarlo
+                if item.product_id in products_seen:
+                    continue
+                    
+                products_seen.add(item.product_id)
+                
+                formatted_data.append({
+                    "inventory_id": item.inventory_id,
+                    "product_id": item.product_id,
+                    "product_name": item.product_name,
+                    "product_code": item.product_code,
+                    "quantity": item.quantity,
+                    "unit_cost": float(average_unit_cost_for_product(self.db, item.product_id)),
+                    "public_sale_price": float(item.public_sale_price) if item.public_sale_price else 0,
+                    "private_sale_price": float(item.private_sale_price) if item.private_sale_price else 0,
+                    "arrival_date": item.arrival_date.strftime("%Y-%m-%d") if item.arrival_date else None,
+                    "lot_number": item.lot_number
+                })
+            
+            return {
+                "status": "success",
+                "message": f"Se encontraron {len(formatted_data)} inventarios",
+                "shopping_id": shopping_id,
+                "data": formatted_data
+            }
+            
+        except Exception as e:
+            return {"status": "error", "message": f"Error al obtener inventarios: {str(e)}"}
+
+    def delete(self, id):
+        """
+        Elimina un shopping y todos sus registros relacionados:
+        - ShoppingProductModel (productos del shopping)
+        - PreInventoryStockModel (stocks pre-inventario asociados)
+        - ShoppingModel (el shopping mismo)
+        
+        IMPORTANTE: Si no se puede eliminar (porque ya fue procesado o tiene lotes creados),
+        cambia el status_id a 8 (finalizado) en lugar de retornar error.
+        """
+        try:
+            # Verificar que el shopping existe
+            shopping = self.db.query(ShoppingModel).filter(ShoppingModel.id == id).first()
+            if not shopping:
+                return {"status": "error", "message": "Shopping not found"}
+
+            # Verificar si el shopping ya fue procesado (status_id = 7 significa que ya se creó inventario)
+            if shopping.status_id == 7:
+                # Ya está en estado 7, no hacer nada
+                return {
+                    "status": "info", 
+                    "message": "El shopping ya está en estado 7 (procesado). No se puede eliminar."
+                }
+
+            # Obtener todos los pre-inventory stocks relacionados
+            pre_inventory_stocks = self.db.query(PreInventoryStockModel).filter(
+                PreInventoryStockModel.shopping_id == id
+            ).all()
+
+            # Verificar si hay lotes creados desde estos pre-inventory stocks
+            # Los lotes se crean usando el lot_number del PreInventoryStock
+            for pre_stock in pre_inventory_stocks:
+                # Buscar si existe un lote con el mismo lot_number (convertido a string)
+                lot_exists = self.db.query(LotModel).filter(
+                    LotModel.lot_number == str(pre_stock.lot_number)
+                ).first()
+                
+                if lot_exists:
+                    # Cambiar a estado finalizado (7) en lugar de eliminar
+                    shopping.status_id = 7
+                    shopping.updated_date = datetime.utcnow()
+                    self.db.commit()
+                    return {
+                        "status": "info",
+                        "message": f"No se puede eliminar el shopping porque ya existen lotes creados desde este shopping (lot_number: {pre_stock.lot_number}). Se cambió el status_id a 7 (finalizado)."
+                    }
+
+            # Si llegamos aquí, es seguro eliminar
+            # Eliminar todos los productos del shopping
+            shopping_products = self.db.query(ShoppingProductModel).filter(
+                ShoppingProductModel.shopping_id == id
+            ).all()
+            
+            for product in shopping_products:
+                self.db.delete(product)
+
+            # Eliminar todos los pre-inventory stocks relacionados
+            for stock in pre_inventory_stocks:
+                self.db.delete(stock)
+
+            # Eliminar el shopping
+            self.db.delete(shopping)
+            self.db.commit()
+
+            return {"status": "success", "message": "Shopping deleted successfully"}
+
+        except Exception as e:
+            self.db.rollback()
+            error_message = str(e)
+            return {"status": "error", "message": f"Error deleting shopping: {error_message}"}
