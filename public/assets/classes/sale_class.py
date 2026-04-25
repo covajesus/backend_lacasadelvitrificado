@@ -52,6 +52,42 @@ class SaleClass:
             return 0
         return int(order_qty) * self._quantity_per_package(product_id)
 
+    def _packages_from_base_units(self, product_id, base_units):
+        """
+        Convierte unidades base a paquetes usando SOLO ``unit_features.quantity_per_package``.
+        Devuelve string para ``reason`` (p. ej. ``1``, ``1.2``).
+        """
+        try:
+            bu = float(base_units or 0)
+        except (TypeError, ValueError):
+            bu = 0.0
+        if bu <= 0:
+            return "0"
+        qpp = self._quantity_per_package(product_id)
+        if qpp <= 1:
+            n = bu
+        else:
+            n = bu / float(qpp)
+        txt = f"{n:.4f}".rstrip("0").rstrip(".")
+        return txt if txt else "0"
+
+    def _reason_base_pkgo_for_sale_movement(self, product_id, base_units):
+        """
+        Regla de visualización solicitada para ``reason``:
+        - Si el corte no coincide con múltiplos del paquete (p. ej. 4 o 6 cuando el paquete es 5),
+          forzar ``base`` al tamaño del paquete y ``pkgo=1``.
+        - Si coincide, usar la proporción normal.
+        """
+        bu = int(base_units or 0)
+        if bu <= 0:
+            return "0", "0"
+        qpp = self._quantity_per_package(product_id)
+        if qpp <= 1:
+            return str(bu), str(bu)
+        if bu % qpp != 0:
+            return str(qpp), "1"
+        return str(bu), self._packages_from_base_units(product_id, bu)
+
     def _sale_line_packages_for_fifo_slice(self, product_id, process_qty, packages_remaining):
         """
         Paquetes a registrar en ``sales_products.quantity`` para un corte FIFO (``process_qty`` = unidades base).
@@ -706,23 +742,27 @@ class SaleClass:
                                 print(f"[CHANGE_STATUS] ERROR: {error_msg}")
                                 return {"status": "error", "message": error_msg}
 
+                            sale_line_qty = self._sale_line_packages_for_fifo_slice(
+                                product_id, process_qty, packages_remaining
+                            )
+                            packages_remaining -= sale_line_qty
+
+                            reason_base, reason_pkgo = self._reason_base_pkgo_for_sale_movement(
+                                product_id, process_qty
+                            )
+
                             inventory_movement = InventoryMovementModel(
                                 inventory_id=inventory.id,
                                 lot_item_id=lot_item.id,
                                 movement_type_id=2,
                                 quantity=(process_qty * -1),
                                 unit_cost=movement_unit_cost,
-                                reason=f"Venta|base={process_qty}|pkgo={packages_ordered}",
+                                reason=f"Venta|base={reason_base}|pkgo={reason_pkgo}",
                                 added_date=_inventory_movement_added_at(),
                             )
                             self.db.add(inventory_movement)
                             self.db.flush()
                             print(f"[CHANGE_STATUS] Movimiento de inventario creado: inventory_id={inventory.id}, quantity={process_qty * -1}, lot_item_id={lot_item.id}")
-
-                            sale_line_qty = self._sale_line_packages_for_fifo_slice(
-                                product_id, process_qty, packages_remaining
-                            )
-                            packages_remaining -= sale_line_qty
 
                             new_sale_product = SaleProductModel(
                                 sale_id=existing_sale.id,
@@ -835,22 +875,26 @@ class SaleClass:
                                         print(f"[CHANGE_STATUS] ERROR: {error_msg}")
                                         return {"status": "error", "message": error_msg}
 
+                                    sale_line_qty = self._sale_line_packages_for_fifo_slice(
+                                        product_id, process_qty, packages_remaining
+                                    )
+                                    packages_remaining -= sale_line_qty
+
+                                    reason_base, reason_pkgo = self._reason_base_pkgo_for_sale_movement(
+                                        product_id, process_qty
+                                    )
+
                                     inventory_movement = InventoryMovementModel(
                                         inventory_id=inventory.id,
                                         lot_item_id=lot_item.id,
                                         movement_type_id=2,
                                         quantity=(process_qty * -1),
                                         unit_cost=movement_uc_budget,
-                                        reason=f"Venta desde presupuesto|base={process_qty}|pkgo={packages_ordered}",
+                                        reason=f"Venta desde presupuesto|base={reason_base}|pkgo={reason_pkgo}",
                                         added_date=_inventory_movement_added_at(),
                                     )
                                     self.db.add(inventory_movement)
                                     self.db.flush()
-
-                                    sale_line_qty = self._sale_line_packages_for_fifo_slice(
-                                        product_id, process_qty, packages_remaining
-                                    )
-                                    packages_remaining -= sale_line_qty
 
                                     sale_product = SaleProductModel(
                                         sale_id=existing_sale.id,

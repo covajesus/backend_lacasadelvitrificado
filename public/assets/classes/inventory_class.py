@@ -294,25 +294,31 @@ class InventoryClass:
                     lot_item.public_sale_price = inventory_inputs.public_sale_price
                     lot_item.updated_date = datetime.now()
 
-                current = stock_sum_for_inventory(self.db, inventory.id)
-                target = int(inventory_inputs.stock or 0)
-                delta = target - current
-                if delta != 0:
-                    movement_uc = new_uc or int(
-                        average_unit_cost_for_product(self.db, inventory_inputs.product_id)
-                        or 0
-                    )
-                    self.db.add(
-                        InventoryMovementModel(
-                            inventory_id=inventory.id,
-                            lot_item_id=lot_item_id,
-                            movement_type_id=4,
-                            quantity=delta,
-                            unit_cost=movement_uc,
-                            reason="Ajuste por actualización de inventario",
-                            added_date=datetime.now(),
+                target_qty = int(inventory_inputs.stock or 0)
+                if target_mov is not None:
+                    # Edición por movimiento: cambiar SOLO la cantidad de esa fila
+                    # (p. ej. 5 -> 10 o 15), sin crear movimientos delta por stock total.
+                    sign = -1 if int(target_mov.quantity or 0) < 0 else 1
+                    target_mov.quantity = abs(target_qty) * sign
+                else:
+                    current = stock_sum_for_inventory(self.db, inventory.id)
+                    delta = target_qty - current
+                    if delta != 0:
+                        movement_uc = new_uc or int(
+                            average_unit_cost_for_product(self.db, inventory_inputs.product_id)
+                            or 0
                         )
-                    )
+                        self.db.add(
+                            InventoryMovementModel(
+                                inventory_id=inventory.id,
+                                lot_item_id=lot_item_id,
+                                movement_type_id=4,
+                                quantity=delta,
+                                unit_cost=movement_uc,
+                                reason="Ajuste por actualización de inventario",
+                                added_date=datetime.now(),
+                            )
+                        )
 
             if lot_item_for_private is not None:
                 self.db.flush()
@@ -383,7 +389,7 @@ class InventoryClass:
             inventory_movement = InventoryMovementModel(
                 inventory_id=inventory.id,
                 lot_item_id=0,  # 0 para remove adjustment
-                movement_type_id=3,  # Tipo de movimiento: Salida
+                movement_type_id=4,  # Tipo de movimiento: Rectificación de Salida
                 quantity=(inventory_inputs.stock * -1),  # Cantidad negativa para salida
                 unit_cost=unit_cost,
                 reason='Ajuste de inventario (salida) realizado.',
@@ -481,7 +487,7 @@ class InventoryClass:
             inventory_movement = InventoryMovementModel(
                 inventory_id=inventory.id,
                 lot_item_id=lot_item.id,
-                movement_type_id=4,
+                movement_type_id=3,  # Tipo de movimiento: Rectificación de Entrada
                 quantity=inventory_inputs.stock,
                 unit_cost=movement_unit_cost,  # Usa costo del kardex si existe
                 reason='Ajuste de inventario realizado.',
