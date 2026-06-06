@@ -742,6 +742,7 @@ class InventoryClass:
                     MovementTypeModel.id == InventoryMovementModel.movement_type_id,
                 )
                 .filter(InventoryModel.product_id == product_id)
+                .filter(~InventoryMovementModel.reason.like("Consumo FIFO|%"))
                 .order_by(
                     InventoryMovementModel.added_date.desc(),
                     InventoryMovementModel.id.desc(),

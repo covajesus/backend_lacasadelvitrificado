@@ -231,6 +231,7 @@ class UnitFeatureModel(Base):
     quantity_per_pallet = Column(Integer)
     weight_per_unit = Column(String(255))
     weight_per_pallet = Column(String(255))
+    sample_size = Column(String(255))
     added_date = Column(DateTime())
     updated_date = Column(DateTime())
 
@@ -398,5 +399,31 @@ class WhatsAppMessageModel(Base):
     sent_date = Column(DateTime(), default=datetime.now)  # Cuando se envió
     delivered_date = Column(DateTime())  # Cuando se entregó
     read_date = Column(DateTime())  # Cuando se leyó
+    added_date = Column(DateTime(), default=datetime.now)
+    updated_date = Column(DateTime(), default=datetime.now)
+
+class SampleRequestModel(Base):
+    __tablename__ = 'sample_requests'
+
+    id = Column(Integer, primary_key=True)
+    customer_id = Column(Integer, nullable=True)
+    customer_rut = Column(String(255))
+    customer_name = Column(String(255))
+    notes = Column(Text(), nullable=True)
+    added_date = Column(DateTime(), default=datetime.now)
+    updated_date = Column(DateTime(), default=datetime.now)
+
+class SampleRequestItemModel(Base):
+    __tablename__ = 'sample_request_items'
+
+    id = Column(Integer, primary_key=True)
+    sample_request_id = Column(Integer)
+    product_id = Column(Integer)
+    product_name = Column(String(255))
+    sample_quantity = Column(Integer)
+    sample_size = Column(Numeric(12, 4))
+    sample_size_label = Column(String(255))
+    total_amount = Column(Numeric(12, 4))
+    unit_measure = Column(String(255), nullable=True)
     added_date = Column(DateTime(), default=datetime.now)
     updated_date = Column(DateTime(), default=datetime.now)

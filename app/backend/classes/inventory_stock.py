@@ -13,9 +13,20 @@ from app.backend.db.models import (
 # Salidas: no entran en la media aritmética de ``unit_cost`` (venta, salida por ajuste).
 AVERAGE_UNIT_COST_EXCLUDED_MOVEMENT_TYPE_IDS = (2, 3)
 
+# Detalle FIFO por lote al vender; el descuento total va en un único movimiento ``Venta|...``.
+FIFO_LOT_CONSUMPTION_REASON_PREFIX = "Consumo FIFO|"
+
+
+def is_fifo_lot_consumption_reason(reason) -> bool:
+    return bool(reason) and str(reason).startswith(FIFO_LOT_CONSUMPTION_REASON_PREFIX)
+
+
+def _exclude_fifo_lot_consumption(query):
+    return query.filter(~InventoryMovementModel.reason.like(f"{FIFO_LOT_CONSUMPTION_REASON_PREFIX}%"))
+
 
 def stock_sum_for_product(db, product_id):
-    q = (
+    q = _exclude_fifo_lot_consumption(
         db.query(func.coalesce(func.sum(InventoryMovementModel.quantity), 0))
         .join(InventoryModel, InventoryModel.id == InventoryMovementModel.inventory_id)
         .filter(InventoryModel.product_id == product_id)
@@ -78,7 +89,7 @@ def average_unit_cost_for_product(db, product_id):
     No pondera por ``quantity`` (cada fila cuenta una vez). Filas con ``unit_cost`` NULL se excluyen.
     Sin filas válidas → ``0``.
     """
-    row = (
+    row = _exclude_fifo_lot_consumption(
         db.query(
             func.coalesce(func.sum(InventoryMovementModel.unit_cost), 0),
             func.count(InventoryMovementModel.id),
@@ -91,8 +102,7 @@ def average_unit_cost_for_product(db, product_id):
                 AVERAGE_UNIT_COST_EXCLUDED_MOVEMENT_TYPE_IDS
             )
         )
-        .first()
-    )
+    ).first()
     if not row:
         return 0
     total_uc, cnt = int(row[0] or 0), int(row[1] or 0)

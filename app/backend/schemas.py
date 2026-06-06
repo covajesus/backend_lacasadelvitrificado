@@ -310,6 +310,7 @@ class StoreProduct(BaseModel):
     quantity_per_pallet: Union[str, None]
     weight_per_pallet: Union[str, None]
     weight_per_unit: Union[str, None]
+    sample_size: Union[str, None]
     is_compound: int
     compound_product_id: Union[int, None]
 
@@ -328,6 +329,7 @@ class StoreProduct(BaseModel):
                     quantity_per_pallet: Optional[str] = Form(None),
                     weight_per_pallet: Optional[str] = Form(None),
                     weight_per_unit: Optional[str] = Form(None),
+                    sample_size: Optional[str] = Form(None),
                     short_description: str = Form(...),
                     is_compound: int = Form(...),
                     compound_product_id: Union[int, None] = Form(None)
@@ -346,6 +348,7 @@ class StoreProduct(BaseModel):
             quantity_per_pallet=quantity_per_pallet,
             weight_per_pallet=weight_per_pallet,
             weight_per_unit=weight_per_unit,
+            sample_size=sample_size,
             short_description=short_description,
             is_compound=is_compound,
             compound_product_id=compound_product_id
@@ -573,3 +576,28 @@ class SupplierCategoryResponse(BaseModel):
     
     class Config:
         from_attributes = True
+
+class SampleRequestList(BaseModel):
+    page: int
+    rut: Optional[str] = None
+    customer_name: Optional[str] = None
+    rol_id: Optional[int] = None
+    user_rut: Optional[str] = None
+
+class SampleRequestItemInput(BaseModel):
+    product_id: int
+    sample_quantity: int
+
+class StoreSampleRequest(BaseModel):
+    customer_rut: str
+    customer_name: str
+    customer_id: Optional[int] = None
+    notes: Optional[str] = None
+    items: List[SampleRequestItemInput]
+
+class UpdateSampleRequest(BaseModel):
+    customer_rut: str
+    customer_name: str
+    customer_id: Optional[int] = None
+    notes: Optional[str] = None
+    items: List[SampleRequestItemInput]

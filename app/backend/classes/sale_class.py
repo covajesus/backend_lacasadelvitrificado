@@ -6,6 +6,7 @@ from app.backend.classes.inventory_stock import (
     stock_sum_for_product,
     average_unit_cost_for_product,
     sale_acceptance_unit_cost_from_movements,
+    FIFO_LOT_CONSUMPTION_REASON_PREFIX,
 )
 from datetime import datetime
 from zoneinfo import ZoneInfo
@@ -76,41 +77,116 @@ class SaleClass:
         txt = f"{n:.4f}".rstrip("0").rstrip(".")
         return txt if txt else "0"
 
-    def _reason_base_pkgo_for_sale_movement(self, product_id, base_units):
-        """
-        Regla de visualización solicitada para ``reason``:
-        - Si el corte no coincide con múltiplos del paquete (p. ej. 4 o 6 cuando el paquete es 5),
-          forzar ``base`` al tamaño del paquete y ``pkgo=1``.
-        - Si coincide, usar la proporción normal.
-        """
-        bu = int(base_units or 0)
-        if bu <= 0:
-            return "0", "0"
-        qpp = self._quantity_per_package(product_id)
-        if qpp <= 1:
-            return str(bu), str(bu)
-        if bu % qpp != 0:
-            return str(qpp), "1"
-        return str(bu), self._packages_from_base_units(product_id, bu)
+    def _sale_reason_for_consolidated_exit(self, product_id, effective_qty, sale_id, reason_prefix="Venta"):
+        """Un solo ``reason`` con el total vendido (base + paquetes)."""
+        base = int(effective_qty or 0)
+        pkgo = self._packages_from_base_units(product_id, base)
+        return f"{reason_prefix}|sale_id={sale_id}|base={base}|pkgo={pkgo}"
 
-    def _sale_line_packages_for_fifo_slice(self, product_id, process_qty, packages_remaining):
-        """
-        Paquetes a registrar en ``sales_products.quantity`` para un corte FIFO (``process_qty`` = unidades base).
-        Usa división entera para no inflar varias líneas; el remanente se suma a la última línea creada.
-        """
-        pq = int(process_qty)
-        if pq <= 0 or packages_remaining <= 0:
-            return 0
-        qpp = self._quantity_per_package(product_id)
-        if qpp <= 1:
-            return min(packages_remaining, pq)
-        return min(packages_remaining, pq // qpp)
+    def _fifo_allocations(self, product_id, base_qty):
+        """Asignación FIFO por lote sin crear movimientos."""
+        remaining = int(base_qty)
+        allocations = []
+        for lot_item, _lot, inv_id, lot_balance in fifo_lots_available(self.db, product_id):
+            if remaining <= 0:
+                break
+            take = min(remaining, int(lot_balance))
+            if take <= 0:
+                continue
+            allocations.append((lot_item, inv_id, take))
+            remaining -= take
+        return allocations, remaining
 
-    @staticmethod
-    def _apply_pending_packages_to_last_line(last_sale_product, pending):
-        if last_sale_product is None or pending <= 0:
-            return
-        last_sale_product.quantity = int(last_sale_product.quantity or 0) + int(pending)
+    def _create_consolidated_sale_inventory_exit(
+        self,
+        sale_id,
+        product_id,
+        effective_qty,
+        movement_unit_cost,
+        reason_prefix="Venta",
+    ):
+        """
+        Un movimiento ``Venta`` con el total (p. ej. -40 L / 4 paquetes).
+        Si la venta cruza varios lotes, los descuentos por lote van en filas
+        ``Consumo FIFO|...`` (ocultas en kardex/movimientos; no duplican stock).
+        """
+        if effective_qty <= 0:
+            return None, "Cantidad inválida para salida de inventario."
+
+        inventory = (
+            self.db.query(InventoryModel)
+            .filter(InventoryModel.product_id == product_id)
+            .first()
+        )
+        if not inventory:
+            return None, f"No se encontró inventario para el producto ID {product_id}"
+
+        allocations, remaining = self._fifo_allocations(product_id, effective_qty)
+        if remaining > 0:
+            return None, (
+                f"Stock insuficiente en lotes para el producto ID {product_id}. "
+                f"Faltan {remaining} unidad(es) de inventario."
+            )
+
+        reason = self._sale_reason_for_consolidated_exit(
+            product_id, effective_qty, sale_id, reason_prefix
+        )
+        lot_item_id = allocations[0][0].id if len(allocations) == 1 else None
+
+        main_movement = InventoryMovementModel(
+            inventory_id=inventory.id,
+            lot_item_id=lot_item_id,
+            movement_type_id=2,
+            quantity=int(effective_qty) * -1,
+            unit_cost=movement_unit_cost,
+            reason=reason,
+            added_date=_inventory_movement_added_at(),
+        )
+        self.db.add(main_movement)
+        self.db.flush()
+
+        if len(allocations) > 1:
+            for lot_item, inv_id, take in allocations:
+                fifo_mov = InventoryMovementModel(
+                    inventory_id=inv_id,
+                    lot_item_id=lot_item.id,
+                    movement_type_id=4,
+                    quantity=int(take) * -1,
+                    unit_cost=0,
+                    reason=(
+                        f"{FIFO_LOT_CONSUMPTION_REASON_PREFIX}"
+                        f"sale_id={sale_id}|product_id={product_id}|lot_item_id={lot_item.id}"
+                    ),
+                    added_date=_inventory_movement_added_at(),
+                )
+                self.db.add(fifo_mov)
+            self.db.flush()
+
+        return main_movement, None
+
+    def _reverse_fifo_lot_consumptions(self, sale_id, product_id):
+        """Revierte los cortes FIFO por lote de una venta."""
+        pattern = f"{FIFO_LOT_CONSUMPTION_REASON_PREFIX}sale_id={sale_id}|product_id={product_id}|%"
+        fifo_moves = (
+            self.db.query(InventoryMovementModel)
+            .filter(InventoryMovementModel.reason.like(pattern))
+            .all()
+        )
+        for fifo_mov in fifo_moves:
+            restore_qty = abs(int(fifo_mov.quantity or 0))
+            if restore_qty <= 0:
+                continue
+            self.db.add(
+                InventoryMovementModel(
+                    inventory_id=fifo_mov.inventory_id,
+                    lot_item_id=fifo_mov.lot_item_id,
+                    movement_type_id=3,
+                    quantity=restore_qty,
+                    unit_cost=0,
+                    reason=f"Reversa {FIFO_LOT_CONSUMPTION_REASON_PREFIX}sale_id={sale_id}|product_id={product_id}",
+                    added_date=_inventory_movement_added_at(),
+                )
+            )
 
     def _sale_movement_reverse_base_units(self, sale_id, sales_product, inventory_movement):
         """
@@ -483,25 +559,25 @@ class SaleClass:
                 ).first()
 
                 if inventory_movement:
-                    # Unidades base a devolver: misma magnitud que el descuento (paquetes × uds/paquete por línea)
-                    reverse_quantity = self._sale_movement_reverse_base_units(
-                        sale_id, sales_product, inventory_movement
-                    )
+                    reverse_quantity = abs(int(inventory_movement.quantity or 0))
+                    if reverse_quantity <= 0:
+                        reverse_quantity = self._sale_movement_reverse_base_units(
+                            sale_id, sales_product, inventory_movement
+                        )
 
-                    # Mismo criterio que al aceptar pago: costo medio desde ``inventories_movements``.
                     return_uc = sale_acceptance_unit_cost_from_movements(self.db, sales_product.product_id)
 
-                    # Crear nuevo movimiento de inventario inverso
                     reverse_movement = InventoryMovementModel(
                         inventory_id=inventory_movement.inventory_id,
                         lot_item_id=inventory_movement.lot_item_id,
-                        movement_type_id=1,  # Tipo entrada
+                        movement_type_id=1,
                         quantity=reverse_quantity,
                         unit_cost=return_uc,
                         reason="Reversa de venta",
                         added_date=_inventory_movement_added_at(),
                     )
                     self.db.add(reverse_movement)
+                    self._reverse_fifo_lot_consumptions(sale_id, sales_product.product_id)
                     self.db.commit()
 
                     print(f"[REVERSE] Movimiento reverso creado para producto {sales_product.product_id}: {reverse_quantity}")
@@ -695,8 +771,8 @@ class SaleClass:
                         product_id = sale_product.product_id
                         quantity = sale_product.quantity
                         packages_ordered = int(quantity)
-                        product_price = sale_product.price  # Guardar precio antes de eliminar
-                        
+                        product_price = sale_product.price
+
                         if quantity <= 0:
                             continue
 
@@ -705,90 +781,36 @@ class SaleClass:
                             continue
 
                         price_per_package = int(product_price or 0)
-
-                        quantity_to_process = effective_qty
-                        total_processed = 0
-
-                        available_lots = fifo_lots_available(self.db, product_id)
-
-                        if not available_lots:
-                            error_msg = f"No hay lotes disponibles para el producto ID {product_id}"
-                            print(f"[CHANGE_STATUS] ERROR: {error_msg}")
-                            return {"status": "error", "message": error_msg}
-
-                        # Eliminar el sale_product original ya que crearemos uno por cada lote
-                        self.db.delete(sale_product)
-                        self.db.flush()
-
-                        # Obligatorio: ``unit_cost`` del movimiento de salida solo desde ``inventories_movements``.
                         movement_unit_cost = sale_acceptance_unit_cost_from_movements(self.db, product_id)
 
-                        packages_remaining = packages_ordered
-                        last_new_sale_product = None
+                        main_movement, exit_error = self._create_consolidated_sale_inventory_exit(
+                            existing_sale.id,
+                            product_id,
+                            effective_qty,
+                            movement_unit_cost,
+                            reason_prefix="Venta",
+                        )
+                        if exit_error:
+                            print(f"[CHANGE_STATUS] ERROR: {exit_error}")
+                            return {"status": "error", "message": exit_error}
 
-                        # Procesar lotes disponibles (saldo = suma de movimientos)
-                        for lot_item, lot, inv_id, lot_balance in available_lots:
-                            if quantity_to_process <= 0:
-                                break
+                        inventory = (
+                            self.db.query(InventoryModel)
+                            .filter(InventoryModel.id == main_movement.inventory_id)
+                            .first()
+                        )
 
-                            process_qty = min(quantity_to_process, int(lot_balance))
-
-                            if process_qty <= 0:
-                                continue
-
-                            inventory = (
-                                self.db.query(InventoryModel)
-                                .filter(InventoryModel.id == inv_id)
-                                .first()
-                            )
-
-                            if not inventory:
-                                error_msg = f"No se encontró inventario para el producto ID {product_id}"
-                                print(f"[CHANGE_STATUS] ERROR: {error_msg}")
-                                return {"status": "error", "message": error_msg}
-
-                            sale_line_qty = self._sale_line_packages_for_fifo_slice(
-                                product_id, process_qty, packages_remaining
-                            )
-                            packages_remaining -= sale_line_qty
-
-                            reason_base, reason_pkgo = self._reason_base_pkgo_for_sale_movement(
-                                product_id, process_qty
-                            )
-
-                            inventory_movement = InventoryMovementModel(
-                                inventory_id=inventory.id,
-                                lot_item_id=lot_item.id,
-                                movement_type_id=2,
-                                quantity=(process_qty * -1),
-                                unit_cost=movement_unit_cost,
-                                reason=f"Venta|base={reason_base}|pkgo={reason_pkgo}",
-                                added_date=_inventory_movement_added_at(),
-                            )
-                            self.db.add(inventory_movement)
-                            self.db.flush()
-                            print(f"[CHANGE_STATUS] Movimiento de inventario creado: inventory_id={inventory.id}, quantity={process_qty * -1}, lot_item_id={lot_item.id}")
-
-                            new_sale_product = SaleProductModel(
-                                sale_id=existing_sale.id,
-                                product_id=product_id,
-                                inventory_movement_id=inventory_movement.id,
-                                inventory_id=inventory.id,
-                                lot_item_id=lot_item.id,
-                                quantity=sale_line_qty,
-                                price=price_per_package,
-                            )
-                            self.db.add(new_sale_product)
-                            self.db.flush()
-                            last_new_sale_product = new_sale_product
-
-                            quantity_to_process -= process_qty
-                            total_processed += process_qty
-
-                            if quantity_to_process <= 0:
-                                break
-
-                        self._apply_pending_packages_to_last_line(last_new_sale_product, packages_remaining)
+                        sale_product.inventory_movement_id = main_movement.id
+                        sale_product.inventory_id = inventory.id if inventory else None
+                        sale_product.lot_item_id = main_movement.lot_item_id
+                        sale_product.quantity = packages_ordered
+                        sale_product.price = price_per_package
+                        self.db.flush()
+                        print(
+                            f"[CHANGE_STATUS] Salida consolidada: sale_id={existing_sale.id}, "
+                            f"product_id={product_id}, quantity={main_movement.quantity}, "
+                            f"reason={main_movement.reason}"
+                        )
 
                 # Si no hay productos sin procesar, buscar presupuesto aceptado del mismo cliente
                 if not sale_products_unprocessed:
@@ -845,83 +867,37 @@ class SaleClass:
                                     else int(product.total or 0)
                                 )
 
-                                quantity_to_process = effective_qty
-                                total_processed = 0
+                                movement_uc_budget = sale_acceptance_unit_cost_from_movements(self.db, product_id)
 
-                                available_lots = fifo_lots_available(self.db, product_id)
-
-                                if not available_lots:
-                                    error_msg = f"No hay lotes disponibles para el producto ID {product_id}"
+                                main_movement, exit_error = self._create_consolidated_sale_inventory_exit(
+                                    existing_sale.id,
+                                    product_id,
+                                    effective_qty,
+                                    movement_uc_budget,
+                                    reason_prefix="Venta desde presupuesto",
+                                )
+                                if exit_error:
+                                    error_msg = exit_error
                                     print(f"[CHANGE_STATUS] ERROR: {error_msg}")
                                     return {"status": "error", "message": error_msg}
 
-                                movement_uc_budget = sale_acceptance_unit_cost_from_movements(self.db, product_id)
+                                inventory = (
+                                    self.db.query(InventoryModel)
+                                    .filter(InventoryModel.id == main_movement.inventory_id)
+                                    .first()
+                                )
 
-                                packages_remaining = packages_ordered
-                                last_budget_sale_product = None
-
-                                for lot_item, lot, inv_id, lot_balance in available_lots:
-                                    if quantity_to_process <= 0:
-                                        break
-
-                                    process_qty = min(quantity_to_process, int(lot_balance))
-
-                                    if process_qty <= 0:
-                                        continue
-
-                                    inventory = (
-                                        self.db.query(InventoryModel)
-                                        .filter(InventoryModel.id == inv_id)
-                                        .first()
-                                    )
-
-                                    if not inventory:
-                                        error_msg = f"No se encontró inventario para el producto ID {product_id}"
-                                        print(f"[CHANGE_STATUS] ERROR: {error_msg}")
-                                        return {"status": "error", "message": error_msg}
-
-                                    sale_line_qty = self._sale_line_packages_for_fifo_slice(
-                                        product_id, process_qty, packages_remaining
-                                    )
-                                    packages_remaining -= sale_line_qty
-
-                                    reason_base, reason_pkgo = self._reason_base_pkgo_for_sale_movement(
-                                        product_id, process_qty
-                                    )
-
-                                    inventory_movement = InventoryMovementModel(
-                                        inventory_id=inventory.id,
-                                        lot_item_id=lot_item.id,
-                                        movement_type_id=2,
-                                        quantity=(process_qty * -1),
-                                        unit_cost=movement_uc_budget,
-                                        reason=f"Venta desde presupuesto|base={reason_base}|pkgo={reason_pkgo}",
-                                        added_date=_inventory_movement_added_at(),
-                                    )
-                                    self.db.add(inventory_movement)
-                                    self.db.flush()
-
-                                    sale_product = SaleProductModel(
-                                        sale_id=existing_sale.id,
-                                        product_id=product_id,
-                                        inventory_movement_id=inventory_movement.id,
-                                        inventory_id=inventory.id,
-                                        lot_item_id=lot_item.id,
-                                        quantity=sale_line_qty,
-                                        price=price_per_package,
-                                    )
-
-                                    self.db.add(sale_product)
-                                    self.db.flush()
-                                    last_budget_sale_product = sale_product
-
-                                    quantity_to_process -= process_qty
-                                    total_processed += process_qty
-
-                                    if quantity_to_process <= 0:
-                                        break
-
-                                self._apply_pending_packages_to_last_line(last_budget_sale_product, packages_remaining)
+                                sale_product = SaleProductModel(
+                                    sale_id=existing_sale.id,
+                                    product_id=product_id,
+                                    inventory_movement_id=main_movement.id,
+                                    inventory_id=inventory.id if inventory else None,
+                                    lot_item_id=main_movement.lot_item_id,
+                                    quantity=packages_ordered,
+                                    price=price_per_package,
+                                )
+                                self.db.add(sale_product)
+                                self.db.flush()
 
             existing_sale.status_id = status_id
             existing_sale.updated_date = datetime.utcnow()

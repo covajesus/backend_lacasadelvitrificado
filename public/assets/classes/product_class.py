@@ -1,13 +1,102 @@
-from app.backend.db.models import ProductModel, LiterFeatureModel, SupplierModel, CategoryModel, LotModel, LotItemModel, KilogramFeatureModel, UnitMeasureModel
+from app.backend.db.models import (
+    ProductModel,
+    SupplierModel,
+    UnitFeatureModel,
+    CategoryModel,
+    LotModel,
+    LotItemModel,
+    UnitMeasureModel,
+    CustomerProductDiscountModel,
+    InventoryModel,
+    InventoryMovementModel,
+)
 from app.backend.classes.file_class import FileClass
 from datetime import datetime
-from sqlalchemy import func
+import re
+from sqlalchemy import func, or_, and_
 
 class ProductClass:
+    _SEARCH_STRIP_CHARS = (
+        "®", "™", "©", "°", "(", ")", "-", "/", ".", ",", ";", ":", "_", "+", "&"
+    )
+
+    @classmethod
+    def _normalize_search_tokens(cls, search_term: str) -> list[str]:
+        """Parte el texto en palabras ignorando símbolos como ®, guiones y paréntesis."""
+        text = (search_term or "").strip().lower()
+        if not text:
+            return []
+        for sym in cls._SEARCH_STRIP_CHARS:
+            text = text.replace(sym.lower(), " ")
+            if sym != sym.lower():
+                text = text.replace(sym, " ")
+        text = re.sub(r"[^\w\s]", " ", text, flags=re.UNICODE)
+        text = re.sub(r"\s+", " ", text).strip()
+        return [t for t in text.split(" ") if t]
+
+    @classmethod
+    def _sql_normalized_column(cls, column):
+        """Expresión SQL con el mismo criterio de normalización para LIKE flexible."""
+        expr = func.lower(column)
+        for sym in cls._SEARCH_STRIP_CHARS:
+            expr = func.replace(expr, sym.lower(), " ")
+            if sym != sym.lower():
+                expr = func.replace(expr, sym, " ")
+        return expr
+
     def __init__(self, db):
         self.db = db
 
-    def get_all(self, page=0, items_per_page=10):
+    def _movement_stock_by_product_subquery(self):
+        """
+        Stock por producto = suma de ``inventories_movements.quantity`` solo del inventario
+        con mayor ``inventories.id`` por SKU (misma regla que ``KardexClass.get_all``).
+        """
+        latest_inv_sq = (
+            self.db.query(
+                InventoryModel.product_id.label("product_id"),
+                func.max(InventoryModel.id).label("latest_inventory_id"),
+            )
+            .group_by(InventoryModel.product_id)
+            .subquery()
+        )
+        stock_per_inv_sq = (
+            self.db.query(
+                InventoryMovementModel.inventory_id.label("inventory_id"),
+                func.coalesce(func.sum(InventoryMovementModel.quantity), 0).label("stock_sum"),
+            )
+            .group_by(InventoryMovementModel.inventory_id)
+            .subquery()
+        )
+        return (
+            self.db.query(
+                latest_inv_sq.c.product_id.label("product_id"),
+                func.coalesce(stock_per_inv_sq.c.stock_sum, 0).label("movement_stock"),
+            )
+            .select_from(latest_inv_sq)
+            .outerjoin(
+                stock_per_inv_sq,
+                stock_per_inv_sq.c.inventory_id == latest_inv_sq.c.latest_inventory_id,
+            )
+            .subquery()
+        )
+
+    def _sum_movement_quantity_for_product(self, product_id):
+        latest_id = (
+            self.db.query(func.max(InventoryModel.id))
+            .filter(InventoryModel.product_id == product_id)
+            .scalar()
+        )
+        if latest_id is None:
+            return 0
+        row = (
+            self.db.query(func.coalesce(func.sum(InventoryMovementModel.quantity), 0))
+            .filter(InventoryMovementModel.inventory_id == latest_id)
+            .scalar()
+        )
+        return int(row or 0)
+
+    def get_all(self, page=0, items_per_page=10, supplier_id=None, product_id=None):
         try:
             query = (
                 self.db.query(
@@ -15,11 +104,21 @@ class ProductClass:
                     SupplierModel.supplier.label("supplier"),
                     CategoryModel.category.label("category"),
                     ProductModel.code,
-                    ProductModel.product                )
+                    ProductModel.product
+                )
                 .join(SupplierModel, SupplierModel.id == ProductModel.supplier_id, isouter=True)
                 .join(CategoryModel, CategoryModel.id == ProductModel.category_id, isouter=True)
-                .order_by(ProductModel.id)
             )
+            
+            # Aplicar filtros si se proporcionan
+            if supplier_id:
+                query = query.filter(ProductModel.supplier_id == supplier_id)
+            
+            if product_id:
+                query = query.filter(ProductModel.id == product_id)
+            
+            # Ordenar por nombre del producto
+            query = query.order_by(ProductModel.product)
 
             if page > 0:
                 total_items = query.count()
@@ -101,7 +200,7 @@ class ProductClass:
                     ProductModel.short_description,
                     ProductModel.description
                 )
-                .order_by(ProductModel.id)
+                .order_by(ProductModel.product)
             )
 
             serialized_data = [{
@@ -135,10 +234,14 @@ class ProductClass:
                 category_id=product_inputs.category_id,
                 unit_measure_id=product_inputs.unit_measure_id,
                 code=product_inputs.code,
+                discount_percentage=product_inputs.discount_percentage,
+                final_unit_cost=product_inputs.final_unit_cost,
                 original_unit_cost=product_inputs.original_unit_cost,
                 product=product_inputs.product,
                 short_description=product_inputs.short_description,
                 description=product_inputs.description,
+                is_compound=product_inputs.is_compound,
+                compound_product_id=product_inputs.compound_product_id,
                 photo=photo,
                 catalog=catalog,
                 added_date=datetime.utcnow(),
@@ -149,33 +252,19 @@ class ProductClass:
             self.db.commit()
             self.db.refresh(new_product)
 
-            if product_inputs.unit_measure_id == 1:
-                new_kilogram_feature = KilogramFeatureModel(
+            new_unit_feature = UnitFeatureModel(
                     product_id=new_product.id,
                     quantity_per_package=product_inputs.quantity_per_package,
                     quantity_per_pallet=product_inputs.quantity_per_pallet,
                     weight_per_unit=product_inputs.weight_per_unit,
                     weight_per_pallet=product_inputs.weight_per_pallet,
+                    sample_size=product_inputs.sample_size,
                     added_date=datetime.utcnow()
                 )
 
-                self.db.add(new_kilogram_feature)
-                self.db.commit()
-                self.db.refresh(new_kilogram_feature)
-
-            if product_inputs.unit_measure_id == 2:
-                new_liter_feature = LiterFeatureModel(
-                    product_id=new_product.id,
-                    quantity_per_package=product_inputs.quantity_per_package,
-                    quantity_per_pallet=product_inputs.quantity_per_pallet,
-                    weight_per_liter=product_inputs.weight_per_liter,
-                    weight_per_pallet=product_inputs.weight_per_pallet,
-                    added_date=datetime.utcnow()
-                )
-
-                self.db.add(new_liter_feature)
-                self.db.commit()
-                self.db.refresh(new_liter_feature)
+            self.db.add(new_unit_feature)
+            self.db.commit()
+            self.db.refresh(new_unit_feature)
 
             return {
                 "status": "Producto registrado exitosamente.",
@@ -186,8 +275,9 @@ class ProductClass:
             self.db.rollback()
             return {"status": "error", "message": str(e)}
 
-    def sale_list(self, category_id):
+    def sale_list_by_category(self, category_id):
         try:
+            movement_stock_sq = self._movement_stock_by_product_subquery()
 
             if category_id == 0 or category_id is None:
                 data = (
@@ -205,14 +295,17 @@ class ProductClass:
                         ProductModel.description,
                         func.max(LotItemModel.public_sale_price).label("public_sale_price"),
                         func.max(LotItemModel.private_sale_price).label("private_sale_price"),
-                        func.sum(LotItemModel.quantity).label("total_stock"),
-                        func.group_concat(LotModel.lot_number.op('ORDER BY')(LotModel.lot_number)).label("lot_numbers")
+                        func.coalesce(func.max(movement_stock_sq.c.movement_stock), 0).label("total_stock"),
+                        func.group_concat(LotModel.lot_number.op('ORDER BY')(LotModel.lot_number)).label("lot_numbers"),
+                        func.max(UnitFeatureModel.sample_size).label("sample_size"),
                     )
                     .join(UnitMeasureModel, UnitMeasureModel.id == ProductModel.unit_measure_id, isouter=True)
                     .join(SupplierModel, SupplierModel.id == ProductModel.supplier_id, isouter=True)
                     .join(CategoryModel, CategoryModel.id == ProductModel.category_id, isouter=True)
                     .join(LotItemModel, LotItemModel.product_id == ProductModel.id)
                     .join(LotModel, LotModel.id == LotItemModel.lot_id)
+                    .outerjoin(UnitFeatureModel, UnitFeatureModel.product_id == ProductModel.id)
+                    .outerjoin(movement_stock_sq, movement_stock_sq.c.product_id == ProductModel.id)
                     .group_by(
                         ProductModel.id,
                         ProductModel.code,
@@ -226,7 +319,114 @@ class ProductClass:
                         ProductModel.short_description,
                         ProductModel.description
                     )
-                    .order_by(ProductModel.id)
+                    .having(func.coalesce(func.max(movement_stock_sq.c.movement_stock), 0) > 0)
+                    .order_by(ProductModel.product)
+                )
+            else:
+                data = (
+                    self.db.query(
+                        ProductModel.id, 
+                        ProductModel.code,
+                        ProductModel.product,
+                        UnitMeasureModel.unit_measure,
+                        SupplierModel.supplier,
+                        CategoryModel.category,
+                        ProductModel.category_id,
+                        ProductModel.photo,
+                        ProductModel.catalog,
+                        ProductModel.short_description,
+                        ProductModel.description,
+                        ProductModel.discount_percentage,
+                        ProductModel.final_unit_cost
+                    )
+                    .join(UnitMeasureModel, UnitMeasureModel.id == ProductModel.unit_measure_id, isouter=True)
+                    .join(SupplierModel, SupplierModel.id == ProductModel.supplier_id, isouter=True)
+                    .join(CategoryModel, CategoryModel.id == ProductModel.category_id, isouter=True)
+                    .filter(ProductModel.category_id == category_id)
+                    .group_by(
+                        ProductModel.id,
+                        ProductModel.code,
+                        ProductModel.product,
+                        UnitMeasureModel.unit_measure,
+                        SupplierModel.supplier,
+                        CategoryModel.category,
+                        ProductModel.category_id,
+                        ProductModel.photo,
+                        ProductModel.catalog,
+                        ProductModel.short_description,
+                        ProductModel.description
+                    )
+                    .order_by(ProductModel.product)
+                )
+
+            serialized_data = [{
+                    "id": product.id,
+                    "code": product.code,
+                    "product": product.product,
+                    "unit_measure": product.unit_measure,
+                    "supplier": product.supplier,
+                    "category": product.category,
+                    "category_id": product.category_id,
+                    "photo": product.photo,
+                    "catalog": product.catalog,
+                    "short_description": product.short_description,
+                    "description": product.description,
+                } for product in data]
+
+            return {
+                "data": serialized_data
+            }
+
+        except Exception as e:
+            error_message = str(e)
+            return {"status": "error", "message": error_message}
+        
+    def sale_list(self, category_id):
+        try:
+            movement_stock_sq = self._movement_stock_by_product_subquery()
+
+            if category_id == 0 or category_id is None:
+                data = (
+                    self.db.query(
+                        ProductModel.id, 
+                        ProductModel.code,
+                        ProductModel.product,
+                        UnitMeasureModel.unit_measure,
+                        SupplierModel.supplier,
+                        CategoryModel.category,
+                        ProductModel.category_id,
+                        ProductModel.photo,
+                        ProductModel.catalog,
+                        ProductModel.short_description,
+                        ProductModel.description,
+                        func.max(LotItemModel.public_sale_price).label("public_sale_price"),
+                        func.max(LotItemModel.private_sale_price).label("private_sale_price"),
+                        func.coalesce(func.max(movement_stock_sq.c.movement_stock), 0).label("total_stock"),
+                        func.group_concat(LotModel.lot_number.op('ORDER BY')(LotModel.lot_number)).label("lot_numbers"),
+                        func.max(UnitFeatureModel.sample_size).label("sample_size"),
+                    )
+                    .join(UnitMeasureModel, UnitMeasureModel.id == ProductModel.unit_measure_id, isouter=True)
+                    .join(SupplierModel, SupplierModel.id == ProductModel.supplier_id, isouter=True)
+                    .join(CategoryModel, CategoryModel.id == ProductModel.category_id, isouter=True)
+                    .join(LotItemModel, LotItemModel.product_id == ProductModel.id)
+                    .join(LotModel, LotModel.id == LotItemModel.lot_id)
+                    .outerjoin(UnitFeatureModel, UnitFeatureModel.product_id == ProductModel.id)
+                    .outerjoin(movement_stock_sq, movement_stock_sq.c.product_id == ProductModel.id)
+                    .group_by(
+                        ProductModel.id,
+                        ProductModel.code,
+                        ProductModel.product,
+                        UnitMeasureModel.unit_measure,
+                        SupplierModel.supplier,
+                        CategoryModel.category,
+                        ProductModel.category_id,
+                        ProductModel.photo,
+                        ProductModel.catalog,
+                        ProductModel.short_description,
+                        ProductModel.description
+                    )
+                    .having(func.coalesce(func.max(movement_stock_sq.c.movement_stock), 0) > 0)
+                    .order_by(ProductModel.product)
                 )
             else:
                 data = (
@@ -244,14 +444,17 @@ class ProductClass:
                         ProductModel.description,
                         func.max(LotItemModel.public_sale_price).label("public_sale_price"),
                         func.max(LotItemModel.private_sale_price).label("private_sale_price"),
-                        func.sum(LotItemModel.quantity).label("total_stock"),
-                        func.group_concat(LotModel.lot_number.op('ORDER BY')(LotModel.lot_number)).label("lot_numbers")
+                        func.coalesce(func.max(movement_stock_sq.c.movement_stock), 0).label("total_stock"),
+                        func.group_concat(LotModel.lot_number.op('ORDER BY')(LotModel.lot_number)).label("lot_numbers"),
+                        func.max(UnitFeatureModel.sample_size).label("sample_size"),
                     )
                     .join(UnitMeasureModel, UnitMeasureModel.id == ProductModel.unit_measure_id, isouter=True)
                     .join(SupplierModel, SupplierModel.id == ProductModel.supplier_id, isouter=True)
                     .join(CategoryModel, CategoryModel.id == ProductModel.category_id, isouter=True)
                     .join(LotItemModel, LotItemModel.product_id == ProductModel.id)
                     .join(LotModel, LotModel.id == LotItemModel.lot_id)
+                    .outerjoin(UnitFeatureModel, UnitFeatureModel.product_id == ProductModel.id)
+                    .outerjoin(movement_stock_sq, movement_stock_sq.c.product_id == ProductModel.id)
                     .filter(ProductModel.category_id == category_id)
                     .group_by(
                         ProductModel.id,
@@ -266,7 +469,8 @@ class ProductClass:
                         ProductModel.short_description,
                         ProductModel.description
                     )
-                    .order_by(ProductModel.id)
+                    .having(func.coalesce(func.max(movement_stock_sq.c.movement_stock), 0) > 0)
+                    .order_by(ProductModel.product)
                 )
 
             serialized_data = [{
@@ -284,7 +488,8 @@ class ProductClass:
                     "public_sale_price": product.public_sale_price if product.public_sale_price is not None else 0,
                     "private_sale_price": product.private_sale_price if product.private_sale_price is not None else 0,
                     "total_stock": product.total_stock if product.total_stock is not None else 0,
-                    "lot_numbers": product.lot_numbers if product.lot_numbers else ""
+                    "lot_numbers": product.lot_numbers if product.lot_numbers else "",
+                    "sample_size": product.sample_size if product.sample_size else "",
                 } for product in data]
 
             return {
@@ -297,6 +502,7 @@ class ProductClass:
         
     def sale_data(self, id):
         try:
+            movement_stock_sq = self._movement_stock_by_product_subquery()
             # Consulta del producto
             data_query = (
                 self.db.query(
@@ -313,11 +519,12 @@ class ProductClass:
                     ProductModel.catalog,
                     func.max(LotItemModel.public_sale_price).label("public_sale_price"),
                     func.max(LotItemModel.private_sale_price).label("private_sale_price"),
-                    func.sum(LotItemModel.quantity).label("total_stock"),
+                    func.coalesce(func.max(movement_stock_sq.c.movement_stock), 0).label("total_stock"),
                     func.group_concat(LotModel.lot_number.op('ORDER BY')(LotModel.lot_number)).label("lot_numbers")
                 )
                 .join(LotItemModel, LotItemModel.product_id == ProductModel.id)
                 .join(LotModel, LotModel.id == LotItemModel.lot_id)
+                .outerjoin(movement_stock_sq, movement_stock_sq.c.product_id == ProductModel.id)
                 .filter(ProductModel.id == id)
                 .group_by(
                     ProductModel.id,
@@ -358,10 +565,9 @@ class ProductClass:
                 "features": None
             }
 
-            # Buscar características según unit_measure_id
-            if data_query.unit_measure_id == 1:  # Kilogramos
-                features = self.db.query(KilogramFeatureModel).filter(
-                    KilogramFeatureModel.product_id == id
+            if data_query.unit_measure_id == 1 or data_query.unit_measure_id == 2 or data_query.unit_measure_id == 3:
+                features = self.db.query(UnitFeatureModel).filter(
+                    UnitFeatureModel.product_id == id
                 ).first()
                 if features:
                     product_data["features"] = {
@@ -370,21 +576,7 @@ class ProductClass:
                         "quantity_per_pallet": features.quantity_per_pallet,
                         "weight_per_unit": features.weight_per_unit,
                         "weight_per_pallet": features.weight_per_pallet,
-                        "added_date": features.added_date,
-                        "updated_date": features.updated_date,
-                    }
-
-            elif data_query.unit_measure_id == 2:  # Litros
-                features = self.db.query(LiterFeatureModel).filter(
-                    LiterFeatureModel.product_id == id
-                ).first()
-                if features:
-                    product_data["features"] = {
-                        "product_id": features.product_id,
-                        "quantity_per_package": features.quantity_per_package,
-                        "quantity_per_pallet": features.quantity_per_pallet,
-                        "weight_per_liter": features.weight_per_liter,
-                        "weight_per_pallet": features.weight_per_pallet,
+                        "sample_size": features.sample_size,
                         "added_date": features.added_date,
                         "updated_date": features.updated_date,
                     }
@@ -396,20 +588,47 @@ class ProductClass:
         
     def get(self, id):
         try:
-            # Consulta del producto
-            data_query = self.db.query(
-                ProductModel.id,
-                ProductModel.supplier_id,
-                ProductModel.category_id,
-                ProductModel.code,
-                ProductModel.product,
-                ProductModel.original_unit_cost,
-                ProductModel.short_description,
-                ProductModel.description,
-                ProductModel.unit_measure_id,
-                ProductModel.photo,
-                ProductModel.catalog
-            ).filter(ProductModel.id == id).first()
+            data_query = (
+                self.db.query(
+                    ProductModel.id,
+                    ProductModel.supplier_id,
+                    ProductModel.category_id,
+                    ProductModel.code,
+                    ProductModel.product,
+                    ProductModel.original_unit_cost,
+                    ProductModel.discount_percentage,
+                    ProductModel.final_unit_cost,
+                    ProductModel.short_description,
+                    ProductModel.description,
+                    ProductModel.unit_measure_id,
+                    ProductModel.is_compound,
+                    ProductModel.compound_product_id,
+                    ProductModel.photo,
+                    ProductModel.catalog,
+                    func.max(LotItemModel.public_sale_price).label("public_sale_price"),
+                    func.max(LotItemModel.private_sale_price).label("private_sale_price")
+                )
+                .join(LotItemModel, LotItemModel.product_id == ProductModel.id, isouter=True)
+                .filter(ProductModel.id == id)
+                .group_by(
+                    ProductModel.id,
+                    ProductModel.supplier_id,
+                    ProductModel.category_id,
+                    ProductModel.code,
+                    ProductModel.product,
+                    ProductModel.original_unit_cost,
+                    ProductModel.discount_percentage,
+                    ProductModel.final_unit_cost,
+                    ProductModel.short_description,
+                    ProductModel.description,
+                    ProductModel.unit_measure_id,
+                    ProductModel.is_compound,
+                    ProductModel.compound_product_id,
+                    ProductModel.photo,
+                    ProductModel.catalog
+                )
+                .first()
+            )
 
             if not data_query:
                 return {"error": "No se encontraron datos para el producto especificado."}
@@ -421,19 +640,25 @@ class ProductClass:
                 "category_id": data_query.category_id,
                 "code": data_query.code,
                 "original_unit_cost": data_query.original_unit_cost,
+                "final_unit_cost": data_query.final_unit_cost,
+                "discount_percentage": data_query.discount_percentage,
                 "product": data_query.product,
                 "short_description": data_query.short_description,
                 "description": data_query.description,
                 "unit_measure_id": data_query.unit_measure_id,
+                "is_compound": data_query.is_compound,
+                "compound_product_id": data_query.compound_product_id,
                 "photo": data_query.photo,
                 "catalog": data_query.catalog,
-                "features": None
+                "public_sale_price": data_query.public_sale_price if data_query.public_sale_price is not None else 0,
+                "private_sale_price": data_query.private_sale_price if data_query.private_sale_price is not None else 0,
+                "features": None,
+                "inventory": 0
             }
 
-            # Buscar características según unit_measure_id
-            if data_query.unit_measure_id == 1:  # Kilogramos
-                features = self.db.query(KilogramFeatureModel).filter(
-                    KilogramFeatureModel.product_id == id
+            if data_query.unit_measure_id == 1 or data_query.unit_measure_id == 2 or data_query.unit_measure_id == 3:
+                features = self.db.query(UnitFeatureModel).filter(
+                    UnitFeatureModel.product_id == id
                 ).first()
                 if features:
                     product_data["features"] = {
@@ -442,48 +667,180 @@ class ProductClass:
                         "quantity_per_pallet": features.quantity_per_pallet,
                         "weight_per_unit": features.weight_per_unit,
                         "weight_per_pallet": features.weight_per_pallet,
+                        "sample_size": features.sample_size,
                         "added_date": features.added_date,
                         "updated_date": features.updated_date,
                     }
 
-            elif data_query.unit_measure_id == 2:  # Litros
-                features = self.db.query(LiterFeatureModel).filter(
-                    LiterFeatureModel.product_id == id
-                ).first()
-                if features:
-                    product_data["features"] = {
-                        "product_id": features.product_id,
-                        "quantity_per_package": features.quantity_per_package,
-                        "quantity_per_pallet": features.quantity_per_pallet,
-                        "weight_per_liter": features.weight_per_liter,
-                        "weight_per_pallet": features.weight_per_pallet,
-                        "added_date": features.added_date,
-                        "updated_date": features.updated_date,
-                    }
+            product_data["inventory"] = self._sum_movement_quantity_for_product(id)
 
             return {"product_data": product_data}
 
         except Exception as e:
             return {"error": str(e)}
 
+    def budget(self, id, customer_id=None):
+        """
+        Obtiene los datos del producto para presupuesto.
+        Devuelve lo mismo que get() pero con public_sale_price y discount_percentage del cliente.
+        """
+        try:
+            # Obtener los mismos datos que get()
+            data_query = (
+                self.db.query(
+                    ProductModel.id,
+                    ProductModel.supplier_id,
+                    ProductModel.category_id,
+                    ProductModel.code,
+                    ProductModel.product,
+                    ProductModel.original_unit_cost,
+                    ProductModel.discount_percentage,
+                    ProductModel.final_unit_cost,
+                    ProductModel.short_description,
+                    ProductModel.description,
+                    ProductModel.unit_measure_id,
+                    ProductModel.is_compound,
+                    ProductModel.compound_product_id,
+                    ProductModel.photo,
+                    ProductModel.catalog,
+                    func.max(LotItemModel.public_sale_price).label("public_sale_price"),
+                    func.max(LotItemModel.private_sale_price).label("private_sale_price")
+                )
+                .join(LotItemModel, LotItemModel.product_id == ProductModel.id, isouter=True)
+                .filter(ProductModel.id == id)
+                .group_by(
+                    ProductModel.id,
+                    ProductModel.supplier_id,
+                    ProductModel.category_id,
+                    ProductModel.code,
+                    ProductModel.product,
+                    ProductModel.original_unit_cost,
+                    ProductModel.discount_percentage,
+                    ProductModel.final_unit_cost,
+                    ProductModel.short_description,
+                    ProductModel.description,
+                    ProductModel.unit_measure_id,
+                    ProductModel.is_compound,
+                    ProductModel.compound_product_id,
+                    ProductModel.photo,
+                    ProductModel.catalog
+                )
+                .first()
+            )
+
+            if not data_query:
+                return {"error": "No se encontraron datos para el producto especificado."}
+
+            # Obtener descuento del cliente para este producto si se proporciona customer_id
+            customer_discount = None
+            if customer_id:
+                customer_discount_record = (
+                    self.db.query(CustomerProductDiscountModel)
+                    .filter(CustomerProductDiscountModel.customer_id == customer_id)
+                    .filter(CustomerProductDiscountModel.product_id == id)
+                    .first()
+                )
+                if customer_discount_record:
+                    customer_discount = customer_discount_record.discount_percentage
+
+            # Diccionario base del producto (igual que get)
+            product_data = {
+                "id": data_query.id,
+                "supplier_id": data_query.supplier_id,
+                "category_id": data_query.category_id,
+                "code": data_query.code,
+                "original_unit_cost": data_query.original_unit_cost,
+                "final_unit_cost": data_query.final_unit_cost,
+                "discount_percentage": data_query.discount_percentage,
+                "product": data_query.product,
+                "short_description": data_query.short_description,
+                "description": data_query.description,
+                "unit_measure_id": data_query.unit_measure_id,
+                "is_compound": data_query.is_compound,
+                "compound_product_id": data_query.compound_product_id,
+                "photo": data_query.photo,
+                "catalog": data_query.catalog,
+                "public_sale_price": data_query.public_sale_price if data_query.public_sale_price is not None else 0,
+                "private_sale_price": data_query.private_sale_price if data_query.private_sale_price is not None else 0,
+                "customer_discount_percentage": customer_discount,
+                "features": None,
+                "inventory": 0
+            }
+
+            if data_query.unit_measure_id == 1 or data_query.unit_measure_id == 2 or data_query.unit_measure_id == 3:
+                features = self.db.query(UnitFeatureModel).filter(
+                    UnitFeatureModel.product_id == id
+                ).first()
+                if features:
+                    product_data["features"] = {
+                        "product_id": features.product_id,
+                        "quantity_per_package": features.quantity_per_package,
+                        "quantity_per_pallet": features.quantity_per_pallet,
+                        "weight_per_unit": features.weight_per_unit,
+                        "weight_per_pallet": features.weight_per_pallet,
+                        "sample_size": features.sample_size,
+                        "added_date": features.added_date,
+                        "updated_date": features.updated_date,
+                    }
+
+            product_data["inventory"] = self._sum_movement_quantity_for_product(id)
+
+            return {"product_data": product_data}
+
+        except Exception as e:
+            return {"error": str(e)}
+
+    def _product_ever_in_inventory(self, product_id: int) -> bool:
+        """True si el producto tiene o tuvo registro en inventario, movimientos o lotes."""
+        if (
+            self.db.query(InventoryModel.id)
+            .filter(InventoryModel.product_id == product_id)
+            .first()
+        ):
+            return True
+
+        if (
+            self.db.query(InventoryMovementModel.id)
+            .join(InventoryModel, InventoryModel.id == InventoryMovementModel.inventory_id)
+            .filter(InventoryModel.product_id == product_id)
+            .first()
+        ):
+            return True
+
+        if (
+            self.db.query(LotItemModel.id)
+            .filter(LotItemModel.product_id == product_id)
+            .first()
+        ):
+            return True
+
+        return False
+
     def delete(self, id):
         try:
             product_data = self.db.query(ProductModel).filter(ProductModel.id == id).first()
-            if product_data:
-                photo_name = product_data.photo
-                remote_path = f"{photo_name}"
-                FileClass(self.db).delete(remote_path)
-
-                catalog_name = product_data.catalog
-                remote_path = f"{catalog_name}"
-                FileClass(self.db).delete(remote_path)
-
-                self.db.delete(product_data)
-                self.db.commit()
-                return 'success'
-            else:
+            if not product_data:
                 return "No data found"
+
+            if self._product_ever_in_inventory(id):
+                return {
+                    "status": "error",
+                    "message": "No se puede eliminar el producto porque ya ingresó alguna vez al inventario.",
+                }
+
+            photo_name = product_data.photo
+            remote_path = f"{photo_name}"
+            FileClass(self.db).delete(remote_path)
+
+            catalog_name = product_data.catalog
+            remote_path = f"{catalog_name}"
+            FileClass(self.db).delete(remote_path)
+
+            self.db.delete(product_data)
+            self.db.commit()
+            return "success"
         except Exception as e:
+            self.db.rollback()
             error_message = str(e)
             return f"Error: {error_message}"
 
@@ -494,22 +851,24 @@ class ProductClass:
             return {"status": "error", "message": "No data found"}
 
         try:
-            # Actualización campos base del producto
             existing_product.supplier_id = form_data.supplier_id
             existing_product.category_id = form_data.category_id
             existing_product.code = form_data.code
             existing_product.product = form_data.product
             existing_product.short_description = form_data.short_description
             existing_product.description = form_data.description
+            existing_product.discount_percentage = form_data.discount_percentage
+            existing_product.original_unit_cost = form_data.original_unit_cost
+            existing_product.final_unit_cost = form_data.final_unit_cost
             existing_product.unit_measure_id = form_data.unit_measure_id
+            existing_product.is_compound = form_data.is_compound
+            existing_product.compound_product_id = form_data.compound_product_id
 
-            # Actualizar foto
             if photo_remote_path:
                 if existing_product.photo:
                     FileClass(self.db).delete(existing_product.photo)
                 existing_product.photo = photo_remote_path
 
-            # Actualizar catálogo
             if catalog_remote_path:
                 if existing_product.catalog:
                     FileClass(self.db).delete(existing_product.catalog)
@@ -517,58 +876,41 @@ class ProductClass:
 
             existing_product.updated_date = datetime.utcnow()
 
-            # === Features update ===
-            if form_data.unit_measure_id == 1:  # Kilogramos
-                # Eliminar LiterFeature si existe
-                liter_feature = self.db.query(LiterFeatureModel).filter_by(product_id=id).first()
-                if liter_feature:
-                    self.db.delete(liter_feature)
-
-                # Insertar o actualizar KilogramFeature
-                kilo_feature = self.db.query(KilogramFeatureModel).filter_by(product_id=id).first()
-                if kilo_feature:
-                    kilo_feature.quantity_per_package = form_data.quantity_per_package
-                    kilo_feature.quantity_per_pallet = form_data.quantity_per_pallet
-                    kilo_feature.weight_per_unit = form_data.weight_per_unit
-                    kilo_feature.weight_per_pallet = form_data.weight_per_pallet
-                    kilo_feature.updated_date = datetime.utcnow()
+            if form_data.unit_measure_id == 1 or form_data.unit_measure_id == 2 or form_data.unit_measure_id == 3:
+                unit_feature = self.db.query(UnitFeatureModel).filter_by(product_id=id).first()
+                if unit_feature:
+                    unit_feature.quantity_per_package = form_data.quantity_per_package
+                    unit_feature.quantity_per_pallet = form_data.quantity_per_pallet
+                    unit_feature.weight_per_unit = form_data.weight_per_unit
+                    unit_feature.weight_per_pallet = form_data.weight_per_pallet
+                    unit_feature.sample_size = form_data.sample_size
+                    unit_feature.updated_date = datetime.utcnow()
                 else:
-                    new_feature = KilogramFeatureModel(
+                    new_feature = UnitFeatureModel(
                         product_id=id,
                         quantity_per_package=form_data.quantity_per_package,
                         quantity_per_pallet=form_data.quantity_per_pallet,
                         weight_per_unit=form_data.weight_per_unit,
                         weight_per_pallet=form_data.weight_per_pallet,
+                        sample_size=form_data.sample_size,
                         added_date=datetime.utcnow(),
                         updated_date=datetime.utcnow()
                     )
                     self.db.add(new_feature)
-
-            elif form_data.unit_measure_id == 2:  # Litros
-                # Eliminar KilogramFeature si existe
-                kilo_feature = self.db.query(KilogramFeatureModel).filter_by(product_id=id).first()
-                if kilo_feature:
-                    self.db.delete(kilo_feature)
-
-                # Insertar o actualizar LiterFeature
-                liter_feature = self.db.query(LiterFeatureModel).filter_by(product_id=id).first()
-                if liter_feature:
-                    liter_feature.quantity_per_package = form_data.quantity_per_package
-                    liter_feature.quantity_per_pallet = form_data.quantity_per_pallet
-                    liter_feature.weight_per_liter = form_data.weight_per_liter
-                    liter_feature.weight_per_pallet = form_data.weight_per_pallet
-                    liter_feature.updated_date = datetime.utcnow()
-                else:
-                    new_feature = LiterFeatureModel(
-                        product_id=id,
-                        quantity_per_package=form_data.quantity_per_package,
-                        quantity_per_pallet=form_data.quantity_per_pallet,
-                        weight_per_liter=form_data.weight_per_liter,
-                        weight_per_pallet=form_data.weight_per_pallet,
-                        added_date=datetime.utcnow(),
-                        updated_date=datetime.utcnow()
+            else:
+                unit_feature = self.db.query(UnitFeatureModel).filter_by(product_id=id).first()
+                if unit_feature:
+                    unit_feature.sample_size = form_data.sample_size
+                    unit_feature.updated_date = datetime.utcnow()
+                elif form_data.sample_size:
+                    self.db.add(
+                        UnitFeatureModel(
+                            product_id=id,
+                            sample_size=form_data.sample_size,
+                            added_date=datetime.utcnow(),
+                            updated_date=datetime.utcnow(),
+                        )
                     )
-                    self.db.add(new_feature)
 
             self.db.commit()
             self.db.refresh(existing_product)
@@ -577,3 +919,219 @@ class ProductClass:
         except Exception as e:
             self.db.rollback()
             return {"status": "error", "message": str(e)}
+
+    def get_products_by_supplier(self, supplier_identifier):
+        """
+        Obtiene productos filtrados por proveedor usando RUT o ID del proveedor.
+        
+        Args:
+            supplier_identifier: RUT del proveedor (ej: "12345678-9") o ID del proveedor (ej: "123")
+        
+        Returns:
+            Lista de productos del proveedor especificado
+        """
+        try:
+            # Determinar si el identificador es un ID numérico o un RUT
+            is_numeric_id = supplier_identifier.isdigit()
+            
+            query = (
+                self.db.query(
+                    ProductModel.id,
+                    ProductModel.code,
+                    ProductModel.product,
+                    ProductModel.description,
+                    ProductModel.photo,
+                    ProductModel.catalog,
+                    SupplierModel.supplier.label("supplier_name"),
+                    SupplierModel.identification_number.label("supplier_rut"),
+                    CategoryModel.category.label("category_name"),
+                    UnitMeasureModel.unit_measure.label("unit_measure"),
+                    ProductModel.added_date
+                )
+                .join(SupplierModel, SupplierModel.id == ProductModel.supplier_id)
+                .join(CategoryModel, CategoryModel.id == ProductModel.category_id, isouter=True)
+                .join(UnitMeasureModel, UnitMeasureModel.id == ProductModel.unit_measure_id, isouter=True)
+            )
+            
+            # Filtrar por ID del proveedor o RUT
+            if is_numeric_id:
+                query = query.filter(SupplierModel.id == int(supplier_identifier))
+            else:
+                query = query.filter(SupplierModel.identification_number == supplier_identifier)
+            
+            # Ordenar por nombre del producto
+            query = query.order_by(ProductModel.product)
+            
+            results = query.all()
+            
+            if not results:
+                return {
+                    "status": "success", 
+                    "message": f"No se encontraron productos para el proveedor: {supplier_identifier}",
+                    "data": []
+                }
+            
+            # Formatear los resultados
+            formatted_data = []
+            for result in results:
+                formatted_data.append({
+                    "id": result.id,
+                    "code": result.code,
+                    "product": result.product,
+                    "description": result.description,
+                    "photo": result.photo,
+                    "catalog": result.catalog,
+                    "supplier_name": result.supplier_name,
+                    "supplier_rut": result.supplier_rut,
+                    "category_name": result.category_name,
+                    "unit_measure": result.unit_measure,
+                    "added_date": result.added_date.strftime("%Y-%m-%d %H:%M:%S") if result.added_date else None
+                })
+            
+            return {
+                "status": "success",
+                "message": f"Se encontraron {len(formatted_data)} productos del proveedor: {results[0].supplier_name}",
+                "data": formatted_data,
+                "supplier_info": {
+                    "supplier_name": results[0].supplier_name,
+                    "supplier_rut": results[0].supplier_rut
+                }
+            }
+            
+        except Exception as e:
+            return {"status": "error", "message": f"Error al obtener productos por proveedor: {str(e)}"}
+
+    def search(self, search_term: str, customer_id: int = None):
+        """
+        Busca productos por código o nombre usando LIKE.
+        
+        Args:
+            search_term: Término de búsqueda que se buscará en code y product
+            customer_id: ID del cliente opcional para obtener su descuento específico
+        
+        Returns:
+            Lista de productos que coinciden con el término de búsqueda
+        """
+        try:
+            if not search_term or not search_term.strip():
+                return {
+                    "status": "error",
+                    "message": "El término de búsqueda no puede estar vacío",
+                    "data": []
+                }
+            
+            # Limpiar el término de búsqueda
+            search_term = search_term.strip()
+            tokens = self._normalize_search_tokens(search_term)
+            if not tokens:
+                return {
+                    "status": "error",
+                    "message": "El término de búsqueda no puede estar vacío",
+                    "data": [],
+                }
+
+            norm_product = self._sql_normalized_column(ProductModel.product)
+            norm_code = self._sql_normalized_column(ProductModel.code)
+
+            token_filters = []
+            for token in tokens:
+                pattern = f"%{token}%"
+                token_filters.append(
+                    or_(
+                        norm_product.like(pattern),
+                        norm_code.like(pattern),
+                    )
+                )
+
+            # Buscar en code, product y description; todas las palabras deben coincidir
+            query = (
+                self.db.query(
+                    ProductModel.id,
+                    ProductModel.code,
+                    ProductModel.product,
+                    ProductModel.description,
+                    ProductModel.photo,
+                    ProductModel.catalog,
+                    ProductModel.category_id,
+                    SupplierModel.supplier.label("supplier_name"),
+                    CategoryModel.category.label("category_name"),
+                    UnitMeasureModel.unit_measure.label("unit_measure"),
+                    func.max(LotItemModel.public_sale_price).label("public_sale_price"),
+                    func.max(LotItemModel.private_sale_price).label("private_sale_price"),
+                )
+                .join(SupplierModel, SupplierModel.id == ProductModel.supplier_id, isouter=True)
+                .join(CategoryModel, CategoryModel.id == ProductModel.category_id, isouter=True)
+                .join(UnitMeasureModel, UnitMeasureModel.id == ProductModel.unit_measure_id, isouter=True)
+                .join(LotItemModel, LotItemModel.product_id == ProductModel.id, isouter=True)
+                .filter(and_(*token_filters))
+                .group_by(
+                    ProductModel.id,
+                    ProductModel.code,
+                    ProductModel.product,
+                    ProductModel.description,
+                    ProductModel.photo,
+                    ProductModel.catalog,
+                    ProductModel.category_id,
+                    SupplierModel.supplier,
+                    CategoryModel.category,
+                    UnitMeasureModel.unit_measure
+                )
+                .order_by(ProductModel.product)
+            )
+            
+            results = query.all()
+            
+            if not results:
+                return {
+                    "status": "success",
+                    "message": f"No se encontraron productos que coincidan con '{search_term}'",
+                    "data": [],
+                    "count": 0
+                }
+            
+            # Obtener descuentos del cliente si se proporciona customer_id
+            customer_discounts = {}
+            if customer_id:
+                discount_records = (
+                    self.db.query(CustomerProductDiscountModel)
+                    .filter(CustomerProductDiscountModel.customer_id == customer_id)
+                    .all()
+                )
+                for discount in discount_records:
+                    customer_discounts[discount.product_id] = discount.discount_percentage or 0
+            
+            # Formatear los resultados
+            formatted_data = []
+            for result in results:
+                # Obtener descuento del cliente para este producto
+                customer_discount = customer_discounts.get(result.id, 0)
+                
+                formatted_data.append({
+                    "id": result.id,
+                    "code": result.code,
+                    "product": result.product,
+                    "description": result.description,
+                    "photo": result.photo,
+                    "catalog": result.catalog,
+                    "category_id": result.category_id,
+                    "category": result.category_name,
+                    "supplier_name": result.supplier_name,
+                    "unit_measure": result.unit_measure,
+                    "public_sale_price": result.public_sale_price if result.public_sale_price is not None else 0,
+                    "private_sale_price": result.private_sale_price if result.private_sale_price is not None else 0,
+                    "customer_discount_percentage": customer_discount
+                })
+            
+            return {
+                "status": "success",
+                "message": f"Se encontraron {len(formatted_data)} productos que coinciden con '{search_term}'",
+                "data": formatted_data,
+                "count": len(formatted_data)
+            }
+            
+        except Exception as e:
+            return {
+                "status": "error",
+                "message": f"Error al buscar productos: {str(e)}",
+                "data": []
+            }

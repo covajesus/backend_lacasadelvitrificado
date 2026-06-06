@@ -23,6 +23,7 @@ from app.backend.routers.kardex import kardex
 from app.backend.routers.dtes import dtes
 from app.backend.routers.budgets import budgets
 from app.backend.routers.whatsapp import whatsapp
+from app.backend.routers.samples import samples
 
 app = FastAPI(root_path="/api")
 application = app
@@ -69,6 +70,7 @@ app.include_router(kardex)
 app.include_router(dtes)
 app.include_router(budgets)
 app.include_router(whatsapp)
+app.include_router(samples)
 
 if __name__ == "__main__":
     uvicorn.run("main:app", port=8000, reload=True)
