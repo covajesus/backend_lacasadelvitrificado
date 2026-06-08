@@ -85,6 +85,7 @@ class StoreLocation(BaseModel):
 class ProductSearch(BaseModel):
     q: str = Field(..., description="Término de búsqueda para buscar en código o nombre del producto")
     customer_id: Optional[int] = Field(None, description="ID del cliente para obtener su descuento específico del producto")
+    with_inventory: Optional[bool] = Field(False, description="Si es true, solo devuelve productos con stock de inventario > 0")
 
 class ProductList(BaseModel):
     page: int

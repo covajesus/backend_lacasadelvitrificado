@@ -1001,13 +1001,14 @@ class ProductClass:
         except Exception as e:
             return {"status": "error", "message": f"Error al obtener productos por proveedor: {str(e)}"}
 
-    def search(self, search_term: str, customer_id: int = None):
+    def search(self, search_term: str, customer_id: int = None, with_inventory: bool = False):
         """
         Busca productos por código o nombre usando LIKE.
         
         Args:
             search_term: Término de búsqueda que se buscará en code y product
             customer_id: ID del cliente opcional para obtener su descuento específico
+            with_inventory: Si es True, solo productos con stock de inventario > 0
         
         Returns:
             Lista de productos que coinciden con el término de búsqueda
@@ -1043,6 +1044,8 @@ class ProductClass:
                     )
                 )
 
+            movement_stock_sq = self._movement_stock_by_product_subquery()
+
             # Buscar en code, product y description; todas las palabras deben coincidir
             query = (
                 self.db.query(
@@ -1058,11 +1061,13 @@ class ProductClass:
                     UnitMeasureModel.unit_measure.label("unit_measure"),
                     func.max(LotItemModel.public_sale_price).label("public_sale_price"),
                     func.max(LotItemModel.private_sale_price).label("private_sale_price"),
+                    func.coalesce(func.max(movement_stock_sq.c.movement_stock), 0).label("total_stock"),
                 )
                 .join(SupplierModel, SupplierModel.id == ProductModel.supplier_id, isouter=True)
                 .join(CategoryModel, CategoryModel.id == ProductModel.category_id, isouter=True)
                 .join(UnitMeasureModel, UnitMeasureModel.id == ProductModel.unit_measure_id, isouter=True)
                 .join(LotItemModel, LotItemModel.product_id == ProductModel.id, isouter=True)
+                .outerjoin(movement_stock_sq, movement_stock_sq.c.product_id == ProductModel.id)
                 .filter(and_(*token_filters))
                 .group_by(
                     ProductModel.id,
@@ -1078,6 +1083,9 @@ class ProductClass:
                 )
                 .order_by(ProductModel.product)
             )
+
+            if with_inventory:
+                query = query.having(func.coalesce(func.max(movement_stock_sq.c.movement_stock), 0) > 0)
             
             results = query.all()
             
@@ -1119,7 +1127,8 @@ class ProductClass:
                     "unit_measure": result.unit_measure,
                     "public_sale_price": result.public_sale_price if result.public_sale_price is not None else 0,
                     "private_sale_price": result.private_sale_price if result.private_sale_price is not None else 0,
-                    "customer_discount_percentage": customer_discount
+                    "customer_discount_percentage": customer_discount,
+                    "total_stock": int(result.total_stock or 0),
                 })
             
             return {
