@@ -1,6 +1,6 @@
-import re
 from datetime import datetime
-from decimal import Decimal
+from decimal import Decimal, ROUND_HALF_UP
+
 from sqlalchemy import func
 
 from app.backend.classes.sale_class import SaleClass, _inventory_movement_added_at
@@ -9,134 +9,149 @@ from app.backend.classes.inventory_stock import (
     sale_acceptance_unit_cost_from_movements,
 )
 from app.backend.db.models import (
-    SampleRequestModel,
-    SampleRequestItemModel,
+    UnitSaleRequestModel,
+    UnitSaleRequestItemModel,
     ProductModel,
-    UnitFeatureModel,
     UnitMeasureModel,
+    UnitFeatureModel,
+    LotItemModel,
     CustomerModel,
+    CustomerProductDiscountModel,
     SaleModel,
     SaleProductModel,
     InventoryModel,
     InventoryMovementModel,
 )
 
-SAMPLE_REASON_PREFIX = "Muestra"
-SAMPLE_SALE_STATUS_ID = 4
+UNIT_SALE_REASON_PREFIX = "Venta unitaria"
+UNIT_SALE_SALE_STATUS_ID = 4
+TAX_RATE = Decimal("0.19")
 
 
-def parse_sample_size(value) -> Decimal:
-    if value is None:
-        return Decimal("0")
-    normalized = str(value).strip().replace(",", ".")
-    match = re.search(r"[\d.]+", normalized)
-    if not match:
-        return Decimal("0")
-    try:
-        return Decimal(match.group())
-    except Exception:
-        return Decimal("0")
-
-
-class SampleClass:
+class UnitSaleClass:
     def __init__(self, db):
         self.db = db
 
-    def _get_product_sample_info(self, product_id: int):
+    def _get_product_pricing(self, product_id: int, customer_id=None):
         row = (
             self.db.query(
                 ProductModel.id,
                 ProductModel.product,
-                func.max(UnitFeatureModel.sample_size).label("sample_size"),
                 UnitMeasureModel.unit_measure,
+                UnitFeatureModel.quantity_per_package,
+                func.max(LotItemModel.public_sale_price).label("public_sale_price"),
             )
-            .outerjoin(UnitFeatureModel, UnitFeatureModel.product_id == ProductModel.id)
             .outerjoin(UnitMeasureModel, UnitMeasureModel.id == ProductModel.unit_measure_id)
+            .outerjoin(UnitFeatureModel, UnitFeatureModel.product_id == ProductModel.id)
+            .outerjoin(LotItemModel, LotItemModel.product_id == ProductModel.id)
             .filter(ProductModel.id == product_id)
-            .group_by(ProductModel.id, ProductModel.product, UnitMeasureModel.unit_measure)
+            .group_by(
+                ProductModel.id,
+                ProductModel.product,
+                UnitMeasureModel.unit_measure,
+                UnitFeatureModel.quantity_per_package,
+            )
             .first()
         )
         if not row:
             return None
-        sample_size_label = (row.sample_size or "").strip()
-        if not sample_size_label:
-            return None
+
+        qpp = Decimal(str(row.quantity_per_package or 1))
+        if qpp <= 0:
+            qpp = Decimal("1")
+
+        package_price = Decimal(str(row.public_sale_price or 0))
+        discount_pct = Decimal("0")
+        if customer_id:
+            discount_record = (
+                self.db.query(CustomerProductDiscountModel)
+                .filter(CustomerProductDiscountModel.customer_id == customer_id)
+                .filter(CustomerProductDiscountModel.product_id == product_id)
+                .first()
+            )
+            if discount_record and discount_record.discount_percentage:
+                discount_pct = Decimal(str(discount_record.discount_percentage))
+
+        if discount_pct > 0:
+            package_price = (
+                package_price * (Decimal("100") - discount_pct) / Decimal("100")
+            ).quantize(Decimal("1"), rounding=ROUND_HALF_UP)
+
+        unit_price = (package_price / qpp).quantize(Decimal("1"), rounding=ROUND_HALF_UP)
+
         return {
             "product_id": row.id,
             "product_name": row.product,
-            "sample_size_label": sample_size_label,
-            "sample_size": parse_sample_size(sample_size_label),
             "unit_measure": row.unit_measure or "",
+            "quantity_per_package": float(qpp),
+            "package_price": float(package_price),
+            "unit_price": float(unit_price),
         }
 
-    def get_products_with_samples(self):
+    def _get_product_info(self, product_id: int, customer_id=None):
+        return self._get_product_pricing(product_id, customer_id)
+
+    def get_products(self):
         try:
             rows = (
                 self.db.query(
                     ProductModel.id,
                     ProductModel.product,
-                    func.max(UnitFeatureModel.sample_size).label("sample_size"),
                     UnitMeasureModel.unit_measure,
                 )
-                .outerjoin(UnitFeatureModel, UnitFeatureModel.product_id == ProductModel.id)
                 .outerjoin(UnitMeasureModel, UnitMeasureModel.id == ProductModel.unit_measure_id)
-                .group_by(ProductModel.id, ProductModel.product, UnitMeasureModel.unit_measure)
                 .order_by(ProductModel.product)
                 .all()
             )
-
-            data = []
-            for row in rows:
-                sample_size_label = (row.sample_size or "").strip()
-                if not sample_size_label:
-                    continue
-                sample_size = parse_sample_size(sample_size_label)
-                data.append(
-                    {
-                        "id": row.id,
-                        "product": row.product,
-                        "sample_size": sample_size_label,
-                        "sample_size_value": float(sample_size) if sample_size > 0 else 0,
-                        "unit_measure": row.unit_measure or "",
-                    }
-                )
-
+            data = [
+                {
+                    "id": row.id,
+                    "product": row.product,
+                    "unit_measure": row.unit_measure or "",
+                }
+                for row in rows
+            ]
             return {"data": data}
         except Exception as e:
             return {"status": "error", "message": str(e)}
 
-    def get_sample_product(self, product_id: int):
+    def get_product(self, product_id: int, customer_id=None):
         try:
-            info = self._get_product_sample_info(product_id)
+            info = self._get_product_pricing(product_id, customer_id)
             if not info:
-                return {"status": "error", "message": "Producto sin muestra configurada"}
-
+                return {"status": "error", "message": "Producto no encontrado"}
             return {
                 "id": info["product_id"],
                 "product": info["product_name"],
-                "sample_size": info["sample_size_label"],
-                "sample_size_value": float(info["sample_size"]),
                 "unit_measure": info["unit_measure"],
+                "quantity_per_package": info["quantity_per_package"],
+                "package_price": info["package_price"],
+                "unit_price": info["unit_price"],
             }
         except Exception as e:
             return {"status": "error", "message": str(e)}
+
+    def _inventory_units(self, unit_quantity) -> int:
+        d = Decimal(str(unit_quantity))
+        if d <= 0:
+            return 0
+        return int(d.quantize(Decimal("1"), rounding=ROUND_HALF_UP))
 
     def _serialize_item(self, item):
         return {
             "id": item.id,
             "product_id": item.product_id,
             "product_name": item.product_name,
-            "sample_quantity": item.sample_quantity,
-            "sample_size": float(item.sample_size) if item.sample_size is not None else 0,
-            "sample_size_label": item.sample_size_label,
-            "total_amount": float(item.total_amount) if item.total_amount is not None else 0,
+            "unit_quantity": float(item.unit_quantity) if item.unit_quantity is not None else 0,
+            "unit_price": float(item.unit_price) if item.unit_price is not None else 0,
+            "line_total": float(item.line_total) if item.line_total is not None else 0,
             "unit_measure": item.unit_measure or "",
         }
 
-    def _items_quantity_summary(self, sample_request_id):
+    def _items_quantity_summary(self, unit_sale_request_id):
         items = (
-            self.db.query(SampleRequestItemModel)
-            .filter(SampleRequestItemModel.sample_request_id == sample_request_id)
+            self.db.query(UnitSaleRequestItemModel)
+            .filter(UnitSaleRequestItemModel.unit_sale_request_id == unit_sale_request_id)
             .all()
         )
         if not items:
@@ -149,7 +164,7 @@ class SampleClass:
         by_unit = {}
         for item in items:
             unit = (item.unit_measure or "").strip() or "u."
-            amount = float(item.total_amount or 0)
+            amount = float(item.unit_quantity or 0)
             by_unit[unit] = by_unit.get(unit, 0) + amount
 
         parts = []
@@ -174,22 +189,30 @@ class SampleClass:
             "customer_name": request.customer_name,
             "notes": request.notes or "",
             "sale_id": request.sale_id,
+            "subtotal": float(request.subtotal or 0),
+            "tax": float(request.tax or 0),
+            "total": float(request.total or 0),
             "items_count": summary.get("items_count", 0),
-            "total_quantity": summary.get("total_quantity", 0),
             "quantity_label": summary.get("quantity_label", "—"),
             "added_date": request.added_date.strftime("%Y-%m-%d %H:%M:%S") if request.added_date else None,
             "updated_date": request.updated_date.strftime("%Y-%m-%d %H:%M:%S") if request.updated_date else None,
         }
 
-    def _sample_delivery_address(self, sample_request_id, customer_name, customer_rut):
+    def _delivery_address(self, unit_sale_request_id, customer_name, customer_rut):
         return (
-            f"[MUESTRA #{sample_request_id}] {customer_name} · RUT {customer_rut} · "
-            f"Sin cobro · Descuento inventario automático"
+            f"[VENTA UNITARIA #{unit_sale_request_id}] {customer_name} · RUT {customer_rut} · "
+            f"Cobro aplicado · Descuento inventario automático"
         )
 
-    def _validate_sample_stock(self, items):
+    def _calculate_totals(self, items):
+        subtotal = sum(Decimal(str(item.line_total or 0)) for item in items)
+        tax = (subtotal * TAX_RATE).quantize(Decimal("1"), rounding=ROUND_HALF_UP)
+        total = subtotal + tax
+        return subtotal, tax, total
+
+    def _validate_stock(self, items):
         for item in items:
-            base_units = int(Decimal(item.total_amount or 0))
+            base_units = self._inventory_units(item.unit_quantity)
             if base_units <= 0:
                 continue
             available = stock_sum_for_product(self.db, item.product_id)
@@ -201,7 +224,6 @@ class SampleClass:
                 )
 
     def _reverse_sale_inventory(self, sale_id):
-        """Revierte salidas de inventario de un pedido de muestra (sin commit)."""
         sale_helper = SaleClass(self.db)
         sales_products = (
             self.db.query(SaleProductModel)
@@ -233,7 +255,7 @@ class SampleClass:
                     movement_type_id=1,
                     quantity=reverse_quantity,
                     unit_cost=return_uc,
-                    reason=f"Reversa {SAMPLE_REASON_PREFIX}|sale_id={sale_id}",
+                    reason=f"Reversa {UNIT_SALE_REASON_PREFIX}|sale_id={sale_id}",
                     added_date=_inventory_movement_added_at(),
                 )
             )
@@ -242,12 +264,11 @@ class SampleClass:
         self.db.query(SaleProductModel).filter(SaleProductModel.sale_id == sale_id).delete()
         self.db.flush()
 
-    def _deduct_sample_lines_on_sale(self, sale_id, sample_request, items):
-        """Descuenta inventario y crea líneas en sales_products (precio 0)."""
+    def _deduct_lines_on_sale(self, sale_id, items):
         sale_helper = SaleClass(self.db)
 
         for item in items:
-            effective_qty = int(Decimal(item.total_amount or 0))
+            effective_qty = self._inventory_units(item.unit_quantity)
             if effective_qty <= 0:
                 continue
 
@@ -257,7 +278,7 @@ class SampleClass:
                 item.product_id,
                 effective_qty,
                 movement_unit_cost,
-                reason_prefix=SAMPLE_REASON_PREFIX,
+                reason_prefix=UNIT_SALE_REASON_PREFIX,
             )
             if exit_error:
                 raise ValueError(exit_error)
@@ -268,6 +289,7 @@ class SampleClass:
                 .first()
             )
 
+            line_price = int(Decimal(str(item.line_total or 0)).quantize(Decimal("1"), rounding=ROUND_HALF_UP))
             self.db.add(
                 SaleProductModel(
                     sale_id=sale_id,
@@ -275,58 +297,58 @@ class SampleClass:
                     inventory_movement_id=main_movement.id,
                     inventory_id=inventory.id if inventory else None,
                     lot_item_id=main_movement.lot_item_id,
-                    quantity=int(item.sample_quantity or 0),
-                    price=0,
+                    quantity=1,
+                    price=line_price,
                 )
             )
 
         self.db.flush()
 
-    def _create_or_refresh_sample_sale(self, sample_request, items):
-        """
-        Crea pedido a $0, descuenta inventario con motivo Muestra y vincula sale_id.
-        Si ya existía pedido, revierte inventario y regenera líneas.
-        """
-        if not sample_request.customer_id:
-            raise ValueError("Cliente inválido para generar el pedido de muestra.")
+    def _create_or_refresh_sale(self, unit_sale_request, items):
+        if not unit_sale_request.customer_id:
+            raise ValueError("Cliente inválido para generar el pedido de venta unitaria.")
 
-        self._validate_sample_stock(items)
+        self._validate_stock(items)
+        subtotal, tax, total = self._calculate_totals(items)
         now = datetime.now()
-        delivery = self._sample_delivery_address(
-            sample_request.id,
-            sample_request.customer_name,
-            sample_request.customer_rut,
+        delivery = self._delivery_address(
+            unit_sale_request.id,
+            unit_sale_request.customer_name,
+            unit_sale_request.customer_rut,
         )
 
-        if sample_request.sale_id:
+        unit_sale_request.subtotal = subtotal
+        unit_sale_request.tax = tax
+        unit_sale_request.total = total
+
+        if unit_sale_request.sale_id:
             sale = (
                 self.db.query(SaleModel)
-                .filter(SaleModel.id == sample_request.sale_id)
+                .filter(SaleModel.id == unit_sale_request.sale_id)
                 .first()
             )
             if sale:
                 self._reverse_sale_inventory(sale.id)
-                sale.customer_id = sample_request.customer_id
+                sale.customer_id = unit_sale_request.customer_id
                 sale.delivery_address = delivery
-                sale.subtotal = 0
-                sale.tax = 0
-                sale.shipping_cost = 0
-                sale.total = 0
-                sale.status_id = SAMPLE_SALE_STATUS_ID
+                sale.subtotal = int(subtotal)
+                sale.tax = int(tax)
+                sale.total = int(total)
+                sale.status_id = UNIT_SALE_SALE_STATUS_ID
                 sale.updated_date = now
-                self._deduct_sample_lines_on_sale(sale.id, sample_request, items)
+                self._deduct_lines_on_sale(sale.id, items)
                 return sale.id
 
         new_sale = SaleModel(
-            customer_id=sample_request.customer_id,
+            customer_id=unit_sale_request.customer_id,
             shipping_method_id=1,
             dte_type_id=2,
             dte_status_id=2,
-            status_id=SAMPLE_SALE_STATUS_ID,
-            subtotal=0,
-            tax=0,
+            status_id=UNIT_SALE_SALE_STATUS_ID,
+            subtotal=int(subtotal),
+            tax=int(tax),
             shipping_cost=0,
-            total=0,
+            total=int(total),
             payment_support=None,
             delivery_address=delivery,
             added_date=now,
@@ -335,22 +357,22 @@ class SampleClass:
         self.db.add(new_sale)
         self.db.flush()
 
-        self._deduct_sample_lines_on_sale(new_sale.id, sample_request, items)
-        sample_request.sale_id = new_sale.id
+        self._deduct_lines_on_sale(new_sale.id, items)
+        unit_sale_request.sale_id = new_sale.id
         return new_sale.id
 
     def get_all(self, page=0, items_per_page=10, rut=None, customer_name=None, rol_id=None, user_rut=None):
         try:
-            query = self.db.query(SampleRequestModel).order_by(SampleRequestModel.added_date.desc())
+            query = self.db.query(UnitSaleRequestModel).order_by(UnitSaleRequestModel.added_date.desc())
 
             if rut and rut.strip():
-                query = query.filter(SampleRequestModel.customer_rut == rut.strip())
+                query = query.filter(UnitSaleRequestModel.customer_rut == rut.strip())
 
             if customer_name and customer_name.strip():
-                query = query.filter(SampleRequestModel.customer_name.ilike(f"%{customer_name.strip()}%"))
+                query = query.filter(UnitSaleRequestModel.customer_name.ilike(f"%{customer_name.strip()}%"))
 
             if rol_id not in (1, 2, 6) and user_rut:
-                query = query.filter(SampleRequestModel.customer_rut == str(user_rut).strip())
+                query = query.filter(UnitSaleRequestModel.customer_rut == str(user_rut).strip())
 
             if page > 0:
                 total_items = query.count()
@@ -384,20 +406,24 @@ class SampleClass:
         except Exception as e:
             return {"status": "error", "message": str(e)}
 
-    def get(self, sample_id):
+    def get(self, unit_sale_id):
         try:
-            request = self.db.query(SampleRequestModel).filter(SampleRequestModel.id == sample_id).first()
+            request = (
+                self.db.query(UnitSaleRequestModel)
+                .filter(UnitSaleRequestModel.id == unit_sale_id)
+                .first()
+            )
             if not request:
-                return {"status": "error", "message": "Sample request not found"}
+                return {"status": "error", "message": "Unit sale request not found"}
 
             items = (
-                self.db.query(SampleRequestItemModel)
-                .filter(SampleRequestItemModel.sample_request_id == sample_id)
-                .order_by(SampleRequestItemModel.id)
+                self.db.query(UnitSaleRequestItemModel)
+                .filter(UnitSaleRequestItemModel.unit_sale_request_id == unit_sale_id)
+                .order_by(UnitSaleRequestItemModel.id)
                 .all()
             )
 
-            payload = self._serialize_request(request, self._items_quantity_summary(sample_id))
+            payload = self._serialize_request(request, self._items_quantity_summary(unit_sale_id))
             payload["items"] = [self._serialize_item(item) for item in items]
             return payload
         except Exception as e:
@@ -415,27 +441,33 @@ class SampleClass:
         )
         return customer.id if customer else None
 
-    def _build_items(self, sample_request_id, items_input):
+    def _build_items(self, unit_sale_request_id, items_input, customer_id=None):
         created_items = []
         for item_input in items_input:
-            if item_input.sample_quantity <= 0:
+            qty = Decimal(str(item_input.unit_quantity))
+            if qty <= 0:
                 continue
 
-            product_info = self._get_product_sample_info(item_input.product_id)
+            product_info = self._get_product_pricing(item_input.product_id, customer_id)
             if not product_info:
-                raise ValueError(f"El producto {item_input.product_id} no tiene tamaño de muestra configurado.")
+                raise ValueError(f"El producto {item_input.product_id} no existe.")
 
-            total_amount = product_info["sample_size"] * Decimal(item_input.sample_quantity)
+            unit_price = Decimal(str(product_info["unit_price"]))
+            if unit_price <= 0:
+                raise ValueError(
+                    f"El producto {product_info['product_name']} no tiene precio de venta configurado."
+                )
+
+            line_total = (qty * unit_price).quantize(Decimal("1"), rounding=ROUND_HALF_UP)
             now = datetime.now()
             created_items.append(
-                SampleRequestItemModel(
-                    sample_request_id=sample_request_id,
+                UnitSaleRequestItemModel(
+                    unit_sale_request_id=unit_sale_request_id,
                     product_id=product_info["product_id"],
                     product_name=product_info["product_name"],
-                    sample_quantity=item_input.sample_quantity,
-                    sample_size=product_info["sample_size"],
-                    sample_size_label=product_info["sample_size_label"],
-                    total_amount=total_amount,
+                    unit_quantity=qty,
+                    unit_price=unit_price,
+                    line_total=line_total,
                     unit_measure=product_info["unit_measure"],
                     added_date=now,
                     updated_date=now,
@@ -443,29 +475,29 @@ class SampleClass:
             )
         return created_items
 
-    def store(self, sample_inputs):
+    def store(self, unit_sale_inputs):
         try:
-            if not sample_inputs.items:
+            if not unit_sale_inputs.items:
                 return {"status": "error", "message": "Debe agregar al menos un producto."}
 
             now = datetime.now()
             customer_id = self._resolve_customer_id(
-                sample_inputs.customer_rut,
-                sample_inputs.customer_id,
+                unit_sale_inputs.customer_rut,
+                unit_sale_inputs.customer_id,
             )
 
-            new_request = SampleRequestModel(
+            new_request = UnitSaleRequestModel(
                 customer_id=customer_id,
-                customer_rut=sample_inputs.customer_rut.strip(),
-                customer_name=sample_inputs.customer_name.strip(),
-                notes=(sample_inputs.notes or "").strip() or None,
+                customer_rut=unit_sale_inputs.customer_rut.strip(),
+                customer_name=unit_sale_inputs.customer_name.strip(),
+                notes=(unit_sale_inputs.notes or "").strip() or None,
                 added_date=now,
                 updated_date=now,
             )
             self.db.add(new_request)
             self.db.flush()
 
-            items = self._build_items(new_request.id, sample_inputs.items)
+            items = self._build_items(new_request.id, unit_sale_inputs.items, customer_id)
             if not items:
                 self.db.rollback()
                 return {"status": "error", "message": "Debe agregar al menos un producto con cantidad válida."}
@@ -473,7 +505,7 @@ class SampleClass:
             self.db.add_all(items)
             self.db.flush()
 
-            self._create_or_refresh_sample_sale(new_request, items)
+            self._create_or_refresh_sale(new_request, items)
             self.db.commit()
             return "success"
         except ValueError as e:
@@ -483,31 +515,35 @@ class SampleClass:
             self.db.rollback()
             return {"status": "error", "message": str(e)}
 
-    def update(self, sample_id, sample_inputs):
+    def update(self, unit_sale_id, unit_sale_inputs):
         try:
-            request = self.db.query(SampleRequestModel).filter(SampleRequestModel.id == sample_id).first()
+            request = (
+                self.db.query(UnitSaleRequestModel)
+                .filter(UnitSaleRequestModel.id == unit_sale_id)
+                .first()
+            )
             if not request:
-                return {"status": "error", "message": "Sample request not found"}
+                return {"status": "error", "message": "Unit sale request not found"}
 
-            if not sample_inputs.items:
+            if not unit_sale_inputs.items:
                 return {"status": "error", "message": "Debe agregar al menos un producto."}
 
             customer_id = self._resolve_customer_id(
-                sample_inputs.customer_rut,
-                sample_inputs.customer_id,
+                unit_sale_inputs.customer_rut,
+                unit_sale_inputs.customer_id,
             )
 
             request.customer_id = customer_id
-            request.customer_rut = sample_inputs.customer_rut.strip()
-            request.customer_name = sample_inputs.customer_name.strip()
-            request.notes = (sample_inputs.notes or "").strip() or None
+            request.customer_rut = unit_sale_inputs.customer_rut.strip()
+            request.customer_name = unit_sale_inputs.customer_name.strip()
+            request.notes = (unit_sale_inputs.notes or "").strip() or None
             request.updated_date = datetime.now()
 
-            self.db.query(SampleRequestItemModel).filter(
-                SampleRequestItemModel.sample_request_id == sample_id
+            self.db.query(UnitSaleRequestItemModel).filter(
+                UnitSaleRequestItemModel.unit_sale_request_id == unit_sale_id
             ).delete()
 
-            items = self._build_items(sample_id, sample_inputs.items)
+            items = self._build_items(unit_sale_id, unit_sale_inputs.items, customer_id)
             if not items:
                 self.db.rollback()
                 return {"status": "error", "message": "Debe agregar al menos un producto con cantidad válida."}
@@ -515,7 +551,7 @@ class SampleClass:
             self.db.add_all(items)
             self.db.flush()
 
-            self._create_or_refresh_sample_sale(request, items)
+            self._create_or_refresh_sale(request, items)
             self.db.commit()
             return "success"
         except ValueError as e:
@@ -525,11 +561,15 @@ class SampleClass:
             self.db.rollback()
             return {"status": "error", "message": str(e)}
 
-    def delete(self, sample_id):
+    def delete(self, unit_sale_id):
         try:
-            request = self.db.query(SampleRequestModel).filter(SampleRequestModel.id == sample_id).first()
+            request = (
+                self.db.query(UnitSaleRequestModel)
+                .filter(UnitSaleRequestModel.id == unit_sale_id)
+                .first()
+            )
             if not request:
-                return {"status": "error", "message": "Sample request not found"}
+                return {"status": "error", "message": "Unit sale request not found"}
 
             if request.sale_id:
                 self._reverse_sale_inventory(request.sale_id)
@@ -538,8 +578,8 @@ class SampleClass:
                     sale.status_id = 3
                     sale.updated_date = datetime.now()
 
-            self.db.query(SampleRequestItemModel).filter(
-                SampleRequestItemModel.sample_request_id == sample_id
+            self.db.query(UnitSaleRequestItemModel).filter(
+                UnitSaleRequestItemModel.unit_sale_request_id == unit_sale_id
             ).delete()
             self.db.delete(request)
             self.db.commit()

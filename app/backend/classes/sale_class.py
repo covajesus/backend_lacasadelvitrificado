@@ -1,6 +1,6 @@
 import re
 
-from app.backend.db.models import SaleModel, CustomerModel, SaleProductModel, ProductModel, InventoryModel, UnitMeasureModel, SupplierModel, CategoryModel, LotItemModel, LotModel, InventoryMovementModel, UnitFeatureModel, SettingModel, UserModel, BudgetModel, BudgetProductModel
+from app.backend.db.models import SaleModel, CustomerModel, SaleProductModel, ProductModel, InventoryModel, UnitMeasureModel, SupplierModel, CategoryModel, LotItemModel, LotModel, InventoryMovementModel, UnitFeatureModel, SettingModel, UserModel, BudgetModel, BudgetProductModel, SampleRequestModel, UnitSaleRequestModel
 from app.backend.classes.inventory_stock import (
     fifo_lots_available,
     stock_sum_for_product,
@@ -10,7 +10,7 @@ from app.backend.classes.inventory_stock import (
 )
 from datetime import datetime
 from zoneinfo import ZoneInfo
-from sqlalchemy import func
+from sqlalchemy import func, or_
 from app.backend.classes.whatsapp_class import WhatsappClass
 
 
@@ -222,6 +222,27 @@ class SaleClass:
         else:
             return {"status": "error", "message": f"Stock insuficiente para: {insufficient}"}
 
+    def _exclude_sample_sales(self, query):
+        """Oculta pedidos internos, en $0 y rechazados del listado de pedidos."""
+        sample_sale_ids = (
+            self.db.query(SampleRequestModel.sale_id)
+            .filter(SampleRequestModel.sale_id.isnot(None))
+        )
+        unit_sale_ids = (
+            self.db.query(UnitSaleRequestModel.sale_id)
+            .filter(UnitSaleRequestModel.sale_id.isnot(None))
+        )
+        return query.filter(
+            SaleModel.status_id != 3,
+            SaleModel.total > 0,
+            ~or_(
+                SaleModel.id.in_(sample_sale_ids),
+                SaleModel.id.in_(unit_sale_ids),
+                SaleModel.delivery_address.like("[MUESTRA #%"),
+                SaleModel.delivery_address.like("[VENTA UNITARIA #%"),
+            ),
+        )
+
     def get_all(self, rol_id = None, rut = None, page=0, items_per_page=10):
         customer = self.db.query(CustomerModel).filter(CustomerModel.identification_number == rut).first()
         
@@ -241,6 +262,7 @@ class SaleClass:
                     .join(CustomerModel, CustomerModel.id == SaleModel.customer_id, isouter=True)
                     .order_by(SaleModel.id.desc())
                 )
+                query = self._exclude_sample_sales(query)
             else:
                 query = (
                     self.db.query(
@@ -257,6 +279,7 @@ class SaleClass:
                     .filter(SaleModel.customer_id == customer.id if customer else None)
                     .order_by(SaleModel.id.desc())
                 )
+                query = self._exclude_sample_sales(query)
 
             if page > 0:
                 total_items = query.count()

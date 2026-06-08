@@ -601,3 +601,28 @@ class UpdateSampleRequest(BaseModel):
     customer_id: Optional[int] = None
     notes: Optional[str] = None
     items: List[SampleRequestItemInput]
+
+class UnitSaleRequestList(BaseModel):
+    page: int
+    rut: Optional[str] = None
+    customer_name: Optional[str] = None
+    rol_id: Optional[int] = None
+    user_rut: Optional[str] = None
+
+class UnitSaleRequestItemInput(BaseModel):
+    product_id: int
+    unit_quantity: float
+
+class StoreUnitSaleRequest(BaseModel):
+    customer_rut: str
+    customer_name: str
+    customer_id: Optional[int] = None
+    notes: Optional[str] = None
+    items: List[UnitSaleRequestItemInput]
+
+class UpdateUnitSaleRequest(BaseModel):
+    customer_rut: str
+    customer_name: str
+    customer_id: Optional[int] = None
+    notes: Optional[str] = None
+    items: List[UnitSaleRequestItemInput]
