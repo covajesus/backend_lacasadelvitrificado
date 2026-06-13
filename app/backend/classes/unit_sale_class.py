@@ -308,7 +308,6 @@ class UnitSaleClass:
         if not unit_sale_request.customer_id:
             raise ValueError("Cliente inválido para generar el pedido de venta unitaria.")
 
-        self._validate_stock(items)
         subtotal, tax, total = self._calculate_totals(items)
         now = datetime.now()
         delivery = self._delivery_address(
@@ -329,6 +328,7 @@ class UnitSaleClass:
             )
             if sale:
                 self._reverse_sale_inventory(sale.id)
+                self._validate_stock(items)
                 sale.customer_id = unit_sale_request.customer_id
                 sale.delivery_address = delivery
                 sale.subtotal = int(subtotal)
@@ -338,6 +338,8 @@ class UnitSaleClass:
                 sale.updated_date = now
                 self._deduct_lines_on_sale(sale.id, items)
                 return sale.id
+
+        self._validate_stock(items)
 
         new_sale = SaleModel(
             customer_id=unit_sale_request.customer_id,

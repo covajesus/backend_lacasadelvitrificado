@@ -290,7 +290,6 @@ class SampleClass:
         if not sample_request.customer_id:
             raise ValueError("Cliente inválido para generar el pedido de muestra.")
 
-        self._validate_sample_stock(items)
         now = datetime.now()
         delivery = self._sample_delivery_address(
             sample_request.id,
@@ -306,6 +305,7 @@ class SampleClass:
             )
             if sale:
                 self._reverse_sale_inventory(sale.id)
+                self._validate_sample_stock(items)
                 sale.customer_id = sample_request.customer_id
                 sale.delivery_address = delivery
                 sale.subtotal = 0
@@ -316,6 +316,8 @@ class SampleClass:
                 sale.updated_date = now
                 self._deduct_sample_lines_on_sale(sale.id, sample_request, items)
                 return sale.id
+
+        self._validate_sample_stock(items)
 
         new_sale = SaleModel(
             customer_id=sample_request.customer_id,
