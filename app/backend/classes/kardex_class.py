@@ -24,11 +24,6 @@ class KardexClass:
         qpp_val = int(qpp) if qpp is not None else 0
         packages_count = round(qty / qpp_val, 2) if qpp_val > 0 else None
         ac = int(kardex.average_cost or 0)
-        pc = float(packages_count) if packages_count else 0.0
-        if pc > 0:
-            total_value = int(round((ac / pc) * qty))
-        else:
-            total_value = qty * ac
         return {
             "id": int(kardex.product_id or 0),
             "product_id": int(kardex.product_id or 0),
@@ -42,7 +37,7 @@ class KardexClass:
             "quantity_per_package": int(qpp) if qpp is not None else None,
             "packages_count": packages_count,
             "average_cost": ac,
-            "total_value": total_value,
+            "total_value": qty * ac,
             "max_public_sale_price": int(kardex.max_public_sale_price or 0),
             "max_private_sale_price": int(kardex.max_private_sale_price or 0),
             "added_date": kardex.added_date.strftime("%Y-%m-%d %H:%M:%S") if kardex.added_date else None,
@@ -216,11 +211,6 @@ class KardexClass:
                 qpp = row.quantity_per_package
                 qpp_val = int(qpp) if qpp is not None else 0
                 packages_count = round(qty / qpp_val, 2) if qpp_val > 0 else None
-                pc = float(packages_count) if packages_count else 0.0
-                if pc > 0:
-                    total_value = int(round((ac / pc) * qty))
-                else:
-                    total_value = qty * ac
                 return {
                     "id": row.product_id,
                     "product_id": row.product_id,
@@ -233,7 +223,7 @@ class KardexClass:
                     "quantity_per_package": int(qpp) if qpp is not None else None,
                     "packages_count": packages_count,
                     "average_cost": ac,
-                    "total_value": total_value,
+                    "total_value": qty * ac,
                     "added_date": row.added_date.strftime("%Y-%m-%d %H:%M:%S") if row.added_date else None,
                     "updated_date": row.updated_date.strftime("%Y-%m-%d %H:%M:%S") if row.updated_date else None,
                 }
@@ -251,19 +241,8 @@ class KardexClass:
             for pid in pids:
                 q = int(stock_sum_for_product(self.db, pid))
                 c = average_unit_cost_for_product(self.db, pid)
-                qpp_row = (
-                    self.db.query(UnitFeatureModel.quantity_per_package)
-                    .filter(UnitFeatureModel.product_id == pid)
-                    .first()
-                )
-                qpp_val = int(qpp_row[0]) if qpp_row and qpp_row[0] else 0
-                pc = round(q / qpp_val, 2) if qpp_val > 0 else 0.0
-                if pc > 0:
-                    line_value = int(round((c / pc) * q))
-                else:
-                    line_value = q * c
                 total_quantity += q
-                total_value += line_value
+                total_value += q * c
             average_cost_overall = total_value / total_quantity if total_quantity > 0 else 0
 
             return {
