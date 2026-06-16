@@ -1,95 +1,52 @@
 from app.backend.db.models import SupplierCategoryModel, SupplierModel, CategoryModel
 from datetime import datetime
 
-class SupplierCategoryClass:
-    def __init__(self, db):
-        self.db = db
+from app.backend.services.crud.base_domain_service import BaseDomainService
+
+
+class SupplierCategoryClass(BaseDomainService):
+    
+    @staticmethod
+    def _serialize_row(supplier_category):
+        return {
+            "id": supplier_category.id,
+            "supplier_id": supplier_category.supplier_id,
+            "category_id": supplier_category.category_id,
+            "added_date": supplier_category.added_date.strftime("%Y-%m-%d %H:%M:%S")
+            if supplier_category.added_date
+            else None,
+            "updated_date": supplier_category.updated_date.strftime("%Y-%m-%d %H:%M:%S")
+            if getattr(supplier_category, "updated_date", None)
+            else None,
+        }
 
     def get_all(self, page=0, items_per_page=10):
-        try:
-            query = (
-                self.db.query(
-                    SupplierCategoryModel.id, 
-                    SupplierCategoryModel.supplier_id,
-                    SupplierCategoryModel.category_id,
-                    SupplierCategoryModel.added_date,
-                    SupplierCategoryModel.updated_date
-                )
-                .order_by(SupplierCategoryModel.id)
+        query = (
+            self.db.query(
+                SupplierCategoryModel.id,
+                SupplierCategoryModel.supplier_id,
+                SupplierCategoryModel.category_id,
+                SupplierCategoryModel.added_date,
+                SupplierCategoryModel.updated_date,
             )
+            .order_by(SupplierCategoryModel.id)
+        )
+        return self.list_query(
+            query, page=page, items_per_page=items_per_page, serialize_row=self._serialize_row
+        )
 
-            if page > 0:
-                total_items = query.count()
-                total_pages = (total_items + items_per_page - 1)
-
-                if page < 1 or page > total_pages:
-                    return {"status": "error", "message": "Invalid page number"}
-
-                data = query.offset((page - 1) * items_per_page).limit(items_per_page).all()
-
-                if not data:
-                    return {"status": "error", "message": "No data found"}
-
-                serialized_data = [{
-                    "id": supplier_category.id,
-                    "supplier_id": supplier_category.supplier_id,
-                    "category_id": supplier_category.category_id,
-                    "added_date": supplier_category.added_date.strftime("%Y-%m-%d %H:%M:%S") if supplier_category.added_date else None,
-                    "updated_date": supplier_category.updated_date.strftime("%Y-%m-%d %H:%M:%S") if supplier_category.updated_date else None
-                } for supplier_category in data]
-
-                return {
-                    "total_items": total_items,
-                    "total_pages": total_pages,
-                    "current_page": page,
-                    "items_per_page": items_per_page,
-                    "data": serialized_data
-                }
-
-            else:
-                data = query.all()
-
-                serialized_data = [{
-                    "id": supplier_category.id,
-                    "supplier_id": supplier_category.supplier_id,
-                    "category_id": supplier_category.category_id,
-                    "added_date": supplier_category.added_date.strftime("%Y-%m-%d %H:%M:%S") if supplier_category.added_date else None,
-                    "updated_date": supplier_category.updated_date.strftime("%Y-%m-%d %H:%M:%S") if supplier_category.updated_date else None
-                } for supplier_category in data]
-
-                return serialized_data
-
-        except Exception as e:
-            error_message = str(e)
-            return {"status": "error", "message": error_message}
-    
     def get_list(self):
-        try:
-            data = (
-                self.db.query(
-                    SupplierCategoryModel.id, 
-                    SupplierCategoryModel.supplier_id,
-                    SupplierCategoryModel.category_id,
-                    SupplierCategoryModel.added_date
-                )
-                .order_by(SupplierCategoryModel.id)
+        query = (
+            self.db.query(
+                SupplierCategoryModel.id,
+                SupplierCategoryModel.supplier_id,
+                SupplierCategoryModel.category_id,
+                SupplierCategoryModel.added_date,
             )
+            .order_by(SupplierCategoryModel.id)
+        )
+        return self.list_wrapped(query, lambda row: self._serialize_row(row))
 
-            serialized_data = [{
-                    "id": supplier_category.id,
-                    "supplier_id": supplier_category.supplier_id,
-                    "category_id": supplier_category.category_id,
-                    "added_date": supplier_category.added_date.strftime("%Y-%m-%d %H:%M:%S") if supplier_category.added_date else None
-                } for supplier_category in data]
-
-            return {
-                "data": serialized_data
-            }
-
-        except Exception as e:
-            error_message = str(e)
-            return {"status": "error", "message": error_message}
-    
     def get_by_supplier(self, supplier_id):
         try:
             data = (
@@ -256,18 +213,8 @@ class SupplierCategoryClass:
             return {"error": str(e)}
         
     def delete(self, id):
-        try:
-            data = self.db.query(SupplierCategoryModel).filter(SupplierCategoryModel.id == id).first()
-            if data:
-                self.db.delete(data)
-                self.db.commit()
-                return 'success'
-            else:
-                return "No data found"
-        except Exception as e:
-            error_message = str(e)
-            return f"Error: {error_message}"
-    
+        return self.delete_entity(SupplierCategoryModel, id)
+
     def delete_by_supplier(self, supplier_id):
         try:
             deleted_count = self.db.query(SupplierCategoryModel).filter(SupplierCategoryModel.supplier_id == supplier_id).delete()

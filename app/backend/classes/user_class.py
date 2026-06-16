@@ -1,83 +1,46 @@
 import json
-from app.backend.db.models import UserModel
-from app.backend.auth.auth_user import generate_bcrypt_hash
 from datetime import datetime
-from app.backend.classes.helper_class import HelperClass
-from werkzeug.security import generate_password_hash
 
-class UserClass:
-    def __init__(self, db):
-        self.db = db
+from app.backend.auth.auth_user import generate_bcrypt_hash
+from app.backend.db.models import UserModel
+from app.backend.services.crud.base_domain_service import BaseDomainService
+
+
+class UserClass(BaseDomainService):
+    
+    @staticmethod
+    def _serialize_row(user):
+        return {
+            "id": user.id,
+            "rut": user.rut,
+            "full_name": user.full_name,
+            "rol_id": user.rol_id,
+            "email": user.email,
+            "phone": user.phone,
+            "added_date": user.added_date,
+        }
 
     def get_all(self, rut=None, page=0, items_per_page=10):
-        try:
-            filters = []
-            if rut is not None:
-                filters.append(UserModel.rut == rut)
-
-            query = self.db.query(
-                UserModel.id, 
-                UserModel.rut, 
-                UserModel.full_name, 
-                UserModel.rol_id, 
+        filters = []
+        if rut is not None:
+            filters.append(UserModel.rut == rut)
+        query = (
+            self.db.query(
+                UserModel.id,
+                UserModel.rut,
+                UserModel.full_name,
+                UserModel.rol_id,
                 UserModel.email,
                 UserModel.phone,
-                UserModel.added_date
-            ).filter(
-                *filters
-            ).order_by(
-                UserModel.rut
+                UserModel.added_date,
             )
+            .filter(*filters)
+            .order_by(UserModel.rut)
+        )
+        return self.list_query(
+            query, page=page, items_per_page=items_per_page, serialize_row=self._serialize_row
+        )
 
-            if page > 0:
-                total_items = query.count()
-                total_pages = (total_items + items_per_page - 1)
-
-                if page < 1 or page > total_pages:
-                    return {"status": "error", "message": "Invalid page number"}
-
-                data = query.offset((page - 1) * items_per_page).limit(items_per_page).all()
-
-                if not data:
-                    return {"status": "error", "message": "No data found"}
-
-                serialized_data = [{
-                    "id": user.id,
-                    "rut": user.rut,
-                    "full_name": user.full_name,
-                    "rol_id": user.rol_id,
-                    "email": user.email,
-                    "phone": user.phone,
-                    "added_date": user.added_date
-                } for user in data]
-
-                return {
-                    "total_items": total_items,
-                    "total_pages": total_pages,
-                    "current_page": page,
-                    "items_per_page": items_per_page,
-                    "data": serialized_data
-                }
-
-            else:
-                data = query.all()
-
-                serialized_data = [{
-                    "id": user.id,
-                    "rut": user.rut,
-                    "full_name": user.full_name,
-                    "rol_id": user.rol_id,
-                    "email": user.email,
-                    "phone": user.phone,
-                    "added_date": user.added_date
-                } for user in data]
-
-                return serialized_data
-
-        except Exception as e:
-            error_message = str(e)
-            return {"status": "error", "message": error_message}
-    
     def get(self, field, value):
         try:
             data_query = self.db.query(UserModel).filter(getattr(UserModel, field) == value).first()
@@ -156,17 +119,7 @@ class UserClass:
             return 0
         
     def delete(self, id):
-        try:
-            data = self.db.query(UserModel).filter(UserModel.id == id).first()
-            if data:
-                self.db.delete(data)
-                self.db.commit()
-                return 'success'
-            else:
-                return "No data found"
-        except Exception as e:
-            error_message = str(e)
-            return f"Error: {error_message}"
+        return self.delete_entity(UserModel, id)
 
     def refresh_password(self, rut):
         user = self.db.query(UserModel).filter(UserModel.rut == rut).first()

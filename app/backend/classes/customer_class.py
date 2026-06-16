@@ -22,9 +22,10 @@ def _phone_db_normalized_expr(column):
     return case((rx.like("56%"), func.substring(rx, 3)), else_=rx)
 
 
-class CustomerClass:
-    def __init__(self, db):
-        self.db = db
+from app.backend.services.crud.base_domain_service import BaseDomainService
+
+
+class CustomerClass(BaseDomainService):
 
     def discounts(self, identification_number):
         try:
@@ -56,81 +57,41 @@ class CustomerClass:
             error_message = str(e)
             return {"status": "error", "message": error_message}
 
+    @staticmethod
+    def _serialize_list_row(customer):
+        return {
+            "id": customer.id,
+            "social_reason": customer.social_reason,
+            "identification_number": customer.identification_number,
+            "address": customer.address,
+            "phone": customer.phone,
+            "email": customer.email if customer.email else None,
+        }
+
     def get_all(self, page=0, items_per_page=10, name=None, rut=None, phone=None):
-        try:
-            query = (
-                self.db.query(
-                    CustomerModel.id, 
-                    CustomerModel.social_reason,
-                    CustomerModel.identification_number,
-                    CustomerModel.address,
-                    CustomerModel.phone,
-                    CustomerModel.email
-                )
-                .order_by(CustomerModel.id)
+        query = (
+            self.db.query(
+                CustomerModel.id,
+                CustomerModel.social_reason,
+                CustomerModel.identification_number,
+                CustomerModel.address,
+                CustomerModel.phone,
+                CustomerModel.email,
             )
+            .order_by(CustomerModel.id)
+        )
+        if name and name.strip():
+            query = query.filter(CustomerModel.social_reason.ilike(f"%{name.strip()}%"))
+        if rut and rut.strip():
+            query = query.filter(CustomerModel.identification_number == rut.strip())
+        if phone is not None and str(phone).strip():
+            search_norm = _normalize_phone_digits(str(phone))
+            if search_norm:
+                query = query.filter(_phone_db_normalized_expr(CustomerModel.phone) == search_norm)
+        return self.list_query(
+            query, page=page, items_per_page=items_per_page, serialize_row=self._serialize_list_row
+        )
 
-            # Aplicar filtros de búsqueda si se proporcionan
-            if name and name.strip():
-                query = query.filter(CustomerModel.social_reason.ilike(f"%{name.strip()}%"))
-
-            if rut and rut.strip():
-                query = query.filter(CustomerModel.identification_number == rut.strip())
-
-            if phone is not None and str(phone).strip():
-                search_norm = _normalize_phone_digits(str(phone))
-                if search_norm:
-                    query = query.filter(
-                        _phone_db_normalized_expr(CustomerModel.phone) == search_norm
-                    )
-
-            if page > 0:
-                total_items = query.count()
-                total_pages = (total_items + items_per_page - 1)
-
-                if page < 1 or page > total_pages:
-                    return {"status": "error", "message": "Invalid page number"}
-
-                data = query.offset((page - 1) * items_per_page).limit(items_per_page).all()
-
-                if not data:
-                    return {"status": "error", "message": "No data found"}
-
-                serialized_data = [{
-                    "id": customer.id,
-                    "social_reason": customer.social_reason,
-                    "identification_number": customer.identification_number,
-                    "address": customer.address,
-                    "phone": customer.phone,
-                    "email": customer.email if customer.email else None,
-                } for customer in data]
-
-                return {
-                    "total_items": total_items,
-                    "total_pages": total_pages,
-                    "current_page": page,
-                    "items_per_page": items_per_page,
-                    "data": serialized_data
-                }
-
-            else:
-                data = query.all()
-
-                serialized_data = [{
-                    "id": customer.id,
-                    "social_reason": customer.social_reason,
-                    "identification_number": customer.identification_number,
-                    "address": customer.address,
-                    "phone": customer.phone,
-                    "email": customer.email if customer.email else None,
-                } for customer in data]
-
-                return serialized_data
-
-        except Exception as e:
-            error_message = str(e)
-            return {"status": "error", "message": error_message}
-    
     def update(self, id, form_data):
         existing_customer = self.db.query(CustomerModel).filter(CustomerModel.id == id).one_or_none()
 

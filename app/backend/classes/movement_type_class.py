@@ -1,29 +1,14 @@
 from app.backend.db.models import MovementTypeModel
-from datetime import datetime
+from app.backend.services.crud.base_domain_service import BaseDomainService
 
-class MovementTypeClass:
-    def __init__(self, db):
-        self.db = db
-    
+
+class MovementTypeClass(BaseDomainService):
+    @staticmethod
+    def _serialize_row(movement_type):
+        return {"id": movement_type.id, "movement_type": movement_type.movement_type}
+
     def get_list(self):
-        try:
-            data = (
-                self.db.query(
-                    MovementTypeModel.id, 
-                    MovementTypeModel.movement_type
-                )
-                .order_by(MovementTypeModel.location)
-            )
-
-            serialized_data = [{
-                    "id": movement_type.id,
-                    "movement_type": movement_type.movement_type
-                } for movement_type in data]
-
-            return {
-                "data": serialized_data
-            }
-
-        except Exception as e:
-            error_message = str(e)
-            return {"status": "error", "message": error_message}
+        query = self.db.query(MovementTypeModel.id, MovementTypeModel.movement_type).order_by(
+            MovementTypeModel.location
+        )
+        return self.list_wrapped(query, self._serialize_row)

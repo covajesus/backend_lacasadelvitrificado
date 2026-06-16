@@ -628,3 +628,17 @@ class UpdateUnitSaleRequest(BaseModel):
     customer_id: Optional[int] = None
     notes: Optional[str] = None
     items: List[UnitSaleRequestItemInput]
+
+class InternalUseRequestList(BaseModel):
+    page: int
+    description: Optional[str] = None
+    rol_id: Optional[int] = None
+
+class InternalUseRequestItemInput(BaseModel):
+    product_id: int
+    unit_quantity: float
+
+class StoreInternalUseRequest(BaseModel):
+    description: str
+    notes: Optional[str] = None
+    items: List[InternalUseRequestItemInput]

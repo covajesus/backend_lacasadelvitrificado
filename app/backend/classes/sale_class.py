@@ -1,7 +1,7 @@
 import re
 from decimal import Decimal, ROUND_HALF_UP
 
-from app.backend.db.models import SaleModel, CustomerModel, SaleProductModel, ProductModel, InventoryModel, UnitMeasureModel, SupplierModel, CategoryModel, LotItemModel, LotModel, InventoryMovementModel, UnitFeatureModel, SettingModel, UserModel, BudgetModel, BudgetProductModel, SampleRequestModel, UnitSaleRequestModel, UnitSaleRequestItemModel
+from app.backend.db.models import SaleModel, CustomerModel, SaleProductModel, ProductModel, InventoryModel, UnitMeasureModel, SupplierModel, CategoryModel, LotItemModel, LotModel, InventoryMovementModel, UnitFeatureModel, SettingModel, UserModel, BudgetModel, BudgetProductModel, SampleRequestModel, UnitSaleRequestModel, UnitSaleRequestItemModel, InternalUseRequestModel, InternalUseRequestItemModel
 from app.backend.classes.inventory_stock import (
     fifo_lots_available,
     stock_sum_for_product,
@@ -243,6 +243,14 @@ class SaleClass:
                     SaleModel.delivery_address.like("[VENTA UNITARIA #%"),
                     ~SaleModel.id.in_(active_unit_sale_ids),
                 ),
+                and_(
+                    SaleModel.delivery_address.like("[USO INTERNO #%"),
+                    ~SaleModel.id.in_(
+                        self.db.query(InternalUseRequestModel.sale_id).filter(
+                            InternalUseRequestModel.sale_id.isnot(None)
+                        )
+                    ),
+                ),
             ),
         )
 
@@ -286,10 +294,50 @@ class SaleClass:
         )
         return items or None
 
+    def _internal_use_totals_for_sale_id(self, sale_id):
+        request = (
+            self.db.query(InternalUseRequestModel)
+            .filter(InternalUseRequestModel.sale_id == sale_id)
+            .first()
+        )
+        if not request:
+            return None
+
+        items = (
+            self.db.query(InternalUseRequestItemModel)
+            .filter(InternalUseRequestItemModel.internal_use_request_id == request.id)
+            .all()
+        )
+        if not items:
+            return None
+
+        subtotal = sum(Decimal(str(item.line_total or 0)) for item in items)
+        tax = Decimal("0")
+        total = subtotal
+        return int(subtotal), int(tax), int(total)
+
+    def _internal_use_items_for_sale_id(self, sale_id):
+        request = (
+            self.db.query(InternalUseRequestModel)
+            .filter(InternalUseRequestModel.sale_id == sale_id)
+            .first()
+        )
+        if not request:
+            return None
+        return (
+            self.db.query(InternalUseRequestItemModel)
+            .filter(InternalUseRequestItemModel.internal_use_request_id == request.id)
+            .order_by(InternalUseRequestItemModel.id)
+            .all()
+        )
+
     def _resolve_sale_totals(self, sale_id, subtotal, tax, total):
         unit_totals = self._unit_sale_totals_for_sale_id(sale_id)
         if unit_totals:
             return unit_totals
+        internal_totals = self._internal_use_totals_for_sale_id(sale_id)
+        if internal_totals:
+            return internal_totals
         return subtotal, tax, total
 
     def get_all(self, rol_id = None, rut = None, page=0, items_per_page=10):
@@ -332,7 +380,7 @@ class SaleClass:
 
             if page > 0:
                 total_items = query.count()
-                total_pages = (total_items + items_per_page - 1)
+                total_pages = max((total_items + items_per_page - 1) // items_per_page, 1)
 
                 if page < 1 or page > total_pages:
                     return {"status": "error", "message": "Invalid page number"}
@@ -747,11 +795,18 @@ class SaleClass:
                 for us_item in unit_sale_items:
                     unit_sale_queues.setdefault(us_item.product_id, []).append(us_item)
 
+            internal_use_items = self._internal_use_items_for_sale_id(id)
+            internal_use_queues = {}
+            if internal_use_items:
+                for iu_item in internal_use_items:
+                    internal_use_queues.setdefault(iu_item.product_id, []).append(iu_item)
+
             sale_data = []
             resolved_subtotal = None
             resolved_tax = None
             resolved_total = None
             is_unit_sale_order = bool(unit_sale_items)
+            is_internal_use_order = bool(internal_use_items)
 
             for data in data_query:
                 if resolved_subtotal is None:
@@ -768,16 +823,26 @@ class SaleClass:
                     if queue:
                         us_item = queue.pop(0)
 
+                iu_item = None
+                if internal_use_items:
+                    queue = internal_use_queues.get(data.product_id)
+                    if queue:
+                        iu_item = queue.pop(0)
+
+                qty_item = us_item or iu_item
+
                 sale_details = {
                     "id": data.id,
                     "product_id": data.product_id,
                     "quantity": data.quantity,
                     "is_unit_sale_order": is_unit_sale_order,
+                    "is_internal_use_order": is_internal_use_order,
                     "is_unit_sale": us_item is not None,
-                    "unit_measure": (us_item.unit_measure or "") if us_item else None,
-                    "unit_quantity": float(us_item.unit_quantity) if us_item and us_item.unit_quantity is not None else None,
-                    "unit_price": float(us_item.unit_price) if us_item and us_item.unit_price is not None else None,
-                    "line_total": float(us_item.line_total) if us_item and us_item.line_total is not None else None,
+                    "is_internal_use": iu_item is not None,
+                    "unit_measure": (qty_item.unit_measure or "") if qty_item else None,
+                    "unit_quantity": float(qty_item.unit_quantity) if qty_item and qty_item.unit_quantity is not None else None,
+                    "unit_price": float(getattr(qty_item, "unit_price", None) or getattr(qty_item, "unit_cost", None) or 0) if qty_item else None,
+                    "line_total": float(qty_item.line_total) if qty_item and qty_item.line_total is not None else None,
                     "subtotal": resolved_subtotal,
                     "tax": resolved_tax,
                     "shipping_cost": data.shipping_cost,

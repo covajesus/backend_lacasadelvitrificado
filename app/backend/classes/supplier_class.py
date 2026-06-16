@@ -1,179 +1,112 @@
-from app.backend.db.models import SupplierModel
 from datetime import datetime
+
 from fastapi import HTTPException
 
-class SupplierClass:
-    def __init__(self, db):
-        self.db = db
+from app.backend.db.models import SupplierModel
+from app.backend.services.crud.base_domain_service import BaseDomainService
+
+
+class SupplierClass(BaseDomainService):
+    @staticmethod
+    def _serialize_row(supplier):
+        return {
+            "id": supplier.id,
+            "identification_number": supplier.identification_number,
+            "supplier": supplier.supplier,
+            "address": supplier.address,
+            "added_date": supplier.added_date.strftime("%Y-%m-%d %H:%M:%S"),
+        }
 
     def get_all(self, page=0, items_per_page=10):
-        try:
-            query = (
-                self.db.query(
-                    SupplierModel.id,
-                    SupplierModel.identification_number,
-                    SupplierModel.supplier,
-                    SupplierModel.address,
-                    SupplierModel.added_date
-                )
-                .order_by(SupplierModel.id)
+        query = (
+            self.db.query(
+                SupplierModel.id,
+                SupplierModel.identification_number,
+                SupplierModel.supplier,
+                SupplierModel.address,
+                SupplierModel.added_date,
             )
+            .order_by(SupplierModel.id)
+        )
+        return self.list_query(
+            query, page=page, items_per_page=items_per_page, serialize_row=self._serialize_row
+        )
 
-            if page > 0:
-                total_items = query.count()
-                total_pages = (total_items + items_per_page - 1)
-
-                if page < 1 or page > total_pages:
-                    return {"status": "error", "message": "Invalid page number"}
-
-                data = query.offset((page - 1) * items_per_page).limit(items_per_page).all()
-
-                if not data:
-                    return {"status": "error", "message": "No data found"}
-
-                serialized_data = [{
-                    "id": supplier.id,
-                    "identification_number": supplier.identification_number,
-                    "supplier": supplier.supplier,
-                    "address": supplier.address,
-                    "added_date": supplier.added_date.strftime("%Y-%m-%d %H:%M:%S")
-                } for supplier in data]
-
-                return {
-                    "total_items": total_items,
-                    "total_pages": total_pages,
-                    "current_page": page,
-                    "items_per_page": items_per_page,
-                    "data": serialized_data
-                }
-
-            else:
-                data = query.all()
-
-                serialized_data = [{
-                    "id": supplier.id,
-                    "identification_number": supplier.identification_number,
-                    "supplier": supplier.supplier,
-                    "address": supplier.address,
-                    "added_date": supplier.added_date.strftime("%Y-%m-%d %H:%M:%S")
-                } for supplier in data]
-
-                return serialized_data
-
-        except Exception as e:
-            error_message = str(e)
-            return {"status": "error", "message": error_message}
-    
     def get_list(self, page=0, items_per_page=10):
-        try:
-            data = (
-                self.db.query(
-                    SupplierModel.id,
-                    SupplierModel.identification_number,
-                    SupplierModel.supplier,
-                    SupplierModel.address,
-                    SupplierModel.added_date
-                )
-                .order_by(SupplierModel.id)
+        query = (
+            self.db.query(
+                SupplierModel.id,
+                SupplierModel.identification_number,
+                SupplierModel.supplier,
+                SupplierModel.address,
+                SupplierModel.added_date,
             )
+            .order_by(SupplierModel.id)
+        )
+        result = self.list_wrapped(query, self._serialize_row)
+        if isinstance(result, dict) and result.get("data") == []:
+            return {"status": "error", "message": "No data found"}
+        return result
 
-            if not data:
-                return {"status": "error", "message": "No data found"}
-
-            serialized_data = [{
-                    "id": supplier.id,
-                    "identification_number": supplier.identification_number,
-                    "supplier": supplier.supplier,
-                    "address": supplier.address,
-                    "added_date": supplier.added_date.strftime("%Y-%m-%d %H:%M:%S")
-                } for supplier in data]
-
-            return {
-                "data": serialized_data
-            }
-        except Exception as e:
-            error_message = str(e)
-            return {"status": "error", "message": error_message}
-        
     def store(self, supplier_inputs):
         try:
-            new_supplier = SupplierModel(
-                identification_number=supplier_inputs.identification_number,
-                supplier=supplier_inputs.supplier,
-                address=supplier_inputs.address,
-                added_date=datetime.now(),
-                updated_date=datetime.now()
-            )
-    
-            self.db.add(new_supplier)
-            self.db.commit()
-            self.db.refresh(new_supplier)
-
-            return {
-                "status": "Proveedor registrado exitosamente.",
-                "supplier_id": new_supplier.id
-            }
-
+            return self._store(supplier_inputs)
         except Exception as e:
             self.db.rollback()
-            raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
+            raise HTTPException(status_code=500, detail=f"Error: {str(e)}") from e
+
+    def _store(self, supplier_inputs):
+        new_supplier = SupplierModel(
+            identification_number=supplier_inputs.identification_number,
+            supplier=supplier_inputs.supplier,
+            address=supplier_inputs.address,
+            added_date=datetime.now(),
+            updated_date=datetime.now(),
+        )
+        self.db.add(new_supplier)
+        self.db.commit()
+        self.db.refresh(new_supplier)
+        return {"status": "Proveedor registrado exitosamente.", "supplier_id": new_supplier.id}
 
     def update(self, id, supplier_inputs):
         existing_supplier = self.db.query(SupplierModel).filter(SupplierModel.id == id).one_or_none()
-
         if not existing_supplier:
             return "No data found"
+        return self.safe(lambda: self._update(existing_supplier, supplier_inputs), rollback=True)
 
-        try:
-            existing_supplier.identification_number = supplier_inputs.identification_number
-            existing_supplier.supplier = supplier_inputs.supplier
-            existing_supplier.address = supplier_inputs.address
-            existing_supplier.updated_date = datetime.utcnow()
+    def _update(self, existing_supplier, supplier_inputs):
+        existing_supplier.identification_number = supplier_inputs.identification_number
+        existing_supplier.supplier = supplier_inputs.supplier
+        existing_supplier.address = supplier_inputs.address
+        existing_supplier.updated_date = datetime.utcnow()
+        self.db.commit()
+        self.db.refresh(existing_supplier)
+        return "Supplier updated successfully"
 
-            self.db.commit()
-            self.db.refresh(existing_supplier)
-            return "Supplier updated successfully"
-        except Exception as e:
-            self.db.rollback()
-            error_message = str(e)
-            return {"status": "error", "message": error_message}
-        
     def get(self, id):
-        try:
-            data_query = self.db.query(
-                SupplierModel.id, 
-                SupplierModel.supplier,
-                SupplierModel.identification_number,
-                SupplierModel.address,
-                SupplierModel.added_date,
-            ).filter(SupplierModel.id == id).first()
+        return self.safe(
+            lambda: self.get_or_error(
+                self.db.query(
+                    SupplierModel.id,
+                    SupplierModel.supplier,
+                    SupplierModel.identification_number,
+                    SupplierModel.address,
+                    SupplierModel.added_date,
+                )
+                .filter(SupplierModel.id == id)
+                .first(),
+                data_key="supplier_data",
+                serialize=lambda row: {
+                    "id": row.id,
+                    "supplier": row.supplier,
+                    "identification_number": row.identification_number,
+                    "address": row.address,
+                    "added_date": row.added_date.strftime("%Y-%m-%d %H:%M:%S")
+                    if row.added_date
+                    else None,
+                },
+            )
+        )
 
-            if data_query:
-                supplier_data = {
-                    "id": data_query.id,
-                    "supplier": data_query.supplier,
-                    "identification_number": data_query.identification_number,
-                    "address": data_query.address,
-                    "added_date": data_query.added_date.strftime("%Y-%m-%d %H:%M:%S") if data_query.added_date else None
-                }
-
-                return {"supplier_data": supplier_data}
-
-            else:
-                return {"error": "No se encontraron datos para el campo especificado."}
-            
-        except Exception as e:
-            return {"error": str(e)}
-        
     def delete(self, id):
-        try:
-            data = self.db.query(SupplierModel).filter(SupplierModel.id == id).first()
-            if data:
-                self.db.delete(data)
-                self.db.commit()
-                return 'success'
-            else:
-                return "No data found"
-        except Exception as e:
-            error_message = str(e)
-            return f"Error: {error_message}"
+        return self.delete_entity(SupplierModel, id)

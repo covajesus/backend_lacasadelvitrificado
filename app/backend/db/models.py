@@ -457,3 +457,30 @@ class UnitSaleRequestItemModel(Base):
     unit_measure = Column(String(255), nullable=True)
     added_date = Column(DateTime(), default=datetime.now)
     updated_date = Column(DateTime(), default=datetime.now)
+
+class InternalUseRequestModel(Base):
+    __tablename__ = 'internal_use_requests'
+
+    id = Column(Integer, primary_key=True)
+    description = Column(Text(), nullable=False)
+    notes = Column(Text(), nullable=True)
+    sale_id = Column(Integer, nullable=True)
+    subtotal = Column(Numeric(12, 2), default=0)
+    tax = Column(Numeric(12, 2), default=0)
+    total = Column(Numeric(12, 2), default=0)
+    added_date = Column(DateTime(), default=datetime.now)
+    updated_date = Column(DateTime(), default=datetime.now)
+
+class InternalUseRequestItemModel(Base):
+    __tablename__ = 'internal_use_request_items'
+
+    id = Column(Integer, primary_key=True)
+    internal_use_request_id = Column(Integer)
+    product_id = Column(Integer)
+    product_name = Column(String(255))
+    unit_quantity = Column(Numeric(12, 4))
+    unit_cost = Column(Numeric(12, 2))
+    line_total = Column(Numeric(12, 2))
+    unit_measure = Column(String(255), nullable=True)
+    added_date = Column(DateTime(), default=datetime.now)
+    updated_date = Column(DateTime(), default=datetime.now)

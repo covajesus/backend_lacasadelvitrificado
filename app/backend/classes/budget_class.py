@@ -80,7 +80,7 @@ class BudgetClass:
 
             if page > 0:
                 total_items = query.count()
-                total_pages = (total_items + items_per_page - 1) // items_per_page
+                total_pages = max((total_items + items_per_page - 1) // items_per_page, 1) // items_per_page
 
                 if page < 1 or (total_pages > 0 and page > total_pages):
                     return {"status": "error", "message": "Invalid page number"}

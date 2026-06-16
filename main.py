@@ -25,6 +25,7 @@ from app.backend.routers.budgets import budgets
 from app.backend.routers.whatsapp import whatsapp
 from app.backend.routers.samples import samples
 from app.backend.routers.unit_sales import unit_sales
+from app.backend.routers.internal_uses import internal_uses
 
 app = FastAPI(root_path="/api")
 application = app
@@ -73,6 +74,7 @@ app.include_router(budgets)
 app.include_router(whatsapp)
 app.include_router(samples)
 app.include_router(unit_sales)
+app.include_router(internal_uses)
 
 if __name__ == "__main__":
     uvicorn.run("main:app", port=8000, reload=True)

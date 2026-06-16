@@ -1,13 +1,11 @@
 import re
 from datetime import datetime
-from decimal import Decimal
+from decimal import Decimal, ROUND_HALF_UP
 from sqlalchemy import func
 
-from app.backend.classes.sale_class import SaleClass, _inventory_movement_added_at
-from app.backend.classes.inventory_stock import (
-    stock_sum_for_product,
-    sale_acceptance_unit_cost_from_movements,
-)
+from app.backend.classes.inventory_stock import sale_acceptance_unit_cost_from_movements
+from app.backend.core.constants import RequestReasonPrefix, TaxPolicy
+from app.backend.core.exceptions import ValidationError
 from app.backend.db.models import (
     SampleRequestModel,
     SampleRequestItemModel,
@@ -15,14 +13,12 @@ from app.backend.db.models import (
     UnitFeatureModel,
     UnitMeasureModel,
     CustomerModel,
-    SaleModel,
-    SaleProductModel,
-    InventoryModel,
-    InventoryMovementModel,
 )
-
-SAMPLE_REASON_PREFIX = "Muestra"
-SAMPLE_SALE_STATUS_ID = 4
+from app.backend.services.inventory.inventory_sale_bridge import InventorySaleBridge, SaleDeductionLine
+from app.backend.core.pagination import paginate_query
+from app.backend.core.role_access import apply_customer_rut_scope
+from app.backend.services.requests.item_summary import summarize_items_by_unit
+from app.backend.services.requests.linked_request_base import LinkedRequestService
 
 
 def parse_sample_size(value) -> Decimal:
@@ -38,9 +34,8 @@ def parse_sample_size(value) -> Decimal:
         return Decimal("0")
 
 
-class SampleClass:
-    def __init__(self, db):
-        self.db = db
+class SampleClass(LinkedRequestService):
+    reason_prefix = RequestReasonPrefix.SAMPLE
 
     def _get_product_sample_info(self, product_id: int):
         row = (
@@ -139,31 +134,10 @@ class SampleClass:
             .filter(SampleRequestItemModel.sample_request_id == sample_request_id)
             .all()
         )
-        if not items:
-            return {
-                "items_count": 0,
-                "total_quantity": 0,
-                "quantity_label": "—",
-            }
-
-        by_unit = {}
-        for item in items:
-            unit = (item.unit_measure or "").strip() or "u."
-            amount = float(item.total_amount or 0)
-            by_unit[unit] = by_unit.get(unit, 0) + amount
-
-        parts = []
-        for unit, total in by_unit.items():
-            if total == int(total):
-                parts.append(f"{int(total)} {unit}")
-            else:
-                parts.append(f"{total:g} {unit}")
-
-        return {
-            "items_count": len(items),
-            "total_quantity": sum(by_unit.values()),
-            "quantity_label": ", ".join(parts),
-        }
+        return summarize_items_by_unit(
+            items,
+            quantity_resolver=lambda i: float(i.total_amount or 0),
+        )
 
     def _serialize_request(self, request, items_summary=None):
         summary = items_summary or {}
@@ -188,203 +162,79 @@ class SampleClass:
         )
 
     def _validate_sample_stock(self, items):
-        for item in items:
-            base_units = int(Decimal(item.total_amount or 0))
-            if base_units <= 0:
-                continue
-            available = stock_sum_for_product(self.db, item.product_id)
-            if available < base_units:
-                unit = item.unit_measure or "u."
-                raise ValueError(
-                    f"Stock insuficiente para {item.product_name}. "
-                    f"Disponible: {available} {unit}, solicitado: {base_units} {unit}."
-                )
-
-    def _reverse_sale_inventory(self, sale_id):
-        """Revierte salidas de inventario de un pedido de muestra (sin commit)."""
-        sale_helper = SaleClass(self.db)
-        sales_products = (
-            self.db.query(SaleProductModel)
-            .filter(SaleProductModel.sale_id == sale_id)
-            .all()
+        self._inventory.validate_stock(
+            items,
+            base_units_resolver=lambda i: int(Decimal(i.total_amount or 0)),
         )
-        for sales_product in sales_products:
-            if not sales_product.inventory_movement_id:
-                continue
-            inventory_movement = (
-                self.db.query(InventoryMovementModel)
-                .filter(InventoryMovementModel.id == sales_product.inventory_movement_id)
-                .first()
-            )
-            if not inventory_movement:
-                continue
 
-            reverse_quantity = sale_helper._sale_movement_reverse_base_units(
-                sale_id, sales_product, inventory_movement
-            )
-            if reverse_quantity <= 0:
-                continue
+    def _purchase_line_total(self, product_id, base_units):
+        unit_cost = Decimal(str(sale_acceptance_unit_cost_from_movements(self.db, product_id) or 0))
+        return (unit_cost * Decimal(str(base_units or 0))).quantize(Decimal("1"), rounding=ROUND_HALF_UP)
 
-            return_uc = sale_acceptance_unit_cost_from_movements(self.db, sales_product.product_id)
-            self.db.add(
-                InventoryMovementModel(
-                    inventory_id=inventory_movement.inventory_id,
-                    lot_item_id=inventory_movement.lot_item_id,
-                    movement_type_id=1,
-                    quantity=reverse_quantity,
-                    unit_cost=return_uc,
-                    reason=f"Reversa {SAMPLE_REASON_PREFIX}|sale_id={sale_id}",
-                    added_date=_inventory_movement_added_at(),
-                )
-            )
-            sale_helper._reverse_fifo_lot_consumptions(sale_id, sales_product.product_id)
+    def _calculate_sample_totals(self, items):
+        subtotal = sum(self._purchase_line_total(item.product_id, item.total_amount) for item in items)
+        tax = TaxPolicy.ZERO
+        total = subtotal
+        return subtotal, tax, total
 
-        self.db.query(SaleProductModel).filter(SaleProductModel.sale_id == sale_id).delete()
-        self.db.flush()
-
-    def _deduct_sample_lines_on_sale(self, sale_id, sample_request, items):
-        """Descuenta inventario y crea líneas en sales_products (precio 0)."""
-        sale_helper = SaleClass(self.db)
-
+    def _to_deduction_lines(self, items):
+        lines = []
         for item in items:
             effective_qty = int(Decimal(item.total_amount or 0))
             if effective_qty <= 0:
                 continue
-
-            movement_unit_cost = sale_acceptance_unit_cost_from_movements(self.db, item.product_id)
-            main_movement, exit_error = sale_helper._create_consolidated_sale_inventory_exit(
-                sale_id,
-                item.product_id,
-                effective_qty,
-                movement_unit_cost,
-                reason_prefix=SAMPLE_REASON_PREFIX,
-            )
-            if exit_error:
-                raise ValueError(exit_error)
-
-            inventory = (
-                self.db.query(InventoryModel)
-                .filter(InventoryModel.id == main_movement.inventory_id)
-                .first()
-            )
-
-            self.db.add(
-                SaleProductModel(
-                    sale_id=sale_id,
+            line_price = int(self._purchase_line_total(item.product_id, item.total_amount))
+            lines.append(
+                SaleDeductionLine(
                     product_id=item.product_id,
-                    inventory_movement_id=main_movement.id,
-                    inventory_id=inventory.id if inventory else None,
-                    lot_item_id=main_movement.lot_item_id,
-                    quantity=int(item.sample_quantity or 0),
-                    price=0,
+                    inventory_base_units=effective_qty,
+                    line_price=line_price,
                 )
             )
-
-        self.db.flush()
+        return lines
 
     def _create_or_refresh_sample_sale(self, sample_request, items):
-        """
-        Crea pedido a $0, descuenta inventario con motivo Muestra y vincula sale_id.
-        Si ya existía pedido, revierte inventario y regenera líneas.
-        """
         if not sample_request.customer_id:
             raise ValueError("Cliente inválido para generar el pedido de muestra.")
 
-        now = datetime.now()
+        subtotal, tax, total = self._calculate_sample_totals(items)
         delivery = self._sample_delivery_address(
             sample_request.id,
             sample_request.customer_name,
             sample_request.customer_rut,
         )
-
-        if sample_request.sale_id:
-            sale = (
-                self.db.query(SaleModel)
-                .filter(SaleModel.id == sample_request.sale_id)
-                .first()
-            )
-            if sale:
-                self._reverse_sale_inventory(sale.id)
-                self._validate_sample_stock(items)
-                sale.customer_id = sample_request.customer_id
-                sale.delivery_address = delivery
-                sale.subtotal = 0
-                sale.tax = 0
-                sale.shipping_cost = 0
-                sale.total = 0
-                sale.status_id = SAMPLE_SALE_STATUS_ID
-                sale.updated_date = now
-                self._deduct_sample_lines_on_sale(sale.id, sample_request, items)
-                return sale.id
-
         self._validate_sample_stock(items)
-
-        new_sale = SaleModel(
+        return self._sale_linkage.create_or_refresh(
+            sample_request,
             customer_id=sample_request.customer_id,
-            shipping_method_id=1,
-            dte_type_id=2,
-            dte_status_id=2,
-            status_id=SAMPLE_SALE_STATUS_ID,
-            subtotal=0,
-            tax=0,
-            shipping_cost=0,
-            total=0,
-            payment_support=None,
             delivery_address=delivery,
-            added_date=now,
-            updated_date=now,
+            subtotal=subtotal,
+            tax=tax,
+            total=total,
+            deduction_lines=self._to_deduction_lines(items),
         )
-        self.db.add(new_sale)
-        self.db.flush()
-
-        self._deduct_sample_lines_on_sale(new_sale.id, sample_request, items)
-        sample_request.sale_id = new_sale.id
-        return new_sale.id
 
     def get_all(self, page=0, items_per_page=10, rut=None, customer_name=None, rol_id=None, user_rut=None):
-        try:
-            query = self.db.query(SampleRequestModel).order_by(SampleRequestModel.added_date.desc())
+        return self.safe(lambda: self._get_all(page, items_per_page, rut, customer_name, rol_id, user_rut))
 
-            if rut and rut.strip():
-                query = query.filter(SampleRequestModel.customer_rut == rut.strip())
+    def _get_all(self, page, items_per_page, rut, customer_name, rol_id, user_rut):
+        query = self.db.query(SampleRequestModel).order_by(SampleRequestModel.added_date.desc())
+        if rut and rut.strip():
+            query = query.filter(SampleRequestModel.customer_rut == rut.strip())
+        if customer_name and customer_name.strip():
+            query = query.filter(SampleRequestModel.customer_name.ilike(f"%{customer_name.strip()}%"))
+        query = apply_customer_rut_scope(
+            query, SampleRequestModel, rol_id=rol_id, user_rut=user_rut
+        )
 
-            if customer_name and customer_name.strip():
-                query = query.filter(SampleRequestModel.customer_name.ilike(f"%{customer_name.strip()}%"))
+        def serialize_row(row):
+            return self._serialize_request(row, self._items_quantity_summary(row.id))
 
-            if rol_id not in (1, 2, 6) and user_rut:
-                query = query.filter(SampleRequestModel.customer_rut == str(user_rut).strip())
-
-            if page > 0:
-                total_items = query.count()
-                total_pages = max((total_items + items_per_page - 1) // items_per_page, 1)
-
-                if page < 1 or page > total_pages:
-                    return {"status": "error", "message": "Invalid page number"}
-
-                rows = query.offset((page - 1) * items_per_page).limit(items_per_page).all()
-                if not rows:
-                    return {"status": "error", "message": "No data found"}
-
-                serialized = []
-                for row in rows:
-                    summary = self._items_quantity_summary(row.id)
-                    serialized.append(self._serialize_request(row, summary))
-
-                return {
-                    "total_items": total_items,
-                    "total_pages": total_pages,
-                    "current_page": page,
-                    "items_per_page": items_per_page,
-                    "data": serialized,
-                }
-
-            rows = query.all()
-            return [
-                self._serialize_request(row, self._items_quantity_summary(row.id))
-                for row in rows
-            ]
-        except Exception as e:
-            return {"status": "error", "message": str(e)}
+        if page > 0:
+            return paginate_query(
+                query, page=page, items_per_page=items_per_page, serialize_row=serialize_row
+            )
+        return [serialize_row(row) for row in query.all()]
 
     def get(self, sample_id):
         try:
@@ -478,7 +328,7 @@ class SampleClass:
             self._create_or_refresh_sample_sale(new_request, items)
             self.db.commit()
             return "success"
-        except ValueError as e:
+        except (ValueError, ValidationError) as e:
             self.db.rollback()
             return {"status": "error", "message": str(e)}
         except Exception as e:
@@ -520,7 +370,7 @@ class SampleClass:
             self._create_or_refresh_sample_sale(request, items)
             self.db.commit()
             return "success"
-        except ValueError as e:
+        except (ValueError, ValidationError) as e:
             self.db.rollback()
             return {"status": "error", "message": str(e)}
         except Exception as e:
@@ -534,11 +384,8 @@ class SampleClass:
                 return {"status": "error", "message": "Sample request not found"}
 
             if request.sale_id:
-                self._reverse_sale_inventory(request.sale_id)
-                sale = self.db.query(SaleModel).filter(SaleModel.id == request.sale_id).first()
-                if sale:
-                    sale.status_id = 3
-                    sale.updated_date = datetime.now()
+                self._inventory.reverse_sale_inventory(request.sale_id)
+                self._inventory.unlink_sale(request.sale_id, mode="soft_reject", check_folio=False)
 
             self.db.query(SampleRequestItemModel).filter(
                 SampleRequestItemModel.sample_request_id == sample_id
