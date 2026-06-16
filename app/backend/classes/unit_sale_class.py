@@ -148,12 +148,7 @@ class UnitSaleClass:
             "unit_measure": item.unit_measure or "",
         }
 
-    def _items_quantity_summary(self, unit_sale_request_id):
-        items = (
-            self.db.query(UnitSaleRequestItemModel)
-            .filter(UnitSaleRequestItemModel.unit_sale_request_id == unit_sale_request_id)
-            .all()
-        )
+    def _items_quantity_summary(self, items):
         if not items:
             return {
                 "items_count": 0,
@@ -180,8 +175,24 @@ class UnitSaleClass:
             "quantity_label": ", ".join(parts),
         }
 
-    def _serialize_request(self, request, items_summary=None):
-        summary = items_summary or {}
+    def _request_items(self, unit_sale_request_id):
+        return (
+            self.db.query(UnitSaleRequestItemModel)
+            .filter(UnitSaleRequestItemModel.unit_sale_request_id == unit_sale_request_id)
+            .order_by(UnitSaleRequestItemModel.id)
+            .all()
+        )
+
+    def _serialize_request(self, request, items=None, items_summary=None):
+        items = items if items is not None else self._request_items(request.id)
+        summary = items_summary or self._items_quantity_summary(items)
+        if items:
+            subtotal, tax, total = self._calculate_totals(items)
+        else:
+            subtotal = Decimal(str(request.subtotal or 0))
+            tax = Decimal(str(request.tax or 0))
+            total = Decimal(str(request.total or 0))
+
         return {
             "id": request.id,
             "customer_id": request.customer_id,
@@ -189,9 +200,9 @@ class UnitSaleClass:
             "customer_name": request.customer_name,
             "notes": request.notes or "",
             "sale_id": request.sale_id,
-            "subtotal": float(request.subtotal or 0),
-            "tax": float(request.tax or 0),
-            "total": float(request.total or 0),
+            "subtotal": float(subtotal),
+            "tax": float(tax),
+            "total": float(total),
             "items_count": summary.get("items_count", 0),
             "quantity_label": summary.get("quantity_label", "—"),
             "added_date": request.added_date.strftime("%Y-%m-%d %H:%M:%S") if request.added_date else None,
@@ -225,6 +236,8 @@ class UnitSaleClass:
 
     def _reverse_sale_inventory(self, sale_id):
         sale_helper = SaleClass(self.db)
+        processed_movement_ids = set()
+
         sales_products = (
             self.db.query(SaleProductModel)
             .filter(SaleProductModel.sale_id == sale_id)
@@ -233,6 +246,7 @@ class UnitSaleClass:
         for sales_product in sales_products:
             if not sales_product.inventory_movement_id:
                 continue
+
             inventory_movement = (
                 self.db.query(InventoryMovementModel)
                 .filter(InventoryMovementModel.id == sales_product.inventory_movement_id)
@@ -241,28 +255,73 @@ class UnitSaleClass:
             if not inventory_movement:
                 continue
 
-            reverse_quantity = sale_helper._sale_movement_reverse_base_units(
-                sale_id, sales_product, inventory_movement
+            processed_movement_ids.add(inventory_movement.id)
+            self._reverse_inventory_movement(
+                sale_helper, sale_id, sales_product.product_id, inventory_movement
             )
-            if reverse_quantity <= 0:
-                continue
 
-            return_uc = sale_acceptance_unit_cost_from_movements(self.db, sales_product.product_id)
-            self.db.add(
-                InventoryMovementModel(
-                    inventory_id=inventory_movement.inventory_id,
-                    lot_item_id=inventory_movement.lot_item_id,
-                    movement_type_id=1,
-                    quantity=reverse_quantity,
-                    unit_cost=return_uc,
-                    reason=f"Reversa {UNIT_SALE_REASON_PREFIX}|sale_id={sale_id}",
-                    added_date=_inventory_movement_added_at(),
-                )
+        exit_movements = (
+            self.db.query(InventoryMovementModel)
+            .filter(
+                InventoryMovementModel.reason.like(f"{UNIT_SALE_REASON_PREFIX}|sale_id={sale_id}|%"),
+                InventoryMovementModel.movement_type_id == 2,
             )
-            sale_helper._reverse_fifo_lot_consumptions(sale_id, sales_product.product_id)
+            .all()
+        )
+        for inventory_movement in exit_movements:
+            if inventory_movement.id in processed_movement_ids:
+                continue
+            product_id = self._product_id_from_inventory_movement(inventory_movement)
+            if not product_id:
+                continue
+            self._reverse_inventory_movement(
+                sale_helper, sale_id, product_id, inventory_movement
+            )
 
         self.db.query(SaleProductModel).filter(SaleProductModel.sale_id == sale_id).delete()
         self.db.flush()
+
+    def _product_id_from_inventory_movement(self, inventory_movement):
+        inv = (
+            self.db.query(InventoryModel)
+            .filter(InventoryModel.id == inventory_movement.inventory_id)
+            .first()
+        )
+        return inv.product_id if inv else None
+
+    def _reverse_inventory_movement(self, sale_helper, sale_id, product_id, inventory_movement):
+        reverse_marker = f"Reversa {UNIT_SALE_REASON_PREFIX}|sale_id={sale_id}|movement_id={inventory_movement.id}"
+        already_reversed = (
+            self.db.query(InventoryMovementModel.id)
+            .filter(InventoryMovementModel.reason == reverse_marker)
+            .first()
+        )
+        if already_reversed:
+            return
+
+        reverse_quantity = sale_helper._sale_movement_reverse_base_units(
+            sale_id,
+            SaleProductModel(product_id=product_id),
+            inventory_movement,
+        )
+        if reverse_quantity <= 0:
+            reverse_quantity = abs(int(inventory_movement.quantity or 0))
+        if reverse_quantity <= 0:
+            return
+
+        return_uc = sale_acceptance_unit_cost_from_movements(self.db, product_id)
+        self.db.add(
+            InventoryMovementModel(
+                inventory_id=inventory_movement.inventory_id,
+                lot_item_id=inventory_movement.lot_item_id,
+                movement_type_id=1,
+                quantity=reverse_quantity,
+                unit_cost=return_uc,
+                reason=reverse_marker,
+                added_date=_inventory_movement_added_at(),
+            )
+        )
+        sale_helper._reverse_fifo_lot_consumptions(sale_id, product_id)
 
     def _deduct_lines_on_sale(self, sale_id, items):
         sale_helper = SaleClass(self.db)
@@ -389,8 +448,9 @@ class UnitSaleClass:
 
                 serialized = []
                 for row in rows:
-                    summary = self._items_quantity_summary(row.id)
-                    serialized.append(self._serialize_request(row, summary))
+                    items = self._request_items(row.id)
+                    summary = self._items_quantity_summary(items)
+                    serialized.append(self._serialize_request(row, items, summary))
 
                 return {
                     "total_items": total_items,
@@ -401,10 +461,12 @@ class UnitSaleClass:
                 }
 
             rows = query.all()
-            return [
-                self._serialize_request(row, self._items_quantity_summary(row.id))
-                for row in rows
-            ]
+            serialized = []
+            for row in rows:
+                items = self._request_items(row.id)
+                summary = self._items_quantity_summary(items)
+                serialized.append(self._serialize_request(row, items, summary))
+            return serialized
         except Exception as e:
             return {"status": "error", "message": str(e)}
 
@@ -418,14 +480,13 @@ class UnitSaleClass:
             if not request:
                 return {"status": "error", "message": "Unit sale request not found"}
 
-            items = (
-                self.db.query(UnitSaleRequestItemModel)
-                .filter(UnitSaleRequestItemModel.unit_sale_request_id == unit_sale_id)
-                .order_by(UnitSaleRequestItemModel.id)
-                .all()
-            )
+            items = self._request_items(unit_sale_id)
 
-            payload = self._serialize_request(request, self._items_quantity_summary(unit_sale_id))
+            payload = self._serialize_request(
+                request,
+                items,
+                self._items_quantity_summary(items),
+            )
             payload["items"] = [self._serialize_item(item) for item in items]
             return payload
         except Exception as e:
@@ -454,10 +515,10 @@ class UnitSaleClass:
             if not product_info:
                 raise ValueError(f"El producto {item_input.product_id} no existe.")
 
-            unit_price = Decimal(str(product_info["unit_price"]))
+            unit_price = Decimal(str(item_input.unit_price))
             if unit_price <= 0:
                 raise ValueError(
-                    f"El producto {product_info['product_name']} no tiene precio de venta configurado."
+                    f"Debe indicar un precio unitario válido para {product_info['product_name']}."
                 )
 
             line_total = (qty * unit_price).quantize(Decimal("1"), rounding=ROUND_HALF_UP)
@@ -573,17 +634,36 @@ class UnitSaleClass:
             if not request:
                 return {"status": "error", "message": "Unit sale request not found"}
 
-            if request.sale_id:
-                self._reverse_sale_inventory(request.sale_id)
-                sale = self.db.query(SaleModel).filter(SaleModel.id == request.sale_id).first()
-                if sale:
-                    sale.status_id = 3
-                    sale.updated_date = datetime.now()
+            sale_id = request.sale_id
+            if sale_id:
+                sale = (
+                    self.db.query(SaleModel)
+                    .filter(SaleModel.id == sale_id)
+                    .first()
+                )
+                if sale and sale.folio:
+                    return {
+                        "status": "error",
+                        "message": "No se puede eliminar: el pedido tiene DTE generado.",
+                    }
+
+                self._reverse_sale_inventory(sale_id)
 
             self.db.query(UnitSaleRequestItemModel).filter(
                 UnitSaleRequestItemModel.unit_sale_request_id == unit_sale_id
             ).delete()
             self.db.delete(request)
+            self.db.flush()
+
+            if sale_id:
+                sale = (
+                    self.db.query(SaleModel)
+                    .filter(SaleModel.id == sale_id)
+                    .first()
+                )
+                if sale:
+                    self.db.delete(sale)
+
             self.db.commit()
             return "success"
         except Exception as e:

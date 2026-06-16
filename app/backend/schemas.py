@@ -613,6 +613,7 @@ class UnitSaleRequestList(BaseModel):
 class UnitSaleRequestItemInput(BaseModel):
     product_id: int
     unit_quantity: float
+    unit_price: float
 
 class StoreUnitSaleRequest(BaseModel):
     customer_rut: str
