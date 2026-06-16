@@ -168,7 +168,7 @@ class InventoryClass:
             movement_lot_item_id = ref_mov.lot_item_id if ref_mov else None
 
             lot_item = None
-            if movement_lot_item_id is not None:
+            if movement_lot_item_id:
                 lot_item = self.db.query(LotItemModel).filter_by(id=movement_lot_item_id).first()
 
             if not lot_item:
@@ -275,14 +275,18 @@ class InventoryClass:
                     .first()
                 )
 
-            # Costo: solo la fila ``inventories_movements.id`` indicada (no salidas 2/3).
-            if target_mov is not None and target_mov.movement_type_id not in AVERAGE_UNIT_COST_EXCLUDED_MOVEMENT_TYPE_IDS:
+            # Edición por fila del kardex: actualizar costo y cantidad aunque no haya lote (lot_item_id 0/NULL).
+            if target_mov is not None:
                 target_mov.unit_cost = new_uc
+                target_qty = int(inventory_inputs.stock or 0)
+                sign = -1 if int(target_mov.quantity or 0) < 0 else 1
+                target_mov.quantity = abs(target_qty) * sign
 
             ref_mov = target_mov or first_mov
-            lot_item_id = ref_mov.lot_item_id if ref_mov else None
+            raw_lot_item_id = ref_mov.lot_item_id if ref_mov else None
+            lot_item_id = raw_lot_item_id if raw_lot_item_id else None
             lot_item_for_private = None
-            if lot_item_id is not None:
+            if lot_item_id:
                 lot_item = self.db.query(LotItemModel).filter_by(id=lot_item_id).first()
                 if lot_item:
                     lot_item_for_private = lot_item
@@ -297,31 +301,26 @@ class InventoryClass:
                     lot_item.public_sale_price = inventory_inputs.public_sale_price
                     lot_item.updated_date = datetime.now()
 
+            elif target_mov is None:
                 target_qty = int(inventory_inputs.stock or 0)
-                if target_mov is not None:
-                    # Edición por movimiento: cambiar SOLO la cantidad de esa fila
-                    # (p. ej. 5 -> 10 o 15), sin crear movimientos delta por stock total.
-                    sign = -1 if int(target_mov.quantity or 0) < 0 else 1
-                    target_mov.quantity = abs(target_qty) * sign
-                else:
-                    current = stock_sum_for_inventory(self.db, inventory.id)
-                    delta = target_qty - current
-                    if delta != 0:
-                        movement_uc = new_uc or int(
-                            average_unit_cost_for_product(self.db, inventory_inputs.product_id)
-                            or 0
+                current = stock_sum_for_inventory(self.db, inventory.id)
+                delta = target_qty - current
+                if delta != 0:
+                    movement_uc = new_uc or int(
+                        average_unit_cost_for_product(self.db, inventory_inputs.product_id)
+                        or 0
+                    )
+                    self.db.add(
+                        InventoryMovementModel(
+                            inventory_id=inventory.id,
+                            lot_item_id=lot_item_id,
+                            movement_type_id=4,
+                            quantity=delta,
+                            unit_cost=movement_uc,
+                            reason="Ajuste por actualización de inventario",
+                            added_date=datetime.now(),
                         )
-                        self.db.add(
-                            InventoryMovementModel(
-                                inventory_id=inventory.id,
-                                lot_item_id=lot_item_id,
-                                movement_type_id=4,
-                                quantity=delta,
-                                unit_cost=movement_uc,
-                                reason="Ajuste por actualización de inventario",
-                                added_date=datetime.now(),
-                            )
-                        )
+                    )
 
             # Precio privado = costo medio × paquete; mismo valor en **todos** los ``lot_items`` del producto
             if lot_item_for_private is not None:

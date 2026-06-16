@@ -10,8 +10,8 @@ from app.backend.db.models import (
     LotModel,
 )
 
-# Salidas: no entran en la media aritmética de ``unit_cost`` (venta, salida por ajuste).
-AVERAGE_UNIT_COST_EXCLUDED_MOVEMENT_TYPE_IDS = (2, 3)
+# Salidas: no entran en la media aritmética de ``unit_cost`` (venta, rectificación de salida / FIFO).
+AVERAGE_UNIT_COST_EXCLUDED_MOVEMENT_TYPE_IDS = (2, 4)
 
 # Detalle FIFO por lote al vender; el descuento total va en un único movimiento ``Venta|...``.
 FIFO_LOT_CONSUMPTION_REASON_PREFIX = "Consumo FIFO|"
@@ -85,7 +85,7 @@ def average_unit_cost_for_product(db, product_id):
     """
     Promedio aritmético de ``unit_cost`` en ``inventories_movements`` para el producto:
     ``SUM(unit_cost) / COUNT(*)`` entre movimientos de ese producto que **no** son salidas
-    (tipos en ``AVERAGE_UNIT_COST_EXCLUDED_MOVEMENT_TYPE_IDS``: venta, salida).
+    (tipos en ``AVERAGE_UNIT_COST_EXCLUDED_MOVEMENT_TYPE_IDS``: venta, rectificación de salida).
     No pondera por ``quantity`` (cada fila cuenta una vez). Filas con ``unit_cost`` NULL se excluyen.
     Sin filas válidas → ``0``.
     """
