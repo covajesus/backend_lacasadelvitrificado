@@ -312,29 +312,29 @@ def reverse_sale(orderId: int, session_user: UserLogin = Depends(get_current_act
         print(f"[ERROR] Error al revertir venta {orderId}: {str(e)}")
         return {"message": {"status": "error", "message": f"Error al revertir la venta: {str(e)}"}}
         
-@sales.get("/delivered_sale/{id}")
-def delivered_sale(id: int, session_user: UserLogin = Depends(get_current_active_user), db: Session = Depends(get_db)):
-    SaleClass(db).change_status(id, 4)
-    
-    # Enviar alerta de pedido entregado
-    try:
-        # Obtener datos de la venta y cliente
-        sale = db.query(SaleModel).filter(SaleModel.id == id).first()
-        if sale:
-            customer = db.query(CustomerModel).filter(CustomerModel.id == sale.customer_id).first()
-            if customer and customer.phone:
-                whatsapp = WhatsappClass(db)
-                whatsapp.send_order_delivered_alert(
-                    customer_phone=customer.phone,
-                    id=sale.id
-                )
-                print(f"[WHATSAPP] Alerta de pedido entregado enviada al cliente {customer.phone}")
-            else:
-                print("[WHATSAPP] Cliente no encontrado o sin teléfono")
-    except Exception as e:
-        print(f"[WHATSAPP] Error enviando alerta de pedido entregado: {str(e)}")
+@sales.get("/delivered_order/{id}")
+def delivered_order(
+    id: int,
+    session_user: UserLogin = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+):
+    result = SaleClass(db).delivered_order(id)
+    if isinstance(result, dict) and result.get("status") == "error":
+        raise HTTPException(status_code=400, detail=result.get("message", "Error marking order as delivered"))
+    return {"message": result}
 
-    return {"message": "Sale marked as delivered"}
+
+@sales.get("/delivered_sale/{id}")
+def delivered_sale(
+    id: int,
+    session_user: UserLogin = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+):
+    """Legacy alias for ``/delivered_order/{id}``."""
+    result = SaleClass(db).delivered_order(id)
+    if isinstance(result, dict) and result.get("status") == "error":
+        raise HTTPException(status_code=400, detail=result.get("message", "Error marking order as delivered"))
+    return {"message": result.get("message", "Order marked as delivered") if isinstance(result, dict) else result}
 
 @sales.post("/store")
 def store(

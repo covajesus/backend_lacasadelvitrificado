@@ -91,6 +91,22 @@ return {"message": SomeClass(db).method(...)}
 # Error: {"status": "error", "message": "..."}
 ```
 
+## Convenciones de nombres (código en inglés)
+
+| Ámbito | Idioma | Ejemplos |
+|--------|--------|----------|
+| **Funciones y métodos** | Inglés | `get_all`, `validate_stock`, `create_or_refresh` |
+| **Variables y parámetros** | Inglés | `customer_id`, `shipping_method_id`, `movement_type` |
+| **Rutas HTTP** (`routers/`) | Inglés, kebab o snake en path | `/internal-uses/store`, `/inventories/movements/{id}` |
+| **Clases, módulos, archivos** | Inglés | `inventory_class.py`, `SaleLinkageService` |
+| **Constantes / enums** | Inglés | `SaleStatus.DELIVERED`, `RequestReasonPrefix` |
+| **Comentarios y docstrings** | Español o inglés (claridad) | — |
+| **Mensajes al usuario / `reason` de negocio** | Español | `"Ajuste de inventario realizado."` |
+
+**Prohibido en código nuevo:** identificadores en español (`obtenerCliente`, `metodo_envio`, `crearPresupuesto`).
+
+**Legacy:** módulos antiguos pueden tener nombres mixtos; al tocarlos, renombrar solo si no rompe el contrato API ni el frontend.
+
 ## Checklist antes de commit
 
 - [ ] ¿Leíste esta guía?
@@ -98,6 +114,7 @@ return {"message": SomeClass(db).method(...)}
 - [ ] ¿Router delgado?
 - [ ] ¿Paginación con `list_query` o `paginate_query`?
 - [ ] ¿Sin copiar bloques de inventario/pedido?
+- [ ] ¿Funciones, variables y rutas nuevas en inglés?
 
 ## No editar
 

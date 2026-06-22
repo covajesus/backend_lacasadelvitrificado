@@ -13,6 +13,7 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 from sqlalchemy import func, or_, and_
 from app.backend.classes.whatsapp_class import WhatsappClass
+from app.backend.core.constants import SaleStatus
 
 
 def _inventory_movement_added_at():
@@ -651,26 +652,25 @@ class SaleClass:
             
             self.db.commit()
 
-            # Enviar alerta de nueva orden por WhatsApp
-            try:
-                # Obtener datos del cliente
-                customer = self.db.query(CustomerModel).filter(CustomerModel.id == customer_id).first()
-                if customer:
-                    customer_name = customer.social_reason or f"Cliente {customer.identification_number}"
-                else:
-                    customer_name = f"Cliente {sale_inputs.customer_rut}"
-                
-                # Formatear fecha
-                date_formatted = new_sale.added_date.strftime("%d-%m-%Y")
-                
-                # Enviar alerta
-                whatsapp = WhatsappClass(self.db)
-                whatsapp.send_new_order_alert(
-                    customer_name=customer_name
+            # Alerta WhatsApp al admin solo con envío a domicilio (no retiro en tienda).
+            if int(sale_inputs.shipping_method_id or 1) != 1:
+                try:
+                    customer = self.db.query(CustomerModel).filter(CustomerModel.id == customer_id).first()
+                    if customer:
+                        customer_name = customer.social_reason or f"Cliente {customer.identification_number}"
+                    else:
+                        customer_name = f"Cliente {sale_inputs.customer_rut}"
+
+                    whatsapp = WhatsappClass(self.db)
+                    whatsapp.send_new_order_alert(customer_name=customer_name)
+                    print(f"[WHATSAPP ALERT] Alerta enviada para nueva orden {new_sale.id}")
+                except Exception as e:
+                    print(f"[WHATSAPP ALERT] Error enviando alerta: {str(e)}")
+            else:
+                print(
+                    f"[WHATSAPP ALERT] Omitida para orden {new_sale.id} "
+                    "(retiro en tienda / shipping_method_id=1)"
                 )
-                print(f"[WHATSAPP ALERT] Alerta enviada para nueva orden {new_sale.id}")
-            except Exception as e:
-                print(f"[WHATSAPP ALERT] Error enviando alerta: {str(e)}")
 
             return {"status": "Venta registrada exitosamente.", "sale_id": new_sale.id}
 
@@ -1098,6 +1098,45 @@ class SaleClass:
             if "could not obtain lock" in error_message.lower() or "lock" in error_message.lower() or "deadlock" in error_message.lower():
                 raise Exception(f"La venta está siendo procesada por otro proceso. Error: {error_message}")
             return {"status": "error", "message": error_message}
+
+    def delivered_order(self, order_id: int):
+        """
+        Mark sale/order as delivered (``status_id`` = ``SaleStatus.DELIVERED``)
+        and notify the customer via WhatsApp when a phone number exists.
+        """
+        change_result = self.change_status(order_id, SaleStatus.DELIVERED)
+
+        if isinstance(change_result, dict) and change_result.get("status") == "error":
+            return change_result
+        if change_result == "No data found":
+            return {"status": "error", "message": "Order not found"}
+        if change_result == "Sale already in this status":
+            return {"status": "success", "message": "Order already marked as delivered"}
+
+        try:
+            sale = self.db.query(SaleModel).filter(SaleModel.id == order_id).first()
+            if sale:
+                customer = (
+                    self.db.query(CustomerModel)
+                    .filter(CustomerModel.id == sale.customer_id)
+                    .first()
+                )
+                if customer and customer.phone:
+                    WhatsappClass(self.db).send_delivered_order(
+                        customer_phone=customer.phone,
+                        order_id=sale.id,
+                        sale_id=sale.id,
+                    )
+                    print(
+                        f"[DELIVERED_ORDER] WhatsApp alert sent to customer {customer.phone} "
+                        f"for order {order_id}"
+                    )
+                else:
+                    print("[DELIVERED_ORDER] Customer not found or missing phone; WhatsApp skipped")
+        except Exception as e:
+            print(f"[DELIVERED_ORDER] WhatsApp error for order {order_id}: {e}")
+
+        return {"status": "success", "message": "Order marked as delivered"}
 
     def get_sales_report(self, start_date=None, end_date=None):
         try:

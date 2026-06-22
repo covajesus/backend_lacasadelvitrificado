@@ -521,26 +521,25 @@ class SaleClass:
             
             self.db.commit()
 
-            # Enviar alerta de nueva orden por WhatsApp
-            try:
-                # Obtener datos del cliente
-                customer = self.db.query(CustomerModel).filter(CustomerModel.id == customer_id).first()
-                if customer:
-                    customer_name = customer.social_reason or f"Cliente {customer.identification_number}"
-                else:
-                    customer_name = f"Cliente {sale_inputs.customer_rut}"
-                
-                # Formatear fecha
-                date_formatted = new_sale.added_date.strftime("%d-%m-%Y")
-                
-                # Enviar alerta
-                whatsapp = WhatsappClass(self.db)
-                whatsapp.send_new_order_alert(
-                    customer_name=customer_name
+            # Alerta WhatsApp al admin solo con envío a domicilio (no retiro en tienda).
+            if int(sale_inputs.shipping_method_id or 1) != 1:
+                try:
+                    customer = self.db.query(CustomerModel).filter(CustomerModel.id == customer_id).first()
+                    if customer:
+                        customer_name = customer.social_reason or f"Cliente {customer.identification_number}"
+                    else:
+                        customer_name = f"Cliente {sale_inputs.customer_rut}"
+
+                    whatsapp = WhatsappClass(self.db)
+                    whatsapp.send_new_order_alert(customer_name=customer_name)
+                    print(f"[WHATSAPP ALERT] Alerta enviada para nueva orden {new_sale.id}")
+                except Exception as e:
+                    print(f"[WHATSAPP ALERT] Error enviando alerta: {str(e)}")
+            else:
+                print(
+                    f"[WHATSAPP ALERT] Omitida para orden {new_sale.id} "
+                    "(retiro en tienda / shipping_method_id=1)"
                 )
-                print(f"[WHATSAPP ALERT] Alerta enviada para nueva orden {new_sale.id}")
-            except Exception as e:
-                print(f"[WHATSAPP ALERT] Error enviando alerta: {str(e)}")
 
             return {"status": "Venta registrada exitosamente.", "sale_id": new_sale.id}
 

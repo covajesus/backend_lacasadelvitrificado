@@ -2436,25 +2436,29 @@ class WhatsappClass:
         
         return response
 
-    def send_order_delivered_alert(self, customer_phone, id): 
+    def send_delivered_order(self, customer_phone, order_id, sale_id: int = None):
+        """
+        Plantilla Meta ``delivered_order`` (Pedido entregado):
+        «Hola el pedido N° {{1}} ha sido entregado con éxito...»
+        """
         url = "https://graph.facebook.com/v22.0/790586727468909/messages"
-        token = os.getenv('META_TOKEN')        
+        token = os.getenv('META_TOKEN')
 
-        # Formatear el número de teléfono
         customer_phone_formatted = self._clean_phone_number(customer_phone)
+        order_number = str(order_id)
 
         payload = {
             "messaging_product": "whatsapp",
             "to": customer_phone_formatted,
             "type": "template",
             "template": {
-                "name": "alerta_pedido_enviado",
+                "name": "delivered_order",
                 "language": {"code": "es"},
                 "components": [
                     {
                         "type": "body",
                         "parameters": [
-                            {"type": "text", "text": id}
+                            {"type": "text", "text": order_number}
                         ]
                     }
                 ]
@@ -2468,11 +2472,10 @@ class WhatsappClass:
 
         response = requests.post(url, json=payload, headers=headers)
 
-        print(f"[WHATSAPP ALERT] Status: {response.status_code}")
+        print(f"[WHATSAPP DELIVERED_ORDER] Status: {response.status_code}")
         response_data = response.json()
-        print(f"[WHATSAPP ALERT] Response: {response_data}")
-        
-        # Guardar el message_id si el envío fue exitoso
+        print(f"[WHATSAPP DELIVERED_ORDER] Response: {response_data}")
+
         if response.status_code == 200 and "messages" in response_data:
             message_id = response_data["messages"][0].get("id")
             if message_id:
@@ -2480,11 +2483,16 @@ class WhatsappClass:
                     message_id=message_id,
                     recipient_phone=customer_phone_formatted,
                     message_type="template",
-                    template_name="alerta_pedido_enviado",
-                    status="sent"
+                    template_name="delivered_order",
+                    status="sent",
+                    sale_id=sale_id if sale_id is not None else int(order_id) if str(order_id).isdigit() else None,
                 )
-        
+
         return response
+
+    def send_order_delivered_alert(self, customer_phone, id):
+        """Alias legacy → ``send_delivered_order``."""
+        return self.send_delivered_order(customer_phone, id, sale_id=id)
 
     def send_rejected_payment_alert(self, customer_phone, id): 
         url = "https://graph.facebook.com/v22.0/790586727468909/messages"
