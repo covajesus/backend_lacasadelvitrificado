@@ -14,6 +14,7 @@ from app.backend.db.models import (
     CustomerProductDiscountModel
 )
 from app.backend.classes.whatsapp_class import WhatsappClass
+from app.backend.services.promotions.promotion_pricing_service import PromotionPricingService
 
 class BudgetClass:
     def __init__(self, db):
@@ -211,6 +212,11 @@ class BudgetClass:
                 )
                 self.db.add(new_product)
 
+            PromotionPricingService(self.db).record_product_discount_usages(
+                products_payload,
+                budget_id=new_budget.id,
+            )
+
             self.db.commit()
             self.db.refresh(new_budget)
 
@@ -285,6 +291,11 @@ class BudgetClass:
                     updated_date=datetime.now()
                 )
                 self.db.add(new_product)
+
+            PromotionPricingService(self.db).record_product_discount_usages(
+                products_payload,
+                budget_id=new_budget.id,
+            )
 
             self.db.commit()
             self.db.refresh(new_budget)

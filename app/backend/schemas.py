@@ -118,6 +118,40 @@ class UpdateCategory(BaseModel):
     public_name: str
     color: str
 
+class PromotionList(BaseModel):
+    page: int
+
+class StorePromotion(BaseModel):
+    promotion_type_id: int = 1
+    product_id: Optional[int] = None
+    product_ids: Optional[list[int]] = None
+    name: str
+    description: Optional[str] = None
+    discount_percent: float = 0
+    coupon_code: Optional[str] = None
+    minimum_purchase: float = 0
+    start_date: Optional[str] = None
+    end_date: Optional[str] = None
+    is_active: int = 1
+
+class UpdatePromotion(BaseModel):
+    promotion_type_id: int = 1
+    product_id: Optional[int] = None
+    product_ids: Optional[list[int]] = None
+    name: str
+    description: Optional[str] = None
+    discount_percent: float = 0
+    coupon_code: Optional[str] = None
+    minimum_purchase: float = 0
+    start_date: Optional[str] = None
+    end_date: Optional[str] = None
+    is_active: int = 1
+
+class ValidateCoupon(BaseModel):
+    coupon_code: str
+    product_ids: list[int] = []
+    subtotal: float = 0
+
 class UpdateSupplier(BaseModel):
     identification_number: str
     supplier: str

@@ -13,6 +13,7 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 from sqlalchemy import func, or_, and_
 from app.backend.classes.whatsapp_class import WhatsappClass
+from app.backend.services.promotions.promotion_pricing_service import PromotionPricingService
 from app.backend.core.constants import SaleStatus
 
 
@@ -463,6 +464,7 @@ class SaleClass:
                 continue
             
             product_name, minimum_stock = product_info
+            minimum_stock = int(minimum_stock or 0)
             
             # Verificar si hay suficiente stock (inventario en unidades base)
             if total_stock < needed_base:
@@ -650,6 +652,12 @@ class SaleClass:
                 )
                 self.db.add(sale_product)
             
+            if sale_inputs.rol_id not in (1, 2):
+                PromotionPricingService(self.db).record_product_discount_usages(
+                    [{'product_id': item.id, 'quantity': item.quantity} for item in sale_inputs.cart],
+                    sale_id=new_sale.id,
+                )
+
             self.db.commit()
 
             # Alerta WhatsApp al admin solo con envío a domicilio (no retiro en tienda).

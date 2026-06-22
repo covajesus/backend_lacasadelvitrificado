@@ -34,6 +34,21 @@ def stock_sum_for_product(db, product_id):
     return int(q.scalar() or 0)
 
 
+def movement_stock_by_product_subquery(db):
+    """
+    Stock por producto = suma de ``inventories_movements.quantity`` en **todos** los
+    inventarios del SKU (misma regla que ``stock_sum_for_product``).
+    """
+    return _exclude_fifo_lot_consumption(
+        db.query(
+            InventoryModel.product_id.label("product_id"),
+            func.coalesce(func.sum(InventoryMovementModel.quantity), 0).label("movement_stock"),
+        )
+        .join(InventoryMovementModel, InventoryMovementModel.inventory_id == InventoryModel.id)
+        .group_by(InventoryModel.product_id)
+    ).subquery()
+
+
 def stock_sum_for_inventory(db, inventory_id):
     q = (
         db.query(func.coalesce(func.sum(InventoryMovementModel.quantity), 0))

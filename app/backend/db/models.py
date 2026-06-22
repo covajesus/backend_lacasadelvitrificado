@@ -199,6 +199,51 @@ class CategoryModel(Base):
     added_date = Column(DateTime())
     updated_date = Column(DateTime())
 
+class PromotionModel(Base):
+    __tablename__ = 'promotions'
+
+    id = Column(Integer, primary_key=True)
+    promotion_type_id = Column(Integer, default=1)
+    product_id = Column(Integer, nullable=True)
+    name = Column(String(255), nullable=False)
+    description = Column(Text, nullable=True)
+    discount_percent = Column(Numeric(5, 2), default=0)
+    coupon_code = Column(String(50), nullable=True)
+    minimum_purchase = Column(Numeric(12, 2), default=0)
+    start_date = Column(DateTime(), nullable=True)
+    end_date = Column(DateTime(), nullable=True)
+    is_active = Column(Integer, default=1)
+    added_date = Column(DateTime())
+    updated_date = Column(DateTime())
+
+class PromotionProductModel(Base):
+    __tablename__ = 'promotion_products'
+
+    id = Column(Integer, primary_key=True)
+    promotion_id = Column(Integer)
+    product_id = Column(Integer)
+    original_price = Column(Numeric(12, 2), default=0)
+    promotional_price = Column(Numeric(12, 2), default=0)
+    discount_amount = Column(Numeric(12, 2), default=0)
+    added_date = Column(DateTime())
+
+class PromotionUsageModel(Base):
+    __tablename__ = 'promotion_usages'
+
+    id = Column(Integer, primary_key=True)
+    promotion_id = Column(Integer)
+    promotion_type_id = Column(Integer)
+    product_id = Column(Integer, nullable=True)
+    sale_id = Column(Integer, nullable=True)
+    budget_id = Column(Integer, nullable=True)
+    coupon_code = Column(String(50), nullable=True)
+    quantity = Column(Integer, default=1)
+    original_unit_price = Column(Numeric(12, 2), default=0)
+    promotional_unit_price = Column(Numeric(12, 2), default=0)
+    discount_amount_per_unit = Column(Numeric(12, 2), default=0)
+    total_discount_lost = Column(Numeric(12, 2), default=0)
+    applied_date = Column(DateTime())
+
 class LiterFeatureModel(Base):
     __tablename__ = 'liter_features'
 

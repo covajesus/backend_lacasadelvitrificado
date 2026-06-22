@@ -11,6 +11,8 @@ from app.backend.db.models import (
     InventoryMovementModel,
 )
 from app.backend.classes.file_class import FileClass
+from app.backend.classes.inventory_stock import movement_stock_by_product_subquery, stock_sum_for_product
+from app.backend.services.promotions.promotion_pricing_service import PromotionPricingService
 from datetime import datetime
 import re
 from sqlalchemy import func, or_, and_
@@ -19,6 +21,16 @@ class ProductClass:
     _SEARCH_STRIP_CHARS = (
         "®", "™", "©", "°", "(", ")", "-", "/", ".", ",", ";", ":", "_", "+", "&"
     )
+
+    def _apply_product_promotions(self, product_data):
+        if not product_data or not isinstance(product_data, dict):
+            return product_data
+        return PromotionPricingService(self.db).enrich_product_dict(product_data)
+
+    def _apply_product_promotions_list(self, products):
+        if not products:
+            return products
+        return PromotionPricingService(self.db).enrich_product_list(products)
 
     @classmethod
     def _normalize_search_tokens(cls, search_term: str) -> list[str]:
@@ -48,53 +60,10 @@ class ProductClass:
         self.db = db
 
     def _movement_stock_by_product_subquery(self):
-        """
-        Stock por producto = suma de ``inventories_movements.quantity`` solo del inventario
-        con mayor ``inventories.id`` por SKU (misma regla que ``KardexClass.get_all``).
-        """
-        latest_inv_sq = (
-            self.db.query(
-                InventoryModel.product_id.label("product_id"),
-                func.max(InventoryModel.id).label("latest_inventory_id"),
-            )
-            .group_by(InventoryModel.product_id)
-            .subquery()
-        )
-        stock_per_inv_sq = (
-            self.db.query(
-                InventoryMovementModel.inventory_id.label("inventory_id"),
-                func.coalesce(func.sum(InventoryMovementModel.quantity), 0).label("stock_sum"),
-            )
-            .group_by(InventoryMovementModel.inventory_id)
-            .subquery()
-        )
-        return (
-            self.db.query(
-                latest_inv_sq.c.product_id.label("product_id"),
-                func.coalesce(stock_per_inv_sq.c.stock_sum, 0).label("movement_stock"),
-            )
-            .select_from(latest_inv_sq)
-            .outerjoin(
-                stock_per_inv_sq,
-                stock_per_inv_sq.c.inventory_id == latest_inv_sq.c.latest_inventory_id,
-            )
-            .subquery()
-        )
+        return movement_stock_by_product_subquery(self.db)
 
     def _sum_movement_quantity_for_product(self, product_id):
-        latest_id = (
-            self.db.query(func.max(InventoryModel.id))
-            .filter(InventoryModel.product_id == product_id)
-            .scalar()
-        )
-        if latest_id is None:
-            return 0
-        row = (
-            self.db.query(func.coalesce(func.sum(InventoryMovementModel.quantity), 0))
-            .filter(InventoryMovementModel.inventory_id == latest_id)
-            .scalar()
-        )
-        return int(row or 0)
+        return stock_sum_for_product(self.db, product_id)
 
     def get_all(self, page=0, items_per_page=10, supplier_id=None, product_id=None):
         try:
@@ -492,6 +461,8 @@ class ProductClass:
                     "sample_size": product.sample_size if product.sample_size else "",
                 } for product in data]
 
+            serialized_data = self._apply_product_promotions_list(serialized_data)
+
             return {
                 "data": serialized_data
             }
@@ -581,7 +552,7 @@ class ProductClass:
                         "updated_date": features.updated_date,
                     }
 
-            return {"product_data": product_data}
+            return {"product_data": self._apply_product_promotions(product_data)}
 
         except Exception as e:
             return {"error": str(e)}
@@ -674,7 +645,7 @@ class ProductClass:
 
             product_data["inventory"] = self._sum_movement_quantity_for_product(id)
 
-            return {"product_data": product_data}
+            return {"product_data": self._apply_product_promotions(product_data)}
 
         except Exception as e:
             return {"error": str(e)}
@@ -785,7 +756,7 @@ class ProductClass:
 
             product_data["inventory"] = self._sum_movement_quantity_for_product(id)
 
-            return {"product_data": product_data}
+            return {"product_data": self._apply_product_promotions(product_data)}
 
         except Exception as e:
             return {"error": str(e)}
@@ -1130,6 +1101,8 @@ class ProductClass:
                     "customer_discount_percentage": customer_discount,
                     "total_stock": int(result.total_stock or 0),
                 })
+            
+            formatted_data = self._apply_product_promotions_list(formatted_data)
             
             return {
                 "status": "success",
