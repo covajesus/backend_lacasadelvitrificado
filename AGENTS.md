@@ -154,9 +154,21 @@ Crear en [Meta Business Manager](https://business.facebook.com/) → WhatsApp �
 | Categoría | Marketing |
 | Idioma | Español |
 | Nombre exacto en Meta | `product_discount_promotion` |
-| Cuerpo | `{{1}}` |
+| Cuerpo | Ver texto fijo abajo con `{{1}}` `{{2}}` `{{3}}` |
 | Botón | Ir a la promoción → URL `https://lacasadelvitrificado.com/{{1}}` |
-| Encabezado imagen (opcional) | Imagen — si la campaña sube foto |
+
+Texto del cuerpo (3 variables):
+
+```
+🥳 ¡Nueva promoción! 🎉
+📦 *Producto:* {{1}}
+💰 *Descuento:* {{2}}
+🗓️ *Vigencia:* {{3}}
+
+Toca el botón *Ir a la promoción*.
+```
+
+El API envía: `{{1}}` = nombre producto, `{{2}}` = descuento (ej. `15%`), `{{3}}` = vigencia (ej. `01-06-2026 al 30-06-2026`).
 
 ### `campana_publicidad_v1` (cupón o mensaje libre, sin imagen)
 

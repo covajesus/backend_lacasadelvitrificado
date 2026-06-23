@@ -2988,10 +2988,11 @@ class WhatsappClass:
         image_url: str | None,
         site_url: str | None,
         promotion_type_id: int | None = None,
+        template_body_params: list[str] | None = None,
     ) -> tuple[dict, str]:
-        clean_message = self._clean_text_for_whatsapp(message or '').strip()
-        if not clean_message:
-            clean_message = 'Tenemos una promoción especial para ti.'
+        from app.backend.services.promotions.promotion_pricing_service import (
+            PROMOTION_TYPE_PRODUCT_DISCOUNT,
+        )
 
         template_name = self._get_campaign_template_name(bool(image_url), promotion_type_id)
         language_code = (os.getenv('WHATSAPP_CAMPAIGN_TEMPLATE_LANG') or 'es').strip()
@@ -3006,11 +3007,27 @@ class WhatsappClass:
                 }
             )
 
+        if (
+            int(promotion_type_id or 0) == PROMOTION_TYPE_PRODUCT_DISCOUNT
+            and template_body_params
+        ):
+            body_parameters = [
+                {'type': 'text', 'text': str(param or '—')[:1024]}
+                for param in template_body_params[:3]
+            ]
+            while len(body_parameters) < 3:
+                body_parameters.append({'type': 'text', 'text': '—'})
+        else:
+            clean_message = self._clean_text_for_whatsapp(message or '').strip()
+            if not clean_message:
+                clean_message = 'Tenemos una promoción especial para ti.'
+            body_parameters = [{'type': 'text', 'text': clean_message[:1024]}]
+
         components.extend(
             [
                 {
                     'type': 'body',
-                    'parameters': [{'type': 'text', 'text': clean_message[:1024]}],
+                    'parameters': body_parameters,
                 },
                 {
                     'type': 'button',
@@ -3040,6 +3057,7 @@ class WhatsappClass:
         image_url: str | None = None,
         site_url: str | None = None,
         promotion_type_id: int | None = None,
+        template_body_params: list[str] | None = None,
     ) -> dict:
         """Envía campaña con plantilla MARKETING (válida fuera de la ventana de 24 h)."""
         url = 'https://graph.facebook.com/v22.0/790586727468909/messages'
@@ -3059,6 +3077,7 @@ class WhatsappClass:
             image_url,
             site_url,
             promotion_type_id=promotion_type_id,
+            template_body_params=template_body_params,
         )
 
         try:

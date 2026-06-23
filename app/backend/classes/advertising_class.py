@@ -139,10 +139,27 @@ class AdvertisingClass(BaseDomainService):
                 lines.append(f"🛒 Compra mínima: {_format_clp(minimum)}")
         else:
             products = promo_data.get('products') or []
+            product_name = 'Producto'
             if products:
                 product_name = products[0].get('product_name') or f"Producto #{products[0].get('product_id')}"
-                lines.append(f"📦 Producto: {product_name}")
-            lines.append(f"💰 Descuento: *{discount_percent}%*")
+            lines = [
+                '🥳 ¡Nueva promoción! 🎉',
+                f'📦 *Producto:* {product_name}',
+                f'💰 *Descuento:* {discount_percent}%',
+            ]
+            start_date = _format_whatsapp_date(promo_data.get('start_date'))
+            end_date = _format_whatsapp_date(promo_data.get('end_date'))
+            if start_date or end_date:
+                lines.append(f'🗓️ *Vigencia:* {start_date or "—"} al {end_date or "—"}')
+            else:
+                lines.append('🗓️ *Vigencia:* —')
+            lines.append('')
+            lines.append('Toca el botón *Ir a la promoción*.')
+            extra = (extra_message or '').strip()
+            if extra:
+                lines.append('')
+                lines.append(extra)
+            return '\n'.join(lines)
 
         start_date = _format_whatsapp_date(promo_data.get('start_date'))
         end_date = _format_whatsapp_date(promo_data.get('end_date'))
@@ -158,6 +175,34 @@ class AdvertisingClass(BaseDomainService):
             lines.append(extra)
 
         return '\n'.join(lines)
+
+    def get_product_discount_template_body_params(self, promotion_id: int) -> list[str] | None:
+        promotion, error = self._get_active_promotion(int(promotion_id))
+        if error or not promotion:
+            return None
+        if int(promotion.promotion_type_id or 0) != PROMOTION_TYPE_PRODUCT_DISCOUNT:
+            return None
+
+        promo_data = PromotionClass(self.db)._serialize_row(promotion)
+        products = promo_data.get('products') or []
+        product_name = 'Producto'
+        if products:
+            product_name = products[0].get('product_name') or f"Producto #{products[0].get('product_id')}"
+
+        discount_percent = int(round(float(promo_data.get('discount_percent') or 0)))
+        start_date = _format_whatsapp_date(promo_data.get('start_date'))
+        end_date = _format_whatsapp_date(promo_data.get('end_date'))
+        if start_date or end_date:
+            validity = f'{start_date or "—"} al {end_date or "—"}'
+        else:
+            validity = '—'
+
+        whatsapp = WhatsappClass(self.db)
+        return [
+            whatsapp._clean_text_for_whatsapp(str(product_name))[:1024],
+            whatsapp._clean_text_for_whatsapp(f'{discount_percent}%')[:1024],
+            whatsapp._clean_text_for_whatsapp(validity)[:1024],
+        ]
 
     def build_campaign_whatsapp_message(
         self,
@@ -607,10 +652,13 @@ class AdvertisingClass(BaseDomainService):
         failed_count = 0
         campaign_product_id = self._resolve_campaign_product_id(promotion_id)
         promotion_type_id = None
+        template_body_params = None
         if promotion_id:
             promotion_row, _ = self._get_active_promotion(int(promotion_id))
             if promotion_row:
                 promotion_type_id = int(promotion_row.promotion_type_id or 0)
+            if promotion_type_id == PROMOTION_TYPE_PRODUCT_DISCOUNT:
+                template_body_params = self.get_product_discount_template_body_params(int(promotion_id))
 
         for index, customer in enumerate(recipients, start=1):
             customer_label = customer.social_reason or customer.identification_number or f'Cliente #{customer.id}'
@@ -630,6 +678,7 @@ class AdvertisingClass(BaseDomainService):
                     product_id=campaign_product_id,
                 ),
                 promotion_type_id=promotion_type_id,
+                template_body_params=template_body_params,
             )
             if result.get('ok'):
                 sent_count += 1
