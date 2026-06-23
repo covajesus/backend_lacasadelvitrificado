@@ -3085,6 +3085,7 @@ class WhatsappClass:
                 f'[WHATSAPP CAMPAIGN] template={template_name} to={phone} '
                 f'status={response.status_code} body={response_data}'
             )
+            message_id = None
             if ok:
                 message_id = response_data['messages'][0].get('id')
                 if message_id:
@@ -3111,6 +3112,7 @@ class WhatsappClass:
                 }
             return {
                 'ok': ok,
+                'message_id': message_id,
                 'status_code': response.status_code,
                 'response': response_data,
                 'template_name': template_name,

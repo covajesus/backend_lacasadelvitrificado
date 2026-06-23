@@ -14,6 +14,7 @@ from app.backend.db.models import (
     CustomerModel,
     PromotionModel,
     PromotionProductModel,
+    WhatsAppMessageModel,
 )
 from app.backend.services.crud.base_domain_service import BaseDomainService
 from app.backend.services.promotions.promotion_pricing_service import (
@@ -26,6 +27,10 @@ AUDIENCE_ALL = 1
 AUDIENCE_SELECTED = 2
 STATUS_DRAFT = 0
 STATUS_SENT = 1
+
+CAMPAIGN_DELIVERY_WAIT_SECONDS = 15.0
+CAMPAIGN_DELIVERY_POLL_SECONDS = 0.5
+CAMPAIGN_DELIVERY_SUCCESS_STATUSES = frozenset({'delivered', 'read'})
 
 
 def _has_valid_phone(phone: str | None) -> bool:
@@ -91,6 +96,95 @@ class AdvertisingClass(BaseDomainService):
     def _clear_job(cls, campaign_id: int) -> None:
         with cls._send_jobs_lock:
             cls._send_jobs.pop(int(campaign_id), None)
+
+    def _wait_for_whatsapp_delivery_status(
+        self,
+        message_ids: list[str],
+        timeout_seconds: float = CAMPAIGN_DELIVERY_WAIT_SECONDS,
+    ) -> dict[str, dict]:
+        """Espera webhooks de Meta (sent/delivered/failed) antes de contar éxitos."""
+        unique_ids = [str(mid).strip() for mid in message_ids if str(mid or '').strip()]
+        if not unique_ids:
+            return {}
+
+        deadline = time.time() + timeout_seconds
+        pending = set(unique_ids)
+        resolved: dict[str, dict] = {}
+
+        while pending and time.time() < deadline:
+            rows = (
+                self.db.query(WhatsAppMessageModel)
+                .filter(WhatsAppMessageModel.message_id.in_(list(pending)))
+                .all()
+            )
+            for row in rows:
+                status = str(row.status or 'sent').strip().lower()
+                if status in CAMPAIGN_DELIVERY_SUCCESS_STATUSES or status == 'failed':
+                    resolved[row.message_id] = {
+                        'status': status,
+                        'error_code': row.error_code,
+                        'error_message': row.error_message,
+                    }
+                    pending.discard(row.message_id)
+            if pending:
+                time.sleep(CAMPAIGN_DELIVERY_POLL_SECONDS)
+
+        if pending:
+            rows = (
+                self.db.query(WhatsAppMessageModel)
+                .filter(WhatsAppMessageModel.message_id.in_(list(pending)))
+                .all()
+            )
+            found = {row.message_id: row for row in rows}
+            for message_id in pending:
+                row = found.get(message_id)
+                resolved[message_id] = {
+                    'status': str(row.status or 'sent').strip().lower() if row else 'unknown',
+                    'error_code': row.error_code if row else None,
+                    'error_message': row.error_message if row else None,
+                }
+
+        return resolved
+
+    @staticmethod
+    def _delivery_failure_detail(customer_label: str, delivery_info: dict) -> str:
+        error_code = delivery_info.get('error_code')
+        error_message = (delivery_info.get('error_message') or '').strip()
+        status = str(delivery_info.get('status') or '').strip().lower()
+
+        if error_message:
+            if error_code:
+                return f'{customer_label}: [{error_code}] {error_message}'
+            return f'{customer_label}: {error_message}'
+        if status == 'sent':
+            return (
+                f'{customer_label}: Meta aceptó el mensaje pero no confirmó la entrega '
+                f'(puede haber sido bloqueado por WhatsApp).'
+            )
+        return f'{customer_label}: WhatsApp/Meta no entregó el mensaje.'
+
+    def _build_campaign_send_summary(
+        self,
+        sent_count: int,
+        failed_count: int,
+        failure_details: list[str],
+    ) -> tuple[str, str | None]:
+        if failed_count > 0 and sent_count == 0:
+            message = f'No se entregó ningún mensaje. Fallidos: {failed_count}.'
+            error = '\n'.join(failure_details[:5]) if failure_details else message
+            return message, error
+
+        if failed_count > 0:
+            message = (
+                f'Campaña finalizada con errores. '
+                f'Entregados: {sent_count}, fallidos: {failed_count}.'
+            )
+            error = '\n'.join(failure_details[:5])
+            if len(failure_details) > 5:
+                error += f'\n… y {len(failure_details) - 5} error(es) más.'
+            return message, error
+
+        return f'Campaña enviada correctamente. Entregados: {sent_count}.', None
 
     def _get_active_promotion(self, promotion_id: int):
         promotion = (
@@ -658,6 +752,8 @@ class AdvertisingClass(BaseDomainService):
         whatsapp = WhatsappClass(self.db)
         sent_count = 0
         failed_count = 0
+        failure_details: list[str] = []
+        pending_deliveries: list[dict] = []
         campaign_product_id = self._resolve_campaign_product_id(promotion_id)
         promotion_type_id = None
         template_body_params = None
@@ -688,10 +784,18 @@ class AdvertisingClass(BaseDomainService):
                 promotion_type_id=promotion_type_id,
                 template_body_params=template_body_params,
             )
-            if result.get('ok'):
-                sent_count += 1
+            message_id = str(result.get('message_id') or '').strip()
+            if message_id:
+                pending_deliveries.append(
+                    {
+                        'message_id': message_id,
+                        'customer_label': customer_label,
+                    }
+                )
             else:
                 failed_count += 1
+                api_error = str(result.get('error') or 'Error al enviar por WhatsApp.').strip()
+                failure_details.append(f'{customer_label}: {api_error}')
 
             self._update_job(
                 campaign_id,
@@ -701,6 +805,31 @@ class AdvertisingClass(BaseDomainService):
                 current_customer=customer_label,
             )
             time.sleep(0.35)
+
+        if pending_deliveries:
+            self._update_job(
+                campaign_id,
+                current_customer='Verificando entrega con Meta…',
+            )
+            delivery_status = self._wait_for_whatsapp_delivery_status(
+                [item['message_id'] for item in pending_deliveries]
+            )
+            for item in pending_deliveries:
+                info = delivery_status.get(item['message_id'], {'status': 'unknown'})
+                status = str(info.get('status') or 'unknown').strip().lower()
+                if status in CAMPAIGN_DELIVERY_SUCCESS_STATUSES:
+                    sent_count += 1
+                else:
+                    failed_count += 1
+                    failure_details.append(
+                        self._delivery_failure_detail(item['customer_label'], info)
+                    )
+
+        summary_message, summary_error = self._build_campaign_send_summary(
+            sent_count,
+            failed_count,
+            failure_details,
+        )
 
         campaign.status_id = STATUS_SENT
         campaign.sent_count = sent_count
@@ -716,9 +845,9 @@ class AdvertisingClass(BaseDomainService):
             failed_count=failed_count,
             done=True,
             current_customer=None,
-            message=(
-                f'Campaña enviada. Exitosos: {sent_count}, fallidos: {failed_count}.'
-            ),
+            message=summary_message,
+            error=summary_error,
+            failure_details=failure_details[:10],
         )
 
     def get_send_progress(self, campaign_id: int):
