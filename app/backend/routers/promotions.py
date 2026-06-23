@@ -93,13 +93,24 @@ def edit(
     return {"message": data}
 
 
+@promotions.get("/visible_coupons")
+def visible_coupons_for_session(
+    session_user: UserLogin = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+):
+    customer_rut = str(getattr(session_user, 'rut', '') or '')
+    data = PromotionClass(db).get_visible_coupons(customer_rut)
+    return {"message": data}
+
+
 @promotions.get("/visible_coupons/{customer_rut}")
 def visible_coupons(
     customer_rut: str,
     session_user: UserLogin = Depends(get_current_active_user),
     db: Session = Depends(get_db),
 ):
-    data = PromotionClass(db).get_visible_coupons(customer_rut)
+    effective_rut = str(getattr(session_user, 'rut', '') or customer_rut or '')
+    data = PromotionClass(db).get_visible_coupons(effective_rut)
     return {"message": data}
 
 

@@ -18,6 +18,7 @@ from app.backend.services.crud.base_domain_service import BaseDomainService
 from app.backend.services.promotions.promotion_pricing_service import (
     PROMOTION_AUDIENCE_SELECTED,
     PROMOTION_TYPE_COUPON,
+    PROMOTION_TYPE_PRODUCT_DISCOUNT,
 )
 
 AUDIENCE_ALL = 1
@@ -36,6 +37,22 @@ def _has_valid_phone(phone: str | None) -> bool:
 def _format_clp(value: float) -> str:
     return f"${int(round(float(value or 0))):,}".replace(',', '.')
 
+
+def _format_whatsapp_date(value) -> str | None:
+    """Fecha para mensajes WhatsApp: dd-mm-YYYY."""
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value.strftime('%d-%m-%Y')
+    text = str(value).strip()
+    if not text:
+        return None
+    for fmt in ('%Y-%m-%d', '%d-%m-%Y', '%d/%m/%Y'):
+        try:
+            return datetime.strptime(text[:10], fmt).strftime('%d-%m-%Y')
+        except ValueError:
+            continue
+    return text
 
 class AdvertisingClass(BaseDomainService):
     AUDIENCE_LABELS = {
@@ -86,6 +103,18 @@ class AdvertisingClass(BaseDomainService):
             return None, 'La promoción seleccionada no está activa.'
         return promotion, None
 
+    def _resolve_campaign_product_id(self, promotion_id: int | None) -> int | None:
+        if not promotion_id:
+            return None
+        promotion, error = self._get_active_promotion(int(promotion_id))
+        if error or not promotion:
+            return None
+        if int(promotion.promotion_type_id or 0) != PROMOTION_TYPE_PRODUCT_DISCOUNT:
+            return None
+        if not promotion.product_id:
+            return None
+        return int(promotion.product_id)
+
     def build_promotion_whatsapp_message(self, promotion_id: int, extra_message: str | None = None) -> str:
         promotion, error = self._get_active_promotion(promotion_id)
         if error or not promotion:
@@ -115,13 +144,13 @@ class AdvertisingClass(BaseDomainService):
                 lines.append(f"📦 Producto: {product_name}")
             lines.append(f"💰 Descuento: *{discount_percent}%*")
 
-        start_date = promo_data.get('start_date')
-        end_date = promo_data.get('end_date')
+        start_date = _format_whatsapp_date(promo_data.get('start_date'))
+        end_date = _format_whatsapp_date(promo_data.get('end_date'))
         if start_date or end_date:
             lines.append(f"📅 Vigencia: {start_date or '—'} al {end_date or '—'}")
 
         lines.append('')
-        lines.append('Toca el botón *Ir al sitio* para ver la tienda.')
+        lines.append('Toca el botón *Ir a la promoción* para ver la tienda.')
 
         extra = (extra_message or '').strip()
         if extra:
@@ -142,7 +171,7 @@ class AdvertisingClass(BaseDomainService):
         if not body:
             return ''
 
-        lines = [body, '', 'Toca el botón *Ir al sitio* para ver la tienda.']
+        lines = [body, '', 'Toca el botón *Ir a la promoción* para ver la tienda.']
         return '\n'.join(lines)
 
     def get_message_preview(self, message: str | None = None):
@@ -166,6 +195,10 @@ class AdvertisingClass(BaseDomainService):
         promo_data = PromotionClass(self.db)._serialize_row(promotion)
         audience_type = int(promo_data.get('audience_type') or AUDIENCE_ALL)
         customers = promo_data.get('customers') or []
+        product_id = self._resolve_campaign_product_id(int(promotion_id))
+        site_url = WhatsappClass.get_campaign_site_url()
+        if product_id:
+            site_url = f'{site_url}?product_id={product_id}'
 
         return {
             'status': 'success',
@@ -173,9 +206,10 @@ class AdvertisingClass(BaseDomainService):
                 'promotion_id': int(promotion_id),
                 'promotion_name': promo_data.get('name'),
                 'promotion_type_label': promo_data.get('promotion_type_label'),
+                'product_id': product_id,
                 'whatsapp_message': self.build_promotion_whatsapp_message(promotion_id, extra_message),
                 'site_button_label': WhatsappClass.CAMPAIGN_SITE_BUTTON_LABEL,
-                'site_url': WhatsappClass.get_campaign_site_url(),
+                'site_url': site_url,
                 'suggested_audience_type': (
                     AUDIENCE_SELECTED
                     if audience_type == PROMOTION_AUDIENCE_SELECTED and customers
@@ -571,6 +605,12 @@ class AdvertisingClass(BaseDomainService):
         whatsapp = WhatsappClass(self.db)
         sent_count = 0
         failed_count = 0
+        campaign_product_id = self._resolve_campaign_product_id(promotion_id)
+        promotion_type_id = None
+        if promotion_id:
+            promotion_row, _ = self._get_active_promotion(int(promotion_id))
+            if promotion_row:
+                promotion_type_id = int(promotion_row.promotion_type_id or 0)
 
         for index, customer in enumerate(recipients, start=1):
             customer_label = customer.social_reason or customer.identification_number or f'Cliente #{customer.id}'
@@ -584,7 +624,12 @@ class AdvertisingClass(BaseDomainService):
                 customer.phone,
                 whatsapp_message,
                 image_url=image_url,
-                site_url=whatsapp.build_campaign_site_url_for_customer(customer.id, customer.phone),
+                site_url=whatsapp.build_campaign_site_url_for_customer(
+                    customer.id,
+                    customer.phone,
+                    product_id=campaign_product_id,
+                ),
+                promotion_type_id=promotion_type_id,
             )
             if result.get('ok'):
                 sent_count += 1

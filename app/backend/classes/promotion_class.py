@@ -488,8 +488,14 @@ class PromotionClass(BaseDomainService):
             coupon_code, product_ids, subtotal, items=items, customer_rut=customer_rut
         )
 
-    def get_visible_coupons(self, customer_rut=None):
-        coupons = self.pricing.get_visible_coupon_banners(customer_rut)
+    def get_visible_coupons(self, customer_rut=None, customer_id=None):
+        resolved_customer_id = customer_id
+        if not resolved_customer_id and customer_rut:
+            resolved_customer_id = self.pricing._get_customer_id_by_rut(customer_rut)
+        coupons = self.pricing.get_visible_coupon_banners(
+            customer_rut,
+            customer_id=resolved_customer_id,
+        )
         return {'status': 'success', 'data': coupons}
 
     def generate_coupon_code(self):

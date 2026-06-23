@@ -141,6 +141,63 @@ Los scripts leen la conexión desde `.env` vía `SQLALCHEMY_DATABASE_URI`. Son i
 
 **Producción:** conectar al servidor, activar el entorno del backend y ejecutar los mismos comandos contra la BD de producción antes de reiniciar la API.
 
+## Campañas WhatsApp (plantillas Meta)
+
+Fuera de la ventana de 24 h, Meta **no permite** mensajes interactivos libres (error `131047`). Las campañas de publicidad deben usar **plantillas MARKETING** aprobadas.
+
+Crear en [Meta Business Manager](https://business.facebook.com/) → WhatsApp → Plantillas de mensajes:
+
+### `product_discount_promotion` (promoción por producto)
+
+| Campo | Valor |
+|-------|--------|
+| Categoría | Marketing |
+| Idioma | Español |
+| Nombre exacto en Meta | `product_discount_promotion` |
+| Cuerpo | `{{1}}` |
+| Botón | Ir a la promoción → URL `https://lacasadelvitrificado.com/{{1}}` |
+| Encabezado imagen (opcional) | Imagen — si la campaña sube foto |
+
+### `campana_publicidad_v1` (cupón o mensaje libre, sin imagen)
+
+| Campo | Valor |
+|-------|--------|
+| Categoría | Marketing |
+| Idioma | Español |
+| Cuerpo | `{{1}}` |
+| Botón | Ir a la promoción → URL `https://lacasadelvitrificado.com/{{1}}` |
+
+### `campana_publicidad_imagen_v1` (con imagen)
+
+| Campo | Valor |
+|-------|--------|
+| Categoría | Marketing |
+| Idioma | Español |
+| Encabezado | Imagen |
+| Cuerpo | `{{1}}` |
+| Botón | Ir a la promoción → URL `https://lacasadelvitrificado.com/{{1}}` |
+
+Variables de entorno opcionales:
+
+```env
+WHATSAPP_CAMPAIGN_TEMPLATE_PRODUCT_NAME=product_discount_promotion
+WHATSAPP_CAMPAIGN_TEMPLATE_PRODUCT_IMAGE_NAME=product_discount_promotion
+WHATSAPP_CAMPAIGN_TEMPLATE_NAME=campana_publicidad_v1
+WHATSAPP_CAMPAIGN_TEMPLATE_IMAGE_NAME=campana_publicidad_imagen_v1
+WHATSAPP_CAMPAIGN_TEMPLATE_LANG=es
+WHATSAPP_CAMPAIGN_SITE_URL=https://lacasadelvitrificado.com
+```
+
+El botón recibe el sufijo dinámico generado por el backend, por ejemplo:
+
+`shoppings/login?phone=56976357193&customer_id=12&token=...&product_id=45`
+
+- **No** pegues la URL completa en Meta: solo `https://lacasadelvitrificado.com/{{1}}`.
+- Si la campaña usa promoción **por producto**, se agrega `product_id` y el cliente entra directo a `/sales/product/detail/{id}`.
+- Si es **cupón** o mensaje libre, va al listado de ventas (`/sales`).
+
+Tras aprobar las plantillas en Meta, desplegar el backend y reiniciar `fastapi.service`.
+
 ## No editar
 
 - `public/assets/classes/` (copia obsoleta)

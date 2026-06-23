@@ -195,18 +195,26 @@ class PromotionPricingService:
                 return int(customer_id)
         return None
 
-    def _coupon_visible_to_customer(self, promotion: PromotionModel, customer_rut: str | None) -> bool:
+    def _coupon_visible_to_customer(
+        self,
+        promotion: PromotionModel,
+        customer_rut: str | None,
+        customer_id: int | None = None,
+    ) -> bool:
         audience_type = int(getattr(promotion, 'audience_type', PROMOTION_AUDIENCE_ALL) or PROMOTION_AUDIENCE_ALL)
         if audience_type == PROMOTION_AUDIENCE_ALL:
             return True
-        customer_id = self._get_customer_id_by_rut(customer_rut)
-        if not customer_id:
+        if audience_type != PROMOTION_AUDIENCE_SELECTED:
+            return False
+
+        resolved_customer_id = customer_id or self._get_customer_id_by_rut(customer_rut)
+        if not resolved_customer_id:
             return False
         try:
             row = (
                 self.db.query(PromotionCustomerModel.id)
                 .filter(PromotionCustomerModel.promotion_id == promotion.id)
-                .filter(PromotionCustomerModel.customer_id == customer_id)
+                .filter(PromotionCustomerModel.customer_id == int(resolved_customer_id))
                 .first()
             )
         except (ProgrammingError, OperationalError) as error:
@@ -216,7 +224,11 @@ class PromotionPricingService:
             raise
         return row is not None
 
-    def get_visible_coupon_banners(self, customer_rut: str | None) -> list[dict]:
+    def get_visible_coupon_banners(
+        self,
+        customer_rut: str | None,
+        customer_id: int | None = None,
+    ) -> list[dict]:
         now = datetime.utcnow()
         try:
             promotions = (
@@ -236,7 +248,7 @@ class PromotionPricingService:
         for promotion in promotions:
             if not self.is_promotion_active(promotion, now):
                 continue
-            if not self._coupon_visible_to_customer(promotion, customer_rut):
+            if not self._coupon_visible_to_customer(promotion, customer_rut, customer_id=customer_id):
                 continue
             if self._customer_has_used_coupon(promotion.id, customer_rut):
                 continue

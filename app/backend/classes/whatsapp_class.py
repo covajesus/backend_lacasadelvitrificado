@@ -23,7 +23,7 @@ from app.backend.db.models import (
 load_dotenv() 
 
 class WhatsappClass:
-    CAMPAIGN_SITE_BUTTON_LABEL = 'Ir al sitio'
+    CAMPAIGN_SITE_BUTTON_LABEL = 'Ir a la promoción'
     _chat_sessions = {}
     _EXIT_WORDS = frozenset(
         {
@@ -2920,16 +2920,118 @@ class WhatsappClass:
     def get_campaign_site_url(cls) -> str:
         return f"{cls.get_campaign_site_base_url()}/shoppings/login"
 
-    def build_campaign_site_url_for_customer(self, customer_id: int, phone: str) -> str:
+    def build_campaign_site_url_for_customer(
+        self,
+        customer_id: int,
+        phone: str,
+        product_id: int | None = None,
+    ) -> str:
         from app.backend.classes.authentication_class import AuthenticationClass
 
         base = self.get_campaign_site_base_url()
         token = AuthenticationClass(self.db).generate_campaign_login_token(int(customer_id), phone)
         phone_param = re.sub(r'\D', '', str(phone or ''))
-        return (
+        url = (
             f"{base}/shoppings/login"
             f"?phone={phone_param}&customer_id={int(customer_id)}&token={token}"
         )
+        if product_id:
+            url += f"&product_id={int(product_id)}"
+        return url
+
+    def _campaign_url_button_suffix(self, site_url: str | None) -> str:
+        """Sufijo dinámico para el botón URL de la plantilla (después del dominio)."""
+        from urllib.parse import urlparse
+
+        full_url = (site_url or self.get_campaign_site_url()).strip()
+        base = self.get_campaign_site_base_url()
+        if full_url.startswith(base + '/'):
+            return full_url[len(base) + 1 :]
+        if full_url.startswith(base):
+            return full_url[len(base) :].lstrip('/')
+
+        parsed = urlparse(full_url)
+        suffix = (parsed.path or '').lstrip('/')
+        if parsed.query:
+            suffix = f'{suffix}?{parsed.query}' if suffix else parsed.query
+        return suffix or 'shoppings/login'
+
+    def _get_campaign_template_name(
+        self,
+        has_image: bool,
+        promotion_type_id: int | None = None,
+    ) -> str:
+        from app.backend.services.promotions.promotion_pricing_service import (
+            PROMOTION_TYPE_PRODUCT_DISCOUNT,
+        )
+
+        if int(promotion_type_id or 0) == PROMOTION_TYPE_PRODUCT_DISCOUNT:
+            if has_image:
+                return (
+                    os.getenv('WHATSAPP_CAMPAIGN_TEMPLATE_PRODUCT_IMAGE_NAME')
+                    or 'product_discount_promotion'
+                ).strip()
+            return (
+                os.getenv('WHATSAPP_CAMPAIGN_TEMPLATE_PRODUCT_NAME') or 'product_discount_promotion'
+            ).strip()
+
+        if has_image:
+            return (
+                os.getenv('WHATSAPP_CAMPAIGN_TEMPLATE_IMAGE_NAME') or 'campana_publicidad_imagen_v1'
+            ).strip()
+        return (os.getenv('WHATSAPP_CAMPAIGN_TEMPLATE_NAME') or 'campana_publicidad_v1').strip()
+
+    def _build_campaign_template_payload(
+        self,
+        phone: str,
+        message: str,
+        image_url: str | None,
+        site_url: str | None,
+        promotion_type_id: int | None = None,
+    ) -> tuple[dict, str]:
+        clean_message = self._clean_text_for_whatsapp(message or '').strip()
+        if not clean_message:
+            clean_message = 'Tenemos una promoción especial para ti.'
+
+        template_name = self._get_campaign_template_name(bool(image_url), promotion_type_id)
+        language_code = (os.getenv('WHATSAPP_CAMPAIGN_TEMPLATE_LANG') or 'es').strip()
+        url_suffix = self._campaign_url_button_suffix(site_url)
+
+        components: list[dict] = []
+        if image_url:
+            components.append(
+                {
+                    'type': 'header',
+                    'parameters': [{'type': 'image', 'image': {'link': image_url}}],
+                }
+            )
+
+        components.extend(
+            [
+                {
+                    'type': 'body',
+                    'parameters': [{'type': 'text', 'text': clean_message[:1024]}],
+                },
+                {
+                    'type': 'button',
+                    'sub_type': 'url',
+                    'index': '0',
+                    'parameters': [{'type': 'text', 'text': url_suffix[:1024]}],
+                },
+            ]
+        )
+
+        payload = {
+            'messaging_product': 'whatsapp',
+            'to': phone,
+            'type': 'template',
+            'template': {
+                'name': template_name,
+                'language': {'code': language_code},
+                'components': components,
+            },
+        }
+        return payload, template_name
 
     def send_campaign_message(
         self,
@@ -2937,70 +3039,69 @@ class WhatsappClass:
         message: str,
         image_url: str | None = None,
         site_url: str | None = None,
+        promotion_type_id: int | None = None,
     ) -> dict:
-        """Envía campaña publicitaria: texto de promoción, imagen opcional y botón Ir al sitio."""
-        url = "https://graph.facebook.com/v22.0/790586727468909/messages"
-        token = os.getenv("META_TOKEN")
+        """Envía campaña con plantilla MARKETING (válida fuera de la ventana de 24 h)."""
+        url = 'https://graph.facebook.com/v22.0/790586727468909/messages'
+        token = os.getenv('META_TOKEN')
         phone = self._clean_phone_number(phone) or phone
         if not phone:
-            return {"ok": False, "error": "Teléfono inválido"}
+            return {'ok': False, 'error': 'Teléfono inválido'}
 
         headers = {
-            "Authorization": f"Bearer {token}",
-            "Content-Type": "application/json",
+            'Authorization': f'Bearer {token}',
+            'Content-Type': 'application/json',
         }
 
-        clean_message = self._clean_text_for_whatsapp(message or "").strip()
-        if not clean_message:
-            clean_message = "Tenemos una promoción especial para ti."
-
-        interactive: dict = {
-            "type": "cta_url",
-            "body": {"text": clean_message[:1024]},
-            "action": {
-                "name": "cta_url",
-                "parameters": {
-                    "display_text": self.CAMPAIGN_SITE_BUTTON_LABEL[:20],
-                    "url": site_url or self.get_campaign_site_url(),
-                },
-            },
-        }
-        if image_url:
-            interactive["header"] = {
-                "type": "image",
-                "image": {"link": image_url},
-            }
-
-        payload = {
-            "messaging_product": "whatsapp",
-            "to": phone,
-            "type": "interactive",
-            "interactive": interactive,
-        }
-        message_type_saved = "interactive_campaign"
+        payload, template_name = self._build_campaign_template_payload(
+            phone,
+            message,
+            image_url,
+            site_url,
+            promotion_type_id=promotion_type_id,
+        )
 
         try:
             response = requests.post(url, json=payload, headers=headers, timeout=30)
             response_data = response.json() if response.content else {}
-            ok = response.status_code == 200
-            print(f"[WHATSAPP CAMPAIGN] to={phone} status={response.status_code} body={response_data}")
-            if ok and "messages" in response_data:
-                message_id = response_data["messages"][0].get("id")
+            ok = response.status_code == 200 and 'messages' in response_data
+            print(
+                f'[WHATSAPP CAMPAIGN] template={template_name} to={phone} '
+                f'status={response.status_code} body={response_data}'
+            )
+            if ok:
+                message_id = response_data['messages'][0].get('id')
                 if message_id:
                     self._save_message(
                         message_id=message_id,
                         recipient_phone=phone,
-                        message_type=message_type_saved,
-                        status="sent",
+                        message_type='template',
+                        template_name=template_name,
+                        status='sent',
                     )
+            else:
+                api_error = response_data.get('error', {})
+                error_message = api_error.get('message') or 'Error al enviar plantilla de campaña.'
+                error_code = api_error.get('code')
+                print(
+                    f'[WHATSAPP CAMPAIGN] Error API code={error_code} message={error_message}'
+                )
+                return {
+                    'ok': False,
+                    'status_code': response.status_code,
+                    'error': error_message,
+                    'error_code': error_code,
+                    'response': response_data,
+                }
             return {
-                "ok": ok,
-                "status_code": response.status_code,
-                "response": response_data,
+                'ok': ok,
+                'status_code': response.status_code,
+                'response': response_data,
+                'template_name': template_name,
             }
         except Exception as exc:
-            print(f"[WHATSAPP CAMPAIGN] Error enviando a {phone}: {exc}")
-            return {"ok": False, "error": str(exc)}
+            print(f'[WHATSAPP CAMPAIGN] Error enviando a {phone}: {exc}')
+            return {'ok': False, 'error': str(exc)}
 
     def send_autoreply(self, phone: str, text: str, buttons=None):
         """
