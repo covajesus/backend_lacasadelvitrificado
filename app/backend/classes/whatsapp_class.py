@@ -2931,9 +2931,7 @@ class WhatsappClass:
         base = self.get_campaign_site_base_url()
         token = AuthenticationClass(self.db).generate_campaign_login_token(int(customer_id), phone)
         phone_param = re.sub(r'\D', '', str(phone or ''))
-        # Entrada /shoppings/go/c/... (HTML estático sin caché) evita que WhatsApp reutilice
-        # la misma SPA al pulsar dos veces el mismo botón de campaña.
-        url = f"{base}/shoppings/go/c/{int(customer_id)}/{phone_param}/{token}"
+        url = f"{base}/shoppings/login/c/{int(customer_id)}/{phone_param}/{token}"
         if product_id:
             url += f"/{int(product_id)}"
         return url
