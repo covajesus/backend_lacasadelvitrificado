@@ -2,9 +2,10 @@ from datetime import datetime
 import secrets
 
 from sqlalchemy import func, or_
-from sqlalchemy.exc import OperationalError, ProgrammingError
+from sqlalchemy.exc import IntegrityError, OperationalError, ProgrammingError
 
 from app.backend.db.models import (
+    AdvertisingCampaignModel,
     CustomerModel,
     ProductModel,
     PromotionCustomerModel,
@@ -13,6 +14,7 @@ from app.backend.db.models import (
     PromotionUsageModel,
     SaleModel,
 )
+from app.backend.core.exceptions import DomainError
 from app.backend.services.crud.base_domain_service import BaseDomainService
 from app.backend.services.promotions.promotion_pricing_service import (
     ACCEPTED_SALE_STATUS_IDS,
@@ -461,7 +463,10 @@ class PromotionClass(BaseDomainService):
         }
 
     def delete(self, id):
-        orders_count = self._get_linked_order_count(id)
+        return self.safe(lambda: self._delete_promotion(int(id)), rollback=True)
+
+    def _delete_promotion(self, promotion_id: int):
+        orders_count = self._get_linked_order_count(promotion_id)
         if orders_count > 0:
             label = 'pedido' if orders_count == 1 else 'pedidos'
             return {
@@ -475,13 +480,40 @@ class PromotionClass(BaseDomainService):
                 'can_deactivate': True,
             }
 
-        self.db.query(PromotionCustomerModel).filter(PromotionCustomerModel.promotion_id == id).delete(
-            synchronize_session=False
+        self.db.query(AdvertisingCampaignModel).filter(
+            AdvertisingCampaignModel.promotion_id == promotion_id
+        ).update(
+            {AdvertisingCampaignModel.promotion_id: None},
+            synchronize_session=False,
         )
-        self.db.query(PromotionProductModel).filter(PromotionProductModel.promotion_id == id).delete(
-            synchronize_session=False
+        self.db.query(PromotionUsageModel).filter(
+            PromotionUsageModel.promotion_id == promotion_id
+        ).delete(synchronize_session=False)
+        self.db.query(PromotionCustomerModel).filter(
+            PromotionCustomerModel.promotion_id == promotion_id
+        ).delete(synchronize_session=False)
+        self.db.query(PromotionProductModel).filter(
+            PromotionProductModel.promotion_id == promotion_id
+        ).delete(synchronize_session=False)
+
+        row = (
+            self.db.query(PromotionModel)
+            .filter(PromotionModel.id == promotion_id)
+            .first()
         )
-        return self.delete_entity(PromotionModel, id)
+        if not row:
+            return 'No data found'
+
+        try:
+            self.db.delete(row)
+            self.db.commit()
+        except IntegrityError as exc:
+            self.db.rollback()
+            raise DomainError(
+                'No se puede eliminar la promoción porque aún tiene registros asociados en el sistema.'
+            ) from exc
+
+        return 'success'
 
     def validate_coupon(self, coupon_code, product_ids, subtotal, items=None, customer_rut=None):
         return self.pricing.validate_coupon(
