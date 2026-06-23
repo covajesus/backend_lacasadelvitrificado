@@ -400,7 +400,81 @@ class PromotionClass(BaseDomainService):
             )
         )
 
+    def _get_linked_order_count(self, promotion_id: int) -> int:
+        promotion = (
+            self.db.query(PromotionModel)
+            .filter(PromotionModel.id == int(promotion_id))
+            .first()
+        )
+        if not promotion:
+            return 0
+
+        try:
+            usage_rows = (
+                self.db.query(PromotionUsageModel.sale_id)
+                .join(SaleModel, SaleModel.id == PromotionUsageModel.sale_id)
+                .filter(PromotionUsageModel.promotion_id == int(promotion_id))
+                .filter(PromotionUsageModel.sale_id.isnot(None))
+                .filter(SaleModel.status_id.in_(ACCEPTED_SALE_STATUS_IDS))
+                .distinct()
+                .all()
+            )
+            sale_ids = {int(row.sale_id) for row in usage_rows if row.sale_id}
+
+            coupon_code = (promotion.coupon_code or '').strip().upper()
+            if coupon_code:
+                coupon_rows = (
+                    self.db.query(SaleModel.id)
+                    .filter(func.upper(SaleModel.coupon_code) == coupon_code)
+                    .filter(SaleModel.status_id.in_(ACCEPTED_SALE_STATUS_IDS))
+                    .all()
+                )
+                sale_ids.update(int(row.id) for row in coupon_rows)
+
+            return len(sale_ids)
+        except (ProgrammingError, OperationalError):
+            try:
+                self.db.rollback()
+            except Exception:
+                pass
+            return 0
+
+    def deactivate(self, promotion_id: int):
+        return self.safe(lambda: self._deactivate_promotion(int(promotion_id)), rollback=True)
+
+    def _deactivate_promotion(self, promotion_id: int):
+        row = (
+            self.db.query(PromotionModel)
+            .filter(PromotionModel.id == int(promotion_id))
+            .first()
+        )
+        if not row:
+            return 'No data found'
+        row.status_id = 0
+        row.updated_date = datetime.utcnow()
+        self.db.commit()
+        self.db.refresh(row)
+        return {
+            'status': 'success',
+            'message': 'Promoción desactivada. Ya no podrá usarse en nuevos pedidos.',
+            'promotion_id': row.id,
+        }
+
     def delete(self, id):
+        orders_count = self._get_linked_order_count(id)
+        if orders_count > 0:
+            label = 'pedido' if orders_count == 1 else 'pedidos'
+            return {
+                'status': 'error',
+                'code': 'promotion_has_orders',
+                'message': (
+                    f'No se puede eliminar: hay {orders_count} {label} '
+                    f'con esta promoción. Puede desactivarla para que no se use en nuevos pedidos.'
+                ),
+                'orders_count': orders_count,
+                'can_deactivate': True,
+            }
+
         self.db.query(PromotionCustomerModel).filter(PromotionCustomerModel.promotion_id == id).delete(
             synchronize_session=False
         )

@@ -539,3 +539,29 @@ class InternalUseRequestItemModel(Base):
     unit_measure = Column(String(255), nullable=True)
     added_date = Column(DateTime(), default=datetime.now)
     updated_date = Column(DateTime(), default=datetime.now)
+
+
+class AdvertisingCampaignModel(Base):
+    __tablename__ = 'advertising_campaigns'
+
+    id = Column(Integer, primary_key=True)
+    name = Column(String(255), nullable=False)
+    promotion_id = Column(Integer, nullable=True)
+    message = Column(Text(), nullable=False)
+    image_path = Column(String(500), nullable=True)
+    audience_type = Column(Integer, default=1)
+    status_id = Column(Integer, default=0)
+    sent_count = Column(Integer, default=0)
+    failed_count = Column(Integer, default=0)
+    added_date = Column(DateTime(), default=datetime.now)
+    updated_date = Column(DateTime(), default=datetime.now)
+    sent_date = Column(DateTime(), nullable=True)
+
+
+class AdvertisingCampaignCustomerModel(Base):
+    __tablename__ = 'advertising_campaign_customers'
+
+    id = Column(Integer, primary_key=True)
+    campaign_id = Column(Integer)
+    customer_id = Column(Integer)
+    added_date = Column(DateTime(), nullable=True)

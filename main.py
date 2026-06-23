@@ -27,6 +27,7 @@ from app.backend.routers.samples import samples
 from app.backend.routers.unit_sales import unit_sales
 from app.backend.routers.internal_uses import internal_uses
 from app.backend.routers.promotions import promotions
+from app.backend.routers.advertising import advertising
 
 app = FastAPI(root_path="/api")
 application = app
@@ -77,6 +78,7 @@ app.include_router(samples)
 app.include_router(unit_sales)
 app.include_router(internal_uses)
 app.include_router(promotions)
+app.include_router(advertising)
 
 if __name__ == "__main__":
     uvicorn.run("main:app", port=8000, reload=True)

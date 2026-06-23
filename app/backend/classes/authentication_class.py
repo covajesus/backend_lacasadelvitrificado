@@ -1,7 +1,8 @@
 from app.backend.db.models import UserModel
 from fastapi import HTTPException
 from app.backend.classes.user_class import UserClass
-from app.backend.classes.customer_class import CustomerClass
+from app.backend.classes.customer_class import _normalize_phone_digits
+from app.backend.db.models import CustomerModel
 from datetime import datetime, timedelta
 from typing import Union
 import os
@@ -168,3 +169,29 @@ class AuthenticationClass:
             "token_type": "bearer",
             "budget_id": budget_id
         }
+
+    def generate_campaign_login_token(self, customer_id: int, phone: str) -> str:
+        phone_norm = _normalize_phone_digits(phone)
+        token_string = f"campaign_{int(customer_id)}_{phone_norm}_{os.environ.get('SECRET_KEY', '')}"
+        return hashlib.md5(token_string.encode()).hexdigest()
+
+    def authenticate_campaign_phone_login(self, customer_id: int, phone: str, token: str):
+        expected = self.generate_campaign_login_token(customer_id, phone)
+        if token != expected:
+            raise HTTPException(status_code=401, detail="Token inválido")
+
+        customer = (
+            self.db.query(CustomerModel)
+            .filter(CustomerModel.id == int(customer_id))
+            .first()
+        )
+        if not customer:
+            raise HTTPException(status_code=401, detail="Cliente no encontrado")
+
+        if _normalize_phone_digits(customer.phone) != _normalize_phone_digits(phone):
+            raise HTTPException(status_code=401, detail="Teléfono no coincide con el cliente")
+
+        if not customer.identification_number:
+            raise HTTPException(status_code=401, detail="El cliente no tiene RUT registrado")
+
+        return self.authenticate_shopping_login(customer.identification_number)

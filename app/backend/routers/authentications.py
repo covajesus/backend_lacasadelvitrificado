@@ -145,3 +145,39 @@ def budget_login(
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error al validar token: {str(e)}")
+
+@authentications.get("/campaign_login")
+def campaign_login(
+    phone: str = Query(..., description="Teléfono del cliente"),
+    customer_id: int = Query(..., description="ID del cliente"),
+    token: str = Query(..., description="Token de acceso desde campaña WhatsApp"),
+    db: Session = Depends(get_db),
+):
+    """
+    Login automático para clientes que abren el enlace de campaña WhatsApp (Ir al sitio).
+    """
+    try:
+        user = AuthenticationClass(db).authenticate_campaign_phone_login(customer_id, phone, token)
+        rol = RolClass(db).get('id', user["user_data"]["rol_id"])
+        token_expires = timedelta(minutes=120)
+        jwt_token = AuthenticationClass(db).create_token(
+            {'sub': str(user["user_data"]["rut"])},
+            token_expires,
+        )
+        expires_in_seconds = token_expires.total_seconds()
+
+        return {
+            "access_token": jwt_token,
+            "user_id": user["user_data"]["id"],
+            "rut": user["user_data"]["rut"],
+            "rol_id": user["user_data"]["rol_id"],
+            "rol": rol.rol,
+            "full_name": user["user_data"]["full_name"],
+            "email": user["user_data"]["email"],
+            "token_type": "bearer",
+            "expires_in": expires_in_seconds,
+        }
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Error al validar acceso: {exc}") from exc

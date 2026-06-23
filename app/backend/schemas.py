@@ -166,6 +166,96 @@ class ValidateCoupon(BaseModel):
     items: Optional[list[ValidateCouponItem]] = None
     customer_rut: Optional[str] = None
 
+class AdvertisingList(BaseModel):
+    page: int
+    q: Optional[str] = None
+    status_id: Optional[int] = None
+
+class StoreAdvertising(BaseModel):
+    name: str
+    promotion_id: Optional[int] = None
+    message: Optional[str] = ''
+    audience_type: int = 1
+    customer_ids: Optional[list[int]] = None
+
+    @classmethod
+    def as_form(
+        cls,
+        name: str = Form(...),
+        promotion_id: str = Form(''),
+        message: str = Form(''),
+        audience_type: int = Form(1),
+        customer_ids: Optional[str] = Form(None),
+    ):
+        parsed_ids: list[int] = []
+        if customer_ids:
+            try:
+                raw = json.loads(customer_ids)
+                if isinstance(raw, list):
+                    parsed_ids = [int(item) for item in raw if item is not None]
+            except json.JSONDecodeError:
+                parsed_ids = [
+                    int(part.strip())
+                    for part in customer_ids.split(',')
+                    if part.strip().isdigit()
+                ]
+        parsed_promotion_id = None
+        if str(promotion_id or '').strip().isdigit():
+            promotion_value = int(str(promotion_id).strip())
+            if promotion_value > 0:
+                parsed_promotion_id = promotion_value
+        return cls(
+            name=name,
+            promotion_id=parsed_promotion_id,
+            message=message or '',
+            audience_type=int(audience_type or 1),
+            customer_ids=parsed_ids or None,
+        )
+
+class UpdateAdvertising(BaseModel):
+    name: str
+    promotion_id: Optional[int] = None
+    message: Optional[str] = ''
+    audience_type: int = 1
+    customer_ids: Optional[list[int]] = None
+    remove_image: bool = False
+
+    @classmethod
+    def as_form(
+        cls,
+        name: str = Form(...),
+        promotion_id: str = Form(''),
+        message: str = Form(''),
+        audience_type: int = Form(1),
+        customer_ids: Optional[str] = Form(None),
+        remove_image: str = Form("false"),
+    ):
+        parsed_ids: list[int] = []
+        if customer_ids:
+            try:
+                raw = json.loads(customer_ids)
+                if isinstance(raw, list):
+                    parsed_ids = [int(item) for item in raw if item is not None]
+            except json.JSONDecodeError:
+                parsed_ids = [
+                    int(part.strip())
+                    for part in customer_ids.split(',')
+                    if part.strip().isdigit()
+                ]
+        parsed_promotion_id = None
+        if str(promotion_id or '').strip().isdigit():
+            promotion_value = int(str(promotion_id).strip())
+            if promotion_value > 0:
+                parsed_promotion_id = promotion_value
+        return cls(
+            name=name,
+            promotion_id=parsed_promotion_id,
+            message=message or '',
+            audience_type=int(audience_type or 1),
+            customer_ids=parsed_ids or None,
+            remove_image=str(remove_image).lower() in ('true', '1', 'yes'),
+        )
+
 class UpdateSupplier(BaseModel):
     identification_number: str
     supplier: str

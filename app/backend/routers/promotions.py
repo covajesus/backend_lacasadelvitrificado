@@ -73,6 +73,16 @@ def delete(
     return {"message": data}
 
 
+@promotions.post("/deactivate/{id}")
+def deactivate(
+    id: int,
+    session_user: UserLogin = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+):
+    data = PromotionClass(db).deactivate(id)
+    return {"message": data}
+
+
 @promotions.get("/edit/{id}")
 def edit(
     id: int,

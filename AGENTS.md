@@ -116,6 +116,31 @@ return {"message": SomeClass(db).method(...)}
 - [ ] ¿Sin copiar bloques de inventario/pedido?
 - [ ] ¿Funciones, variables y rutas nuevas en inglés?
 
+## Migraciones de base de datos
+
+Al agregar tablas o columnas nuevas, crear un script idempotente en `migrations/` y ejecutarlo **en local y en producción** antes de desplegar el backend.
+
+```bash
+cd backend
+
+# Todas las migraciones pendientes
+python migrations/run_all_migrations.py
+
+# Solo módulo publicidad (campañas WhatsApp)
+python migrations/run_advertising_migrations.py
+```
+
+| Script | Qué crea / actualiza |
+|--------|----------------------|
+| `run_add_promotion_audience.py` | `promotions.audience_type`, tabla `promotion_customers` |
+| `run_add_sales_coupon_code.py` | `sales.coupon_code` |
+| `run_add_advertising_campaigns.py` | `advertising_campaigns`, `advertising_campaign_customers` |
+| `run_add_advertising_promotion_id.py` | `advertising_campaigns.promotion_id` |
+
+Los scripts leen la conexión desde `.env` vía `SQLALCHEMY_DATABASE_URI`. Son idempotentes: si la tabla/columna ya existe, hacen `SKIP`.
+
+**Producción:** conectar al servidor, activar el entorno del backend y ejecutar los mismos comandos contra la BD de producción antes de reiniciar la API.
+
 ## No editar
 
 - `public/assets/classes/` (copia obsoleta)

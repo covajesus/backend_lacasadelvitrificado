@@ -23,6 +23,7 @@ from app.backend.db.models import (
 load_dotenv() 
 
 class WhatsappClass:
+    CAMPAIGN_SITE_BUTTON_LABEL = 'Ir al sitio'
     _chat_sessions = {}
     _EXIT_WORDS = frozenset(
         {
@@ -2910,6 +2911,96 @@ class WhatsappClass:
             import traceback
             traceback.print_exc()
             self.db.rollback()
+
+    @classmethod
+    def get_campaign_site_base_url(cls) -> str:
+        return (os.getenv('WHATSAPP_CAMPAIGN_SITE_URL') or 'https://lacasadelvitrificado.com').strip().rstrip('/')
+
+    @classmethod
+    def get_campaign_site_url(cls) -> str:
+        return f"{cls.get_campaign_site_base_url()}/shoppings/login"
+
+    def build_campaign_site_url_for_customer(self, customer_id: int, phone: str) -> str:
+        from app.backend.classes.authentication_class import AuthenticationClass
+
+        base = self.get_campaign_site_base_url()
+        token = AuthenticationClass(self.db).generate_campaign_login_token(int(customer_id), phone)
+        phone_param = re.sub(r'\D', '', str(phone or ''))
+        return (
+            f"{base}/shoppings/login"
+            f"?phone={phone_param}&customer_id={int(customer_id)}&token={token}"
+        )
+
+    def send_campaign_message(
+        self,
+        phone: str,
+        message: str,
+        image_url: str | None = None,
+        site_url: str | None = None,
+    ) -> dict:
+        """Envía campaña publicitaria: texto de promoción, imagen opcional y botón Ir al sitio."""
+        url = "https://graph.facebook.com/v22.0/790586727468909/messages"
+        token = os.getenv("META_TOKEN")
+        phone = self._clean_phone_number(phone) or phone
+        if not phone:
+            return {"ok": False, "error": "Teléfono inválido"}
+
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json",
+        }
+
+        clean_message = self._clean_text_for_whatsapp(message or "").strip()
+        if not clean_message:
+            clean_message = "Tenemos una promoción especial para ti."
+
+        interactive: dict = {
+            "type": "cta_url",
+            "body": {"text": clean_message[:1024]},
+            "action": {
+                "name": "cta_url",
+                "parameters": {
+                    "display_text": self.CAMPAIGN_SITE_BUTTON_LABEL[:20],
+                    "url": site_url or self.get_campaign_site_url(),
+                },
+            },
+        }
+        if image_url:
+            interactive["header"] = {
+                "type": "image",
+                "image": {"link": image_url},
+            }
+
+        payload = {
+            "messaging_product": "whatsapp",
+            "to": phone,
+            "type": "interactive",
+            "interactive": interactive,
+        }
+        message_type_saved = "interactive_campaign"
+
+        try:
+            response = requests.post(url, json=payload, headers=headers, timeout=30)
+            response_data = response.json() if response.content else {}
+            ok = response.status_code == 200
+            print(f"[WHATSAPP CAMPAIGN] to={phone} status={response.status_code} body={response_data}")
+            if ok and "messages" in response_data:
+                message_id = response_data["messages"][0].get("id")
+                if message_id:
+                    self._save_message(
+                        message_id=message_id,
+                        recipient_phone=phone,
+                        message_type=message_type_saved,
+                        status="sent",
+                    )
+            return {
+                "ok": ok,
+                "status_code": response.status_code,
+                "response": response_data,
+            }
+        except Exception as exc:
+            print(f"[WHATSAPP CAMPAIGN] Error enviando a {phone}: {exc}")
+            return {"ok": False, "error": str(exc)}
 
     def send_autoreply(self, phone: str, text: str, buttons=None):
         """
