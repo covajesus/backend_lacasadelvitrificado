@@ -10,6 +10,7 @@ from app.backend.classes.promotion_class import PromotionClass
 from app.backend.classes.whatsapp_class import WhatsappClass
 from app.backend.db.models import (
     AdvertisingCampaignCustomerModel,
+    AdvertisingCampaignDeliveryModel,
     AdvertisingCampaignModel,
     CustomerModel,
     PromotionModel,
@@ -772,6 +773,7 @@ class AdvertisingClass(BaseDomainService):
                 current_customer=customer_label,
             )
 
+            delivery_row = self._create_campaign_delivery(campaign_id, int(customer.id))
             result = whatsapp.send_campaign_message(
                 customer.phone,
                 whatsapp_message,
@@ -786,15 +788,28 @@ class AdvertisingClass(BaseDomainService):
             )
             message_id = str(result.get('message_id') or '').strip()
             if message_id:
+                self._update_campaign_delivery(
+                    delivery_row,
+                    message_id=message_id,
+                    status='sent',
+                    sent_date=datetime.utcnow(),
+                )
                 pending_deliveries.append(
                     {
+                        'delivery_id': delivery_row.id,
                         'message_id': message_id,
                         'customer_label': customer_label,
                     }
                 )
             else:
-                failed_count += 1
                 api_error = str(result.get('error') or 'Error al enviar por WhatsApp.').strip()
+                self._update_campaign_delivery(
+                    delivery_row,
+                    status='failed',
+                    error_code=str(result.get('error_code') or '') or None,
+                    error_message=api_error,
+                )
+                failed_count += 1
                 failure_details.append(f'{customer_label}: {api_error}')
 
             self._update_job(
@@ -816,6 +831,13 @@ class AdvertisingClass(BaseDomainService):
             )
             for item in pending_deliveries:
                 info = delivery_status.get(item['message_id'], {'status': 'unknown'})
+                delivery_row = (
+                    self.db.query(AdvertisingCampaignDeliveryModel)
+                    .filter(AdvertisingCampaignDeliveryModel.id == int(item['delivery_id']))
+                    .first()
+                )
+                if delivery_row:
+                    self._apply_delivery_info(delivery_row, info)
                 status = str(info.get('status') or 'unknown').strip().lower()
                 if status in CAMPAIGN_DELIVERY_SUCCESS_STATUSES:
                     sent_count += 1
@@ -824,6 +846,7 @@ class AdvertisingClass(BaseDomainService):
                     failure_details.append(
                         self._delivery_failure_detail(item['customer_label'], info)
                     )
+            self.db.commit()
 
         summary_message, summary_error = self._build_campaign_send_summary(
             sent_count,
@@ -855,3 +878,267 @@ class AdvertisingClass(BaseDomainService):
         if not job:
             return {'status': 'error', 'message': 'No hay envío en curso para esta campaña.'}
         return {'status': 'success', 'data': job}
+
+    def _create_campaign_delivery(self, campaign_id: int, customer_id: int) -> AdvertisingCampaignDeliveryModel:
+        row = AdvertisingCampaignDeliveryModel(
+            campaign_id=int(campaign_id),
+            customer_id=int(customer_id),
+            status='pending',
+            added_date=datetime.utcnow(),
+            updated_date=datetime.utcnow(),
+        )
+        self.db.add(row)
+        self.db.flush()
+        return row
+
+    def _update_campaign_delivery(
+        self,
+        delivery: AdvertisingCampaignDeliveryModel,
+        *,
+        message_id: str | None = None,
+        status: str | None = None,
+        error_code: str | None = None,
+        error_message: str | None = None,
+        sent_date: datetime | None = None,
+        delivered_date: datetime | None = None,
+        read_date: datetime | None = None,
+    ) -> None:
+        if message_id:
+            delivery.message_id = message_id
+        if status:
+            delivery.status = status
+        if error_code is not None:
+            delivery.error_code = error_code
+        if error_message is not None:
+            delivery.error_message = error_message
+        if sent_date is not None:
+            delivery.sent_date = sent_date
+        if delivered_date is not None:
+            delivery.delivered_date = delivered_date
+        if read_date is not None:
+            delivery.read_date = read_date
+        delivery.updated_date = datetime.utcnow()
+
+    def _apply_delivery_info(
+        self,
+        delivery: AdvertisingCampaignDeliveryModel,
+        info: dict,
+    ) -> None:
+        status = str(info.get('status') or delivery.status or 'sent').strip().lower()
+        self._update_campaign_delivery(
+            delivery,
+            status=status,
+            error_code=str(info.get('error_code') or '') or None,
+            error_message=(info.get('error_message') or None),
+        )
+        message_id = delivery.message_id
+        if message_id:
+            wa_row = (
+                self.db.query(WhatsAppMessageModel)
+                .filter(WhatsAppMessageModel.message_id == message_id)
+                .first()
+            )
+            if wa_row:
+                if wa_row.sent_date:
+                    delivery.sent_date = wa_row.sent_date
+                if wa_row.delivered_date:
+                    delivery.delivered_date = wa_row.delivered_date
+                if wa_row.read_date:
+                    delivery.read_date = wa_row.read_date
+
+    @classmethod
+    def sync_delivery_from_whatsapp_status(
+        cls,
+        db,
+        message_id: str,
+        status_type: str,
+        error_code: str | None = None,
+        error_message: str | None = None,
+    ) -> None:
+        delivery = (
+            db.query(AdvertisingCampaignDeliveryModel)
+            .filter(AdvertisingCampaignDeliveryModel.message_id == str(message_id).strip())
+            .first()
+        )
+        if not delivery:
+            return
+
+        status = str(status_type or delivery.status or 'sent').strip().lower()
+        delivery.status = status
+        delivery.error_code = error_code
+        delivery.error_message = error_message
+        delivery.updated_date = datetime.utcnow()
+        now = datetime.utcnow()
+        if status == 'sent' and not delivery.sent_date:
+            delivery.sent_date = now
+        if status == 'delivered' and not delivery.delivered_date:
+            delivery.delivered_date = now
+        if status == 'read' and not delivery.read_date:
+            delivery.read_date = now
+
+        wa_row = (
+            db.query(WhatsAppMessageModel)
+            .filter(WhatsAppMessageModel.message_id == str(message_id).strip())
+            .first()
+        )
+        if wa_row:
+            if wa_row.sent_date:
+                delivery.sent_date = wa_row.sent_date
+            if wa_row.delivered_date:
+                delivery.delivered_date = wa_row.delivered_date
+            if wa_row.read_date:
+                delivery.read_date = wa_row.read_date
+
+        db.commit()
+
+    def _aggregate_delivery_stats(self, campaign_id: int) -> dict:
+        rows = (
+            self.db.query(AdvertisingCampaignDeliveryModel)
+            .filter(AdvertisingCampaignDeliveryModel.campaign_id == int(campaign_id))
+            .all()
+        )
+        total = len(rows)
+        read_count = 0
+        delivered_count = 0
+        failed_count = 0
+        pending_count = 0
+        sent_count = 0
+
+        for row in rows:
+            status = str(row.status or 'pending').strip().lower()
+            if status == 'read':
+                read_count += 1
+                delivered_count += 1
+            elif status == 'delivered':
+                delivered_count += 1
+            elif status == 'failed':
+                failed_count += 1
+            elif status == 'sent':
+                sent_count += 1
+            else:
+                pending_count += 1
+
+        return {
+            'recipients_total': total,
+            'read_count': read_count,
+            'delivered_count': delivered_count,
+            'failed_count': failed_count,
+            'sent_count': sent_count,
+            'pending_count': pending_count,
+        }
+
+    def get_campaign_stats(self, campaign_id: int):
+        campaign = (
+            self.db.query(AdvertisingCampaignModel)
+            .filter(AdvertisingCampaignModel.id == int(campaign_id))
+            .first()
+        )
+        if not campaign:
+            return 'No data found'
+
+        promotion_name = None
+        if campaign.promotion_id:
+            promotion = (
+                self.db.query(PromotionModel)
+                .filter(PromotionModel.id == int(campaign.promotion_id))
+                .first()
+            )
+            promotion_name = promotion.name if promotion else None
+
+        stats = self._aggregate_delivery_stats(int(campaign_id))
+        total = int(stats['recipients_total'] or 0)
+        read_count = int(stats['read_count'] or 0)
+        delivered_count = int(stats['delivered_count'] or 0)
+        failed_count = int(stats['failed_count'] or 0)
+
+        read_rate = round((read_count / total) * 100, 1) if total else 0.0
+        delivered_rate = round((delivered_count / total) * 100, 1) if total else 0.0
+
+        return {
+            'status': 'success',
+            'data': {
+                'campaign_id': int(campaign.id),
+                'campaign_name': campaign.name,
+                'promotion_id': int(campaign.promotion_id) if campaign.promotion_id else None,
+                'promotion_name': promotion_name,
+                'audience_type': int(campaign.audience_type or AUDIENCE_ALL),
+                'audience_label': self.AUDIENCE_LABELS.get(
+                    int(campaign.audience_type or AUDIENCE_ALL),
+                    'Audiencia',
+                ),
+                'status_id': int(campaign.status_id or STATUS_DRAFT),
+                'sent_date': campaign.sent_date.isoformat() if campaign.sent_date else None,
+                'summary': stats,
+                'read_rate_percent': read_rate,
+                'delivered_rate_percent': delivered_rate,
+                'chart': {
+                    'audience_labels': ['Audiencia disparada', 'Leídos'],
+                    'audience_series': [total, read_count],
+                    'status_labels': ['Leídos', 'Entregados (sin leer)', 'Enviados', 'Fallidos', 'Pendientes'],
+                    'status_series': [
+                        read_count,
+                        max(delivered_count - read_count, 0),
+                        int(stats['sent_count'] or 0),
+                        failed_count,
+                        int(stats['pending_count'] or 0),
+                    ],
+                },
+            },
+        }
+
+    def get_campaign_deliveries(self, campaign_id: int, page: int = 0, items_per_page: int = 20):
+        campaign = (
+            self.db.query(AdvertisingCampaignModel)
+            .filter(AdvertisingCampaignModel.id == int(campaign_id))
+            .first()
+        )
+        if not campaign:
+            return 'No data found'
+
+        page = max(int(page or 0), 0)
+        items_per_page = min(max(int(items_per_page or 20), 1), 100)
+        offset = page * items_per_page
+
+        base_query = (
+            self.db.query(
+                AdvertisingCampaignDeliveryModel,
+                CustomerModel.social_reason,
+                CustomerModel.identification_number,
+                CustomerModel.phone,
+            )
+            .join(CustomerModel, CustomerModel.id == AdvertisingCampaignDeliveryModel.customer_id)
+            .filter(AdvertisingCampaignDeliveryModel.campaign_id == int(campaign_id))
+        )
+        total = base_query.count()
+        rows = (
+            base_query.order_by(AdvertisingCampaignDeliveryModel.id.asc())
+            .offset(offset)
+            .limit(items_per_page)
+            .all()
+        )
+
+        data = []
+        for delivery, social_reason, identification_number, phone in rows:
+            data.append(
+                {
+                    'id': delivery.id,
+                    'customer_id': delivery.customer_id,
+                    'customer_name': social_reason or identification_number or f'Cliente #{delivery.customer_id}',
+                    'identification_number': identification_number,
+                    'phone': phone,
+                    'message_id': delivery.message_id,
+                    'status': delivery.status,
+                    'error_code': delivery.error_code,
+                    'error_message': delivery.error_message,
+                    'sent_date': delivery.sent_date.isoformat() if delivery.sent_date else None,
+                    'delivered_date': delivery.delivered_date.isoformat() if delivery.delivered_date else None,
+                    'read_date': delivery.read_date.isoformat() if delivery.read_date else None,
+                }
+            )
+
+        return {
+            'data': data,
+            'total': total,
+            'page': page,
+            'items_per_page': items_per_page,
+        }

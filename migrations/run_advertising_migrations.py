@@ -9,6 +9,7 @@ from pathlib import Path
 MIGRATIONS = [
     'run_add_advertising_campaigns.py',
     'run_add_advertising_promotion_id.py',
+    'run_add_advertising_campaign_deliveries.py',
 ]
 
 

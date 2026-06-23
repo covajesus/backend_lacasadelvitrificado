@@ -2873,6 +2873,15 @@ class WhatsappClass:
                 try:
                     self.db.commit()
                     print(f"✅ Estado actualizado en BD: {status_type} para mensaje {message_id}")
+                    from app.backend.classes.advertising_class import AdvertisingClass
+
+                    AdvertisingClass.sync_delivery_from_whatsapp_status(
+                        self.db,
+                        message_id,
+                        status_type,
+                        str(error_code) if error_code else None,
+                        error_message,
+                    )
                 except Exception as commit_error:
                     print(f"❌ ERROR al hacer commit: {str(commit_error)}")
                     self.db.rollback()
@@ -2901,6 +2910,15 @@ class WhatsappClass:
                 try:
                     self.db.commit()
                     print(f"✅ Nuevo registro creado para mensaje {message_id} con estado {status_type}")
+                    from app.backend.classes.advertising_class import AdvertisingClass
+
+                    AdvertisingClass.sync_delivery_from_whatsapp_status(
+                        self.db,
+                        message_id,
+                        status_type,
+                        str(error_code) if error_code else None,
+                        error_message,
+                    )
                 except Exception as commit_error:
                     print(f"❌ ERROR al crear nuevo registro: {str(commit_error)}")
                     self.db.rollback()

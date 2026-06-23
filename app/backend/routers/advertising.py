@@ -117,6 +117,31 @@ def send_progress(
     return {"message": data}
 
 
+@advertising.get("/stats/{id}")
+def campaign_stats(
+    id: int,
+    session_user: UserLogin = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+):
+    data = AdvertisingClass(db).get_campaign_stats(id)
+    return {"message": data}
+
+
+@advertising.post("/deliveries/{id}")
+def campaign_deliveries(
+    id: int,
+    payload: AdvertisingList,
+    session_user: UserLogin = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+):
+    data = AdvertisingClass(db).get_campaign_deliveries(
+        id,
+        page=payload.page,
+        items_per_page=20,
+    )
+    return {"message": data}
+
+
 @advertising.get("/promotion_preview/{promotion_id}")
 def promotion_preview(
     promotion_id: int,

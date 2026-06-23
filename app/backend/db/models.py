@@ -565,3 +565,20 @@ class AdvertisingCampaignCustomerModel(Base):
     campaign_id = Column(Integer)
     customer_id = Column(Integer)
     added_date = Column(DateTime(), nullable=True)
+
+
+class AdvertisingCampaignDeliveryModel(Base):
+    __tablename__ = 'advertising_campaign_deliveries'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    campaign_id = Column(Integer, nullable=False, index=True)
+    customer_id = Column(Integer, nullable=False, index=True)
+    message_id = Column(String(255), nullable=True, index=True)
+    status = Column(String(50), nullable=False, default='pending')
+    error_code = Column(String(50), nullable=True)
+    error_message = Column(Text(), nullable=True)
+    sent_date = Column(DateTime(), nullable=True)
+    delivered_date = Column(DateTime(), nullable=True)
+    read_date = Column(DateTime(), nullable=True)
+    added_date = Column(DateTime(), default=datetime.now)
+    updated_date = Column(DateTime(), default=datetime.now)
