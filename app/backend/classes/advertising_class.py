@@ -148,21 +148,26 @@ class AdvertisingClass(BaseDomainService):
         return resolved
 
     @staticmethod
-    def _delivery_failure_detail(customer_label: str, delivery_info: dict) -> str:
-        error_code = delivery_info.get('error_code')
+    def _delivery_error_message_from_info(delivery_info: dict) -> str:
         error_message = (delivery_info.get('error_message') or '').strip()
-        status = str(delivery_info.get('status') or '').strip().lower()
-
         if error_message:
-            if error_code:
-                return f'{customer_label}: [{error_code}] {error_message}'
-            return f'{customer_label}: {error_message}'
+            return error_message
+        status = str(delivery_info.get('status') or '').strip().lower()
         if status == 'sent':
             return (
-                f'{customer_label}: Meta aceptó el mensaje pero no confirmó la entrega '
-                f'(puede haber sido bloqueado por WhatsApp).'
+                'Meta aceptó el mensaje pero no confirmó la entrega '
+                '(puede haber sido bloqueado por WhatsApp).'
             )
-        return f'{customer_label}: WhatsApp/Meta no entregó el mensaje.'
+        return 'WhatsApp/Meta no entregó el mensaje.'
+
+    @staticmethod
+    def _delivery_failure_detail(customer_label: str, delivery_info: dict) -> str:
+        error_code = delivery_info.get('error_code')
+        error_message = AdvertisingClass._delivery_error_message_from_info(delivery_info)
+
+        if error_code and (delivery_info.get('error_message') or '').strip():
+            return f'{customer_label}: [{error_code}] {error_message}'
+        return f'{customer_label}: {error_message}'
 
     def _build_campaign_send_summary(
         self,
@@ -836,16 +841,23 @@ class AdvertisingClass(BaseDomainService):
                     .filter(AdvertisingCampaignDeliveryModel.id == int(item['delivery_id']))
                     .first()
                 )
-                if delivery_row:
-                    self._apply_delivery_info(delivery_row, info)
                 status = str(info.get('status') or 'unknown').strip().lower()
                 if status in CAMPAIGN_DELIVERY_SUCCESS_STATUSES:
+                    if delivery_row:
+                        self._apply_delivery_info(delivery_row, info)
                     sent_count += 1
                 else:
                     failed_count += 1
                     failure_details.append(
                         self._delivery_failure_detail(item['customer_label'], info)
                     )
+                    if delivery_row:
+                        self._update_campaign_delivery(
+                            delivery_row,
+                            status='failed',
+                            error_code=str(info.get('error_code') or '') or None,
+                            error_message=self._delivery_error_message_from_info(info),
+                        )
             self.db.commit()
 
         summary_message, summary_error = self._build_campaign_send_summary(
@@ -991,7 +1003,67 @@ class AdvertisingClass(BaseDomainService):
 
         db.commit()
 
+    def _reconcile_delivery_from_whatsapp(self, delivery: AdvertisingCampaignDeliveryModel) -> bool:
+        """Sincroniza el estado del envío con el mensaje de WhatsApp vinculado."""
+        message_id = str(delivery.message_id or '').strip()
+        if not message_id:
+            return False
+
+        wa_row = (
+            self.db.query(WhatsAppMessageModel)
+            .filter(WhatsAppMessageModel.message_id == message_id)
+            .first()
+        )
+        if not wa_row:
+            return False
+
+        wa_status = str(wa_row.status or '').strip().lower()
+        current_status = str(delivery.status or 'pending').strip().lower()
+        changed = False
+
+        if wa_status == 'failed' and current_status != 'failed':
+            self._update_campaign_delivery(
+                delivery,
+                status='failed',
+                error_code=wa_row.error_code,
+                error_message=wa_row.error_message,
+            )
+            changed = True
+        elif wa_status in CAMPAIGN_DELIVERY_SUCCESS_STATUSES and current_status != wa_status:
+            self._apply_delivery_info(
+                delivery,
+                {
+                    'status': wa_status,
+                    'error_code': wa_row.error_code,
+                    'error_message': wa_row.error_message,
+                },
+            )
+            changed = True
+        elif wa_status == 'sent' and current_status in {'pending', 'failed'}:
+            self._apply_delivery_info(
+                delivery,
+                {
+                    'status': wa_status,
+                    'error_code': wa_row.error_code,
+                    'error_message': wa_row.error_message,
+                },
+            )
+            changed = True
+
+        return changed
+
+    def _reconcile_campaign_deliveries(self, campaign_id: int) -> None:
+        rows = (
+            self.db.query(AdvertisingCampaignDeliveryModel)
+            .filter(AdvertisingCampaignDeliveryModel.campaign_id == int(campaign_id))
+            .all()
+        )
+        changed = any(self._reconcile_delivery_from_whatsapp(row) for row in rows)
+        if changed:
+            self.db.commit()
+
     def _aggregate_delivery_stats(self, campaign_id: int) -> dict:
+        self._reconcile_campaign_deliveries(campaign_id)
         rows = (
             self.db.query(AdvertisingCampaignDeliveryModel)
             .filter(AdvertisingCampaignDeliveryModel.campaign_id == int(campaign_id))
@@ -1051,6 +1123,13 @@ class AdvertisingClass(BaseDomainService):
         delivered_count = int(stats['delivered_count'] or 0)
         failed_count = int(stats['failed_count'] or 0)
 
+        successful_count = delivered_count
+        if int(campaign.sent_count or 0) != successful_count or int(campaign.failed_count or 0) != failed_count:
+            campaign.sent_count = successful_count
+            campaign.failed_count = failed_count
+            campaign.updated_date = datetime.utcnow()
+            self.db.commit()
+
         read_rate = round((read_count / total) * 100, 1) if total else 0.0
         delivered_rate = round((delivered_count / total) * 100, 1) if total else 0.0
 
@@ -1094,6 +1173,8 @@ class AdvertisingClass(BaseDomainService):
         )
         if not campaign:
             return 'No data found'
+
+        self._reconcile_campaign_deliveries(campaign_id)
 
         page = max(int(page or 0), 0)
         items_per_page = min(max(int(items_per_page or 20), 1), 100)
