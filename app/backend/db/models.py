@@ -212,7 +212,7 @@ class PromotionModel(Base):
     minimum_purchase = Column(Numeric(12, 2), default=0)
     start_date = Column(DateTime(), nullable=True)
     end_date = Column(DateTime(), nullable=True)
-    is_active = Column(Integer, default=1)
+    status_id = Column(Integer, default=1)
     added_date = Column(DateTime())
     updated_date = Column(DateTime())
 

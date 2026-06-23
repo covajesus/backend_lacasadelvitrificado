@@ -2,6 +2,7 @@ from datetime import datetime
 from decimal import Decimal, ROUND_HALF_UP
 
 from sqlalchemy import func
+from sqlalchemy.exc import OperationalError, ProgrammingError
 from sqlalchemy.orm import Session
 
 from app.backend.db.models import (
@@ -25,12 +26,27 @@ def _round_price(value):
     return float(Decimal(str(value)).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP))
 
 
+def _rollback_db(db: Session):
+    try:
+        db.rollback()
+    except Exception:
+        pass
+
+
 class PromotionPricingService:
     def __init__(self, db: Session):
         self.db = db
 
+    def _promotions_schema_missing(self, error: Exception) -> bool:
+        message = str(getattr(error, 'orig', error)).lower()
+        if "doesn't exist" in message or '1146' in message:
+            return True
+        if '1054' in message or 'unknown column' in message:
+            return 'promotion' in message
+        return False
+
     def is_promotion_active(self, promotion: PromotionModel, now: datetime | None = None) -> bool:
-        if not promotion or int(promotion.is_active or 0) != 1:
+        if not promotion or int(getattr(promotion, 'status_id', 0) or 0) != 1:
             return False
         current = now or datetime.utcnow()
         if promotion.start_date and current < promotion.start_date:
@@ -63,13 +79,20 @@ class PromotionPricingService:
 
     def get_active_product_discounts_map(self) -> dict[int, dict]:
         now = datetime.utcnow()
-        rows = (
-            self.db.query(PromotionModel, PromotionProductModel)
-            .join(PromotionProductModel, PromotionProductModel.promotion_id == PromotionModel.id)
-            .filter(PromotionModel.promotion_type_id == PROMOTION_TYPE_PRODUCT_DISCOUNT)
-            .filter(PromotionModel.is_active == 1)
-            .all()
-        )
+        try:
+            rows = (
+                self.db.query(PromotionModel, PromotionProductModel)
+                .join(PromotionProductModel, PromotionProductModel.promotion_id == PromotionModel.id)
+                .filter(PromotionModel.promotion_type_id == PROMOTION_TYPE_PRODUCT_DISCOUNT)
+                .filter(PromotionModel.status_id == 1)
+                .all()
+            )
+        except (ProgrammingError, OperationalError) as error:
+            _rollback_db(self.db)
+            if self._promotions_schema_missing(error):
+                return {}
+            raise
+
         result: dict[int, dict] = {}
         for promotion, promo_product in rows:
             if not self.is_promotion_active(promotion, now):
@@ -142,12 +165,22 @@ class PromotionPricingService:
         if not code:
             return {'status': 'error', 'message': 'Debe indicar el código del cupón.'}
 
-        promotion = (
-            self.db.query(PromotionModel)
-            .filter(PromotionModel.promotion_type_id == PROMOTION_TYPE_COUPON)
-            .filter(func.upper(PromotionModel.coupon_code) == code)
-            .first()
-        )
+        try:
+            promotion = (
+                self.db.query(PromotionModel)
+                .filter(PromotionModel.promotion_type_id == PROMOTION_TYPE_COUPON)
+                .filter(func.upper(PromotionModel.coupon_code) == code)
+                .first()
+            )
+        except (ProgrammingError, OperationalError) as error:
+            _rollback_db(self.db)
+            if self._promotions_schema_missing(error):
+                return {
+                    'status': 'error',
+                    'message': 'El módulo de promociones no está instalado en la base de datos.',
+                }
+            raise
+
         if not promotion:
             return {'status': 'error', 'message': 'Cupón no encontrado.'}
         if not self.is_promotion_active(promotion):
@@ -161,11 +194,21 @@ class PromotionPricingService:
                 'message': f'La compra mínima para este cupón es ${int(minimum):,}'.replace(',', '.'),
             }
 
-        promo_products = (
-            self.db.query(PromotionProductModel)
-            .filter(PromotionProductModel.promotion_id == promotion.id)
-            .all()
-        )
+        try:
+            promo_products = (
+                self.db.query(PromotionProductModel)
+                .filter(PromotionProductModel.promotion_id == promotion.id)
+                .all()
+            )
+        except (ProgrammingError, OperationalError) as error:
+            _rollback_db(self.db)
+            if self._promotions_schema_missing(error):
+                return {
+                    'status': 'error',
+                    'message': 'El módulo de promociones no está instalado en la base de datos.',
+                }
+            raise
+
         allowed_ids = {int(row.product_id) for row in promo_products}
         if not allowed_ids:
             return {'status': 'error', 'message': 'El cupón no tiene productos asociados.'}
@@ -216,22 +259,28 @@ class PromotionPricingService:
     ):
         discount_per_unit = _round_price(_to_float(original_unit_price) - _to_float(promotional_unit_price))
         total_lost = _round_price(discount_per_unit * max(int(quantity or 1), 1))
-        row = PromotionUsageModel(
-            promotion_id=promotion_id,
-            promotion_type_id=promotion_type_id,
-            product_id=product_id,
-            sale_id=sale_id,
-            budget_id=budget_id,
-            coupon_code=coupon_code,
-            quantity=max(int(quantity or 1), 1),
-            original_unit_price=original_unit_price,
-            promotional_unit_price=promotional_unit_price,
-            discount_amount_per_unit=discount_per_unit,
-            total_discount_lost=total_lost,
-            applied_date=datetime.utcnow(),
-        )
-        self.db.add(row)
-        return row
+        try:
+            row = PromotionUsageModel(
+                promotion_id=promotion_id,
+                promotion_type_id=promotion_type_id,
+                product_id=product_id,
+                sale_id=sale_id,
+                budget_id=budget_id,
+                coupon_code=coupon_code,
+                quantity=max(int(quantity or 1), 1),
+                original_unit_price=original_unit_price,
+                promotional_unit_price=promotional_unit_price,
+                discount_amount_per_unit=discount_per_unit,
+                total_discount_lost=total_lost,
+                applied_date=datetime.utcnow(),
+            )
+            self.db.add(row)
+            return row
+        except (ProgrammingError, OperationalError) as error:
+            _rollback_db(self.db)
+            if self._promotions_schema_missing(error):
+                return None
+            raise
 
     def record_product_discount_usages(self, product_items, budget_id=None, sale_id=None):
         discounts = self.get_active_product_discounts_map()

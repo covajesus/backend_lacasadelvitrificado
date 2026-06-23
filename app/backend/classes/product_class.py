@@ -25,12 +25,18 @@ class ProductClass:
     def _apply_product_promotions(self, product_data):
         if not product_data or not isinstance(product_data, dict):
             return product_data
-        return PromotionPricingService(self.db).enrich_product_dict(product_data)
+        try:
+            return PromotionPricingService(self.db).enrich_product_dict(product_data)
+        except Exception:
+            return product_data
 
     def _apply_product_promotions_list(self, products):
         if not products:
             return products
-        return PromotionPricingService(self.db).enrich_product_list(products)
+        try:
+            return PromotionPricingService(self.db).enrich_product_list(products)
+        except Exception:
+            return products
 
     @classmethod
     def _normalize_search_tokens(cls, search_term: str) -> list[str]:

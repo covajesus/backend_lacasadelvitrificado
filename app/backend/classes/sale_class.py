@@ -14,6 +14,7 @@ from zoneinfo import ZoneInfo
 from sqlalchemy import func, or_, and_
 from app.backend.classes.whatsapp_class import WhatsappClass
 from app.backend.services.promotions.promotion_pricing_service import PromotionPricingService
+from app.backend.services.promotions.promotion_pricing_service import PromotionPricingService
 from app.backend.core.constants import SaleStatus
 
 
@@ -776,10 +777,14 @@ class SaleClass:
     
     def details(self, id):
         try:
+            pricing_service = PromotionPricingService(self.db)
+            discounts_map = pricing_service.get_active_product_discounts_map()
+
             data_query = self.db.query(
                 SaleProductModel.id,
                 SaleProductModel.product_id,
                 SaleProductModel.quantity,
+                SaleProductModel.price,
                 SaleModel.subtotal,
                 SaleModel.shipping_cost,
                 SaleModel.tax,
@@ -843,6 +848,7 @@ class SaleClass:
                     "id": data.id,
                     "product_id": data.product_id,
                     "quantity": data.quantity,
+                    "price": data.price,
                     "is_unit_sale_order": is_unit_sale_order,
                     "is_internal_use_order": is_internal_use_order,
                     "is_unit_sale": us_item is not None,
@@ -864,6 +870,14 @@ class SaleClass:
                     "product": data.product,
                     "customer_name": data.customer_name
                 }
+
+                if data.product_id:
+                    promo = discounts_map.get(int(data.product_id))
+                    if promo:
+                        sale_details["has_product_promotion"] = True
+                        sale_details["promotion_discount_percent"] = promo["discount_percent"]
+                        sale_details["public_sale_price_original"] = promo["original_price"]
+                        sale_details["public_sale_price"] = promo["promotional_price"]
 
                 sale_data.append(sale_details)
 

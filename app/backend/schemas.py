@@ -120,6 +120,9 @@ class UpdateCategory(BaseModel):
 
 class PromotionList(BaseModel):
     page: int
+    q: Optional[str] = None
+    promotion_type_id: Optional[int] = None
+    status_id: Optional[int] = None
 
 class StorePromotion(BaseModel):
     promotion_type_id: int = 1
@@ -132,7 +135,7 @@ class StorePromotion(BaseModel):
     minimum_purchase: float = 0
     start_date: Optional[str] = None
     end_date: Optional[str] = None
-    is_active: int = 1
+    status_id: int = 1
 
 class UpdatePromotion(BaseModel):
     promotion_type_id: int = 1
@@ -145,7 +148,7 @@ class UpdatePromotion(BaseModel):
     minimum_purchase: float = 0
     start_date: Optional[str] = None
     end_date: Optional[str] = None
-    is_active: int = 1
+    status_id: int = 1
 
 class ValidateCoupon(BaseModel):
     coupon_code: str

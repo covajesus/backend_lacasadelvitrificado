@@ -20,6 +20,26 @@ class BudgetClass:
     def __init__(self, db):
         self.db = db
 
+    def _attach_promotion_to_budget_products(self, product_data):
+        pricing_service = PromotionPricingService(self.db)
+        discounts_map = pricing_service.get_active_product_discounts_map()
+        enriched = []
+        for item in product_data:
+            row = dict(item)
+            product_id = row.get("product_id")
+            quantity = row.get("quantity") or 0
+            if quantity > 0 and row.get("total") is not None:
+                row["sale_price"] = int(row["total"] // quantity)
+            if product_id:
+                promo = discounts_map.get(int(product_id))
+                if promo:
+                    row["has_product_promotion"] = True
+                    row["promotion_discount_percent"] = promo["discount_percent"]
+                    row["public_sale_price_original"] = promo["original_price"]
+                    row["public_sale_price"] = promo["promotional_price"]
+            enriched.append(row)
+        return enriched
+
     def serialize_budget(self, budget_row):
         return {
             "id": budget_row.id,
@@ -153,7 +173,7 @@ class BudgetClass:
 
             return {
                 "budget": self.serialize_budget(budget),
-                "products": product_data
+                "products": self._attach_promotion_to_budget_products(product_data)
             }
 
         except Exception as e:
@@ -592,7 +612,7 @@ class BudgetClass:
             }
 
             print(f"[BUDGET_PRODUCT_DETAIL] Datos finales: {product_data}")
-            return product_data
+            return PromotionPricingService(self.db).enrich_product_dict(product_data)
 
         except Exception as e:
             return {"status": "error", "message": str(e)}

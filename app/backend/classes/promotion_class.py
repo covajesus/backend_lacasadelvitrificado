@@ -1,6 +1,7 @@
 from datetime import datetime
+import secrets
 
-from sqlalchemy import func
+from sqlalchemy import func, or_
 
 from app.backend.db.models import (
     ProductModel,
@@ -33,6 +34,15 @@ def _parse_optional_date(value):
         return datetime.fromisoformat(text.replace('Z', '')[:19])
     except ValueError:
         return None
+
+
+_COUPON_PREFIX = 'LCV'
+_COUPON_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789'
+
+
+def _build_coupon_code():
+    suffix = ''.join(secrets.choice(_COUPON_ALPHABET) for _ in range(6))
+    return f'{_COUPON_PREFIX}{suffix}'
 
 
 class PromotionClass(BaseDomainService):
@@ -93,12 +103,19 @@ class PromotionClass(BaseDomainService):
             'minimum_purchase': float(row.minimum_purchase or 0),
             'start_date': start,
             'end_date': end,
-            'is_active': int(row.is_active or 0),
+            'status_id': int(row.status_id if row.status_id is not None else 1),
             'products': products,
             'total_discount_per_unit': round(total_discount, 2),
         }
 
-    def get_all(self, page=0, items_per_page=10):
+    def get_all(
+        self,
+        page=0,
+        items_per_page=10,
+        q=None,
+        promotion_type_id=None,
+        status_id=None,
+    ):
         query = (
             self.db.query(
                 PromotionModel.id,
@@ -111,10 +128,33 @@ class PromotionClass(BaseDomainService):
                 PromotionModel.minimum_purchase,
                 PromotionModel.start_date,
                 PromotionModel.end_date,
-                PromotionModel.is_active,
+                PromotionModel.status_id,
             )
             .order_by(PromotionModel.id.desc())
         )
+
+        if q and str(q).strip():
+            term = f"%{str(q).strip()}%"
+            product_promotion_ids = (
+                self.db.query(PromotionProductModel.promotion_id)
+                .join(ProductModel, ProductModel.id == PromotionProductModel.product_id)
+                .filter(or_(ProductModel.product.ilike(term), ProductModel.code.ilike(term)))
+            )
+            query = query.filter(
+                or_(
+                    PromotionModel.name.ilike(term),
+                    PromotionModel.description.ilike(term),
+                    PromotionModel.coupon_code.ilike(term),
+                    PromotionModel.id.in_(product_promotion_ids),
+                )
+            )
+
+        if promotion_type_id is not None and int(promotion_type_id) > 0:
+            query = query.filter(PromotionModel.promotion_type_id == int(promotion_type_id))
+
+        if status_id is not None and int(status_id) >= 0:
+            query = query.filter(PromotionModel.status_id == int(status_id))
+
         return self.list_query(
             query, page=page, items_per_page=items_per_page, serialize_row=self._serialize_row
         )
@@ -132,9 +172,9 @@ class PromotionClass(BaseDomainService):
                 PromotionModel.minimum_purchase,
                 PromotionModel.start_date,
                 PromotionModel.end_date,
-                PromotionModel.is_active,
+                PromotionModel.status_id,
             )
-            .filter(PromotionModel.is_active == 1)
+            .filter(PromotionModel.status_id == 1)
             .order_by(PromotionModel.name)
         )
         return self.list_wrapped(query, self._serialize_row)
@@ -218,7 +258,7 @@ class PromotionClass(BaseDomainService):
             minimum_purchase=float(promotion_inputs.minimum_purchase or 0),
             start_date=_parse_optional_date(promotion_inputs.start_date),
             end_date=_parse_optional_date(promotion_inputs.end_date),
-            is_active=1 if int(promotion_inputs.is_active or 0) else 0,
+            status_id=1 if int(promotion_inputs.status_id or 0) == 1 else 0,
             added_date=datetime.utcnow(),
             updated_date=datetime.utcnow(),
         )
@@ -261,7 +301,7 @@ class PromotionClass(BaseDomainService):
         existing.minimum_purchase = float(promotion_inputs.minimum_purchase or 0)
         existing.start_date = _parse_optional_date(promotion_inputs.start_date)
         existing.end_date = _parse_optional_date(promotion_inputs.end_date)
-        existing.is_active = 1 if int(promotion_inputs.is_active or 0) else 0
+        existing.status_id = 1 if int(promotion_inputs.status_id or 0) == 1 else 0
         existing.updated_date = datetime.utcnow()
         self._replace_products(existing.id, promotion_type_id, promotion_inputs.discount_percent, product_ids)
         self.db.commit()
@@ -288,6 +328,18 @@ class PromotionClass(BaseDomainService):
 
     def validate_coupon(self, coupon_code, product_ids, subtotal):
         return self.pricing.validate_coupon(coupon_code, product_ids, subtotal)
+
+    def generate_coupon_code(self):
+        for _ in range(25):
+            code = _build_coupon_code()
+            duplicate = (
+                self.db.query(PromotionModel.id)
+                .filter(func.upper(PromotionModel.coupon_code) == code)
+                .first()
+            )
+            if not duplicate:
+                return {'status': 'success', 'coupon_code': code}
+        return {'status': 'error', 'message': 'No se pudo generar un código único.'}
 
     def get_usage_summary(self, promotion_id=None):
         query = self.db.query(

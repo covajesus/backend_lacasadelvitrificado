@@ -24,7 +24,12 @@ def index(
     session_user: UserLogin = Depends(get_current_active_user),
     db: Session = Depends(get_db),
 ):
-    data = PromotionClass(db).get_all(promotion_inputs.page)
+    data = PromotionClass(db).get_all(
+        page=promotion_inputs.page,
+        q=promotion_inputs.q,
+        promotion_type_id=promotion_inputs.promotion_type_id,
+        status_id=promotion_inputs.status_id,
+    )
     return {"message": data}
 
 
@@ -75,6 +80,15 @@ def edit(
     db: Session = Depends(get_db),
 ):
     data = PromotionClass(db).get(id)
+    return {"message": data}
+
+
+@promotions.get("/generate_coupon_code")
+def generate_coupon_code(
+    session_user: UserLogin = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+):
+    data = PromotionClass(db).generate_coupon_code()
     return {"message": data}
 
 

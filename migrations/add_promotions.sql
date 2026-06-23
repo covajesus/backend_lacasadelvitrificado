@@ -9,7 +9,7 @@ CREATE TABLE IF NOT EXISTS promotions (
   minimum_purchase DECIMAL(12, 2) NOT NULL DEFAULT 0,
   start_date DATETIME NULL,
   end_date DATETIME NULL,
-  is_active TINYINT(1) NOT NULL DEFAULT 1,
+  status_id TINYINT(1) NOT NULL DEFAULT 1,
   added_date DATETIME NULL,
   updated_date DATETIME NULL,
   UNIQUE KEY uq_promotions_coupon_code (coupon_code)
