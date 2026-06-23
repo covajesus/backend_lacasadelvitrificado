@@ -14,12 +14,14 @@ from app.backend.db.models import (
     PromotionProductModel,
     PromotionUsageModel,
     SaleModel,
+    SaleProductModel,
 )
 
 PROMOTION_TYPE_PRODUCT_DISCOUNT = 1
 PROMOTION_TYPE_COUPON = 2
 PROMOTION_AUDIENCE_ALL = 1
 PROMOTION_AUDIENCE_SELECTED = 2
+ACCEPTED_SALE_STATUS_IDS = (2, 4)
 
 
 def _to_float(value):
@@ -159,6 +161,7 @@ class PromotionPricingService:
                 .join(PromotionUsageModel, PromotionUsageModel.sale_id == SaleModel.id)
                 .filter(PromotionUsageModel.promotion_id == promotion_id)
                 .filter(PromotionUsageModel.promotion_type_id == PROMOTION_TYPE_COUPON)
+                .filter(SaleModel.status_id.in_(ACCEPTED_SALE_STATUS_IDS))
                 .all()
             )
         except (ProgrammingError, OperationalError) as error:
@@ -585,3 +588,84 @@ class PromotionPricingService:
                 budget_id=budget_id,
                 sale_id=sale_id,
             )
+
+    def remove_sale_promotion_usages(self, sale_id: int) -> None:
+        try:
+            (
+                self.db.query(PromotionUsageModel)
+                .filter(PromotionUsageModel.sale_id == int(sale_id))
+                .delete(synchronize_session=False)
+            )
+            self.db.flush()
+        except (ProgrammingError, OperationalError) as error:
+            _rollback_db(self.db)
+            if self._promotions_schema_missing(error):
+                return
+            raise
+
+    def record_sale_promotion_usages(self, sale_id: int) -> None:
+        sale_id = int(sale_id)
+        try:
+            existing = (
+                self.db.query(PromotionUsageModel.id)
+                .filter(PromotionUsageModel.sale_id == sale_id)
+                .first()
+            )
+            if existing:
+                return
+
+            sale = self.db.query(SaleModel).filter(SaleModel.id == sale_id).first()
+            if not sale:
+                return
+
+            sale_products = (
+                self.db.query(SaleProductModel)
+                .filter(SaleProductModel.sale_id == sale_id)
+                .all()
+            )
+            if not sale_products:
+                return
+
+            product_items = [
+                {'product_id': sp.product_id, 'quantity': sp.quantity}
+                for sp in sale_products
+            ]
+            self.record_product_discount_usages(product_items, sale_id=sale_id)
+
+            coupon_code = (getattr(sale, 'coupon_code', None) or '').strip()
+            if not coupon_code:
+                return
+
+            customer_rut = None
+            if sale.customer_id:
+                customer = (
+                    self.db.query(CustomerModel)
+                    .filter(CustomerModel.id == sale.customer_id)
+                    .first()
+                )
+                if customer:
+                    customer_rut = customer.identification_number
+
+            coupon_items = []
+            for sp in sale_products:
+                unit_price = _to_float(sp.price)
+                if unit_price <= 0:
+                    unit_price = self.get_product_public_price(sp.product_id)
+                coupon_items.append({
+                    'product_id': sp.product_id,
+                    'quantity': sp.quantity,
+                    'unit_price': unit_price,
+                    'public_sale_price': unit_price,
+                })
+
+            self.record_coupon_usages(
+                coupon_code,
+                coupon_items,
+                sale_id=sale_id,
+                customer_rut=customer_rut,
+            )
+        except (ProgrammingError, OperationalError) as error:
+            _rollback_db(self.db)
+            if self._promotions_schema_missing(error):
+                return
+            raise

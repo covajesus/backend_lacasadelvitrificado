@@ -629,6 +629,10 @@ class SaleClass:
                 else:
                     # Mantener el cálculo original para otros casos
                     total = subtotal + tax
+
+            coupon_code = None
+            if sale_inputs.rol_id not in (1, 2) and getattr(sale_inputs, 'coupon_code', None):
+                coupon_code = (sale_inputs.coupon_code or '').strip().upper() or None
   
             new_sale = SaleModel(
                 customer_id=customer_id,
@@ -641,6 +645,7 @@ class SaleClass:
                 total=total,
                 payment_support=photo_path,
                 delivery_address=sale_inputs.delivery_address,
+                coupon_code=coupon_code,
                 added_date=datetime.now()
             )
             self.db.add(new_sale)
@@ -672,29 +677,9 @@ class SaleClass:
                     price=price
                 )
                 self.db.add(sale_product)
-            
-            if sale_inputs.rol_id not in (1, 2):
-                pricing_service = PromotionPricingService(self.db)
-                pricing_service.record_product_discount_usages(
-                    [{'product_id': item.id, 'quantity': item.quantity} for item in sale_inputs.cart],
-                    sale_id=new_sale.id,
-                )
-                if getattr(sale_inputs, 'coupon_code', None):
-                    coupon_items = []
-                    for item in sale_inputs.cart:
-                        unit_price = float(item.public_sale_price or 0)
-                        coupon_items.append({
-                            'product_id': item.id,
-                            'quantity': item.quantity,
-                            'unit_price': unit_price,
-                            'public_sale_price': unit_price,
-                        })
-                    pricing_service.record_coupon_usages(
-                        sale_inputs.coupon_code,
-                        coupon_items,
-                        sale_id=new_sale.id,
-                        customer_rut=sale_inputs.customer_rut,
-                    )
+
+            if status_id in (SaleStatus.IN_PROCESS, SaleStatus.DELIVERED):
+                PromotionPricingService(self.db).record_sale_promotion_usages(new_sale.id)
 
             self.db.commit()
 
@@ -728,6 +713,8 @@ class SaleClass:
         sales_products = self.db.query(SaleProductModel).filter(SaleProductModel.sale_id == sale_id).all()
 
         try:
+            PromotionPricingService(self.db).remove_sale_promotion_usages(sale_id)
+
             for sales_product in sales_products:
                 # Obtener el movimiento de inventario original
                 inventory_movement = self.db.query(InventoryMovementModel).filter(
@@ -758,6 +745,7 @@ class SaleClass:
 
                     print(f"[REVERSE] Movimiento reverso creado para producto {sales_product.product_id}: {reverse_quantity}")
 
+            self.db.commit()
             return "Inventory reversed successfully"
         except Exception as e:
             self.db.rollback()
@@ -1142,6 +1130,8 @@ class SaleClass:
                                 )
                                 self.db.add(sale_product)
                                 self.db.flush()
+
+                PromotionPricingService(self.db).record_sale_promotion_usages(id)
 
             existing_sale.status_id = status_id
             existing_sale.updated_date = datetime.utcnow()

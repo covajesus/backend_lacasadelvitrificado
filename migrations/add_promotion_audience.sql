@@ -1,5 +1,8 @@
 ALTER TABLE promotions
-  ADD COLUMN audience_type TINYINT NOT NULL DEFAULT 1 COMMENT '1=todos, 2=seleccionados' AFTER status_id;
+  ADD COLUMN IF NOT EXISTS audience_type TINYINT NOT NULL DEFAULT 1 COMMENT '1=todos, 2=seleccionados' AFTER status_id;
+
+-- MySQL < 8.0.12 no soporta IF NOT EXISTS en ADD COLUMN; usar:
+-- python migrations/run_add_promotion_audience.py
 
 CREATE TABLE IF NOT EXISTS promotion_customers (
   id INT AUTO_INCREMENT PRIMARY KEY,

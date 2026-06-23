@@ -11,9 +11,11 @@ from app.backend.db.models import (
     PromotionModel,
     PromotionProductModel,
     PromotionUsageModel,
+    SaleModel,
 )
 from app.backend.services.crud.base_domain_service import BaseDomainService
 from app.backend.services.promotions.promotion_pricing_service import (
+    ACCEPTED_SALE_STATUS_IDS,
     PROMOTION_AUDIENCE_ALL,
     PROMOTION_AUDIENCE_SELECTED,
     PROMOTION_TYPE_COUPON,
@@ -451,11 +453,25 @@ class PromotionClass(BaseDomainService):
         if not promotion:
             return {'status': 'error', 'message': 'Promoción no encontrada.'}
 
-        usages = (
-            self.db.query(PromotionUsageModel)
-            .filter(PromotionUsageModel.promotion_id == int(promotion_id))
-            .all()
-        )
+        try:
+            usages = (
+                self.db.query(PromotionUsageModel)
+                .outerjoin(SaleModel, SaleModel.id == PromotionUsageModel.sale_id)
+                .filter(PromotionUsageModel.promotion_id == int(promotion_id))
+                .filter(
+                    or_(
+                        PromotionUsageModel.sale_id.is_(None),
+                        SaleModel.status_id.in_(ACCEPTED_SALE_STATUS_IDS),
+                    )
+                )
+                .all()
+            )
+        except (ProgrammingError, OperationalError):
+            try:
+                self.db.rollback()
+            except Exception:
+                pass
+            usages = []
 
         total_original = 0.0
         total_paid = 0.0

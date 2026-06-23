@@ -126,6 +126,7 @@ class SaleModel(Base):
     total = Column(Float)
     payment_support = Column(Text())
     delivery_address = Column(Text())
+    coupon_code = Column(String(50), nullable=True)
     added_date = Column(DateTime(), default=datetime.now)
     updated_date = Column(DateTime(), default=datetime.now)
 
