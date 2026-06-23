@@ -13,6 +13,7 @@ from app.backend.db.models import (
     AdvertisingCampaignModel,
     CustomerModel,
     PromotionModel,
+    PromotionProductModel,
 )
 from app.backend.services.crud.base_domain_service import BaseDomainService
 from app.backend.services.promotions.promotion_pricing_service import (
@@ -111,9 +112,18 @@ class AdvertisingClass(BaseDomainService):
             return None
         if int(promotion.promotion_type_id or 0) != PROMOTION_TYPE_PRODUCT_DISCOUNT:
             return None
-        if not promotion.product_id:
-            return None
-        return int(promotion.product_id)
+        if promotion.product_id:
+            return int(promotion.product_id)
+
+        linked_product = (
+            self.db.query(PromotionProductModel.product_id)
+            .filter(PromotionProductModel.promotion_id == int(promotion_id))
+            .order_by(PromotionProductModel.id.asc())
+            .first()
+        )
+        if linked_product and linked_product.product_id:
+            return int(linked_product.product_id)
+        return None
 
     def build_promotion_whatsapp_message(self, promotion_id: int, extra_message: str | None = None) -> str:
         promotion, error = self._get_active_promotion(promotion_id)
