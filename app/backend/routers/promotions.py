@@ -83,6 +83,16 @@ def edit(
     return {"message": data}
 
 
+@promotions.get("/visible_coupons/{customer_rut}")
+def visible_coupons(
+    customer_rut: str,
+    session_user: UserLogin = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+):
+    data = PromotionClass(db).get_visible_coupons(customer_rut)
+    return {"message": data}
+
+
 @promotions.get("/generate_coupon_code")
 def generate_coupon_code(
     session_user: UserLogin = Depends(get_current_active_user),
@@ -102,6 +112,8 @@ def validate_coupon(
         coupon_inputs.coupon_code,
         coupon_inputs.product_ids,
         coupon_inputs.subtotal,
+        items=[item.model_dump() for item in coupon_inputs.items] if coupon_inputs.items else None,
+        customer_rut=coupon_inputs.customer_rut,
     )
     return {"message": data}
 

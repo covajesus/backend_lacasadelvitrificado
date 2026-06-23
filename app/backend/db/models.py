@@ -213,8 +213,17 @@ class PromotionModel(Base):
     start_date = Column(DateTime(), nullable=True)
     end_date = Column(DateTime(), nullable=True)
     status_id = Column(Integer, default=1)
+    audience_type = Column(Integer, default=1)
     added_date = Column(DateTime())
     updated_date = Column(DateTime())
+
+class PromotionCustomerModel(Base):
+    __tablename__ = 'promotion_customers'
+
+    id = Column(Integer, primary_key=True)
+    promotion_id = Column(Integer)
+    customer_id = Column(Integer)
+    added_date = Column(DateTime())
 
 class PromotionProductModel(Base):
     __tablename__ = 'promotion_products'

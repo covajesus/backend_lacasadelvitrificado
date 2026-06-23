@@ -2,15 +2,20 @@ from datetime import datetime
 import secrets
 
 from sqlalchemy import func, or_
+from sqlalchemy.exc import OperationalError, ProgrammingError
 
 from app.backend.db.models import (
+    CustomerModel,
     ProductModel,
+    PromotionCustomerModel,
     PromotionModel,
     PromotionProductModel,
     PromotionUsageModel,
 )
 from app.backend.services.crud.base_domain_service import BaseDomainService
 from app.backend.services.promotions.promotion_pricing_service import (
+    PROMOTION_AUDIENCE_ALL,
+    PROMOTION_AUDIENCE_SELECTED,
     PROMOTION_TYPE_COUPON,
     PROMOTION_TYPE_PRODUCT_DISCOUNT,
     PromotionPricingService,
@@ -86,11 +91,33 @@ class PromotionClass(BaseDomainService):
             for row in rows
         ]
 
+    def _load_customers(self, promotion_id):
+        rows = (
+            self.db.query(
+                PromotionCustomerModel.customer_id,
+                CustomerModel.social_reason,
+                CustomerModel.identification_number,
+            )
+            .join(CustomerModel, CustomerModel.id == PromotionCustomerModel.customer_id, isouter=True)
+            .filter(PromotionCustomerModel.promotion_id == promotion_id)
+            .all()
+        )
+        return [
+            {
+                'customer_id': row.customer_id,
+                'social_reason': row.social_reason,
+                'identification_number': row.identification_number,
+            }
+            for row in rows
+        ]
+
     def _serialize_row(self, row):
         start = row.start_date.strftime('%Y-%m-%d') if row.start_date else None
         end = row.end_date.strftime('%Y-%m-%d') if row.end_date else None
         products = self._load_products(row.id)
         total_discount = sum(item['discount_amount'] for item in products)
+        audience_type = int(getattr(row, 'audience_type', PROMOTION_AUDIENCE_ALL) or PROMOTION_AUDIENCE_ALL)
+        customers = self._load_customers(row.id) if int(row.promotion_type_id or 0) == PROMOTION_TYPE_COUPON else []
         return {
             'id': row.id,
             'promotion_type_id': int(row.promotion_type_id or PROMOTION_TYPE_PRODUCT_DISCOUNT),
@@ -104,6 +131,9 @@ class PromotionClass(BaseDomainService):
             'start_date': start,
             'end_date': end,
             'status_id': int(row.status_id if row.status_id is not None else 1),
+            'audience_type': audience_type,
+            'customers': customers,
+            'customer_ids': [int(item['customer_id']) for item in customers if item.get('customer_id')],
             'products': products,
             'total_discount_per_unit': round(total_discount, 2),
         }
@@ -129,6 +159,7 @@ class PromotionClass(BaseDomainService):
                 PromotionModel.start_date,
                 PromotionModel.end_date,
                 PromotionModel.status_id,
+                PromotionModel.audience_type,
             )
             .order_by(PromotionModel.id.desc())
         )
@@ -199,8 +230,9 @@ class PromotionClass(BaseDomainService):
             coupon_code = (promotion_inputs.coupon_code or '').strip().upper()
             if not coupon_code:
                 return 'Debe indicar el código del cupón.'
-            if not product_ids:
-                return 'Debe seleccionar al menos un producto para el cupón.'
+            minimum = float(promotion_inputs.minimum_purchase or 0)
+            if minimum <= 0:
+                return 'Los cupones deben tener una compra mínima mayor a 0.'
             duplicate = (
                 self.db.query(PromotionModel)
                 .filter(func.upper(PromotionModel.coupon_code) == coupon_code)
@@ -209,8 +241,29 @@ class PromotionClass(BaseDomainService):
             )
             if duplicate:
                 return 'Ya existe un cupón con ese código.'
+            audience_type = int(getattr(promotion_inputs, 'audience_type', PROMOTION_AUDIENCE_ALL) or PROMOTION_AUDIENCE_ALL)
+            if audience_type not in (PROMOTION_AUDIENCE_ALL, PROMOTION_AUDIENCE_SELECTED):
+                return 'Tipo de audiencia no válido.'
+            customer_ids = [int(cid) for cid in (promotion_inputs.customer_ids or []) if cid]
+            if audience_type == PROMOTION_AUDIENCE_SELECTED and not customer_ids:
+                return 'Debe seleccionar al menos un cliente para el cupón.'
 
         return None
+
+    def _replace_customers(self, promotion_id, audience_type, customer_ids):
+        self.db.query(PromotionCustomerModel).filter(
+            PromotionCustomerModel.promotion_id == promotion_id
+        ).delete(synchronize_session=False)
+        if int(audience_type or PROMOTION_AUDIENCE_ALL) != PROMOTION_AUDIENCE_SELECTED:
+            return
+        for customer_id in customer_ids:
+            self.db.add(
+                PromotionCustomerModel(
+                    promotion_id=promotion_id,
+                    customer_id=int(customer_id),
+                    added_date=datetime.utcnow(),
+                )
+            )
 
     def _replace_products(self, promotion_id, promotion_type_id, discount_percent, product_ids):
         self.db.query(PromotionProductModel).filter(
@@ -245,8 +298,12 @@ class PromotionClass(BaseDomainService):
             product_ids = [int(promotion_inputs.product_id)]
 
         coupon_code = None
+        audience_type = PROMOTION_AUDIENCE_ALL
+        customer_ids = []
         if promotion_type_id == PROMOTION_TYPE_COUPON:
             coupon_code = (promotion_inputs.coupon_code or '').strip().upper()
+            audience_type = int(getattr(promotion_inputs, 'audience_type', PROMOTION_AUDIENCE_ALL) or PROMOTION_AUDIENCE_ALL)
+            customer_ids = [int(cid) for cid in (promotion_inputs.customer_ids or []) if cid]
 
         new_row = PromotionModel(
             promotion_type_id=promotion_type_id,
@@ -259,12 +316,18 @@ class PromotionClass(BaseDomainService):
             start_date=_parse_optional_date(promotion_inputs.start_date),
             end_date=_parse_optional_date(promotion_inputs.end_date),
             status_id=1 if int(promotion_inputs.status_id or 0) == 1 else 0,
+            audience_type=audience_type,
             added_date=datetime.utcnow(),
             updated_date=datetime.utcnow(),
         )
         self.db.add(new_row)
         self.db.flush()
-        self._replace_products(new_row.id, promotion_type_id, promotion_inputs.discount_percent, product_ids)
+        if promotion_type_id == PROMOTION_TYPE_PRODUCT_DISCOUNT:
+            self._replace_products(new_row.id, promotion_type_id, promotion_inputs.discount_percent, product_ids)
+            self._replace_customers(new_row.id, PROMOTION_AUDIENCE_ALL, [])
+        else:
+            self._replace_products(new_row.id, promotion_type_id, promotion_inputs.discount_percent, [])
+            self._replace_customers(new_row.id, audience_type, customer_ids)
         self.db.commit()
         self.db.refresh(new_row)
         return {
@@ -283,12 +346,16 @@ class PromotionClass(BaseDomainService):
         if validation_error:
             return validation_error
 
-        promotion_type_id = int(promotion_inputs.promotion_type_id)
+        existing_type = int(existing.promotion_type_id or PROMOTION_TYPE_PRODUCT_DISCOUNT)
+        requested_type = int(promotion_inputs.promotion_type_id or existing_type)
+        if requested_type != existing_type:
+            return 'No se puede cambiar el tipo de promoción al editar.'
+
+        promotion_type_id = existing_type
         product_ids = [int(pid) for pid in (promotion_inputs.product_ids or []) if pid]
         if promotion_type_id == PROMOTION_TYPE_PRODUCT_DISCOUNT and promotion_inputs.product_id:
             product_ids = [int(promotion_inputs.product_id)]
 
-        existing.promotion_type_id = promotion_type_id
         existing.product_id = product_ids[0] if promotion_type_id == PROMOTION_TYPE_PRODUCT_DISCOUNT else None
         existing.name = promotion_inputs.name.strip()
         existing.description = (promotion_inputs.description or '').strip() or None
@@ -302,8 +369,19 @@ class PromotionClass(BaseDomainService):
         existing.start_date = _parse_optional_date(promotion_inputs.start_date)
         existing.end_date = _parse_optional_date(promotion_inputs.end_date)
         existing.status_id = 1 if int(promotion_inputs.status_id or 0) == 1 else 0
+        audience_type = int(getattr(promotion_inputs, 'audience_type', PROMOTION_AUDIENCE_ALL) or PROMOTION_AUDIENCE_ALL)
+        customer_ids = [int(cid) for cid in (promotion_inputs.customer_ids or []) if cid]
+        if promotion_type_id == PROMOTION_TYPE_COUPON:
+            existing.audience_type = audience_type
+        else:
+            existing.audience_type = PROMOTION_AUDIENCE_ALL
         existing.updated_date = datetime.utcnow()
-        self._replace_products(existing.id, promotion_type_id, promotion_inputs.discount_percent, product_ids)
+        if promotion_type_id == PROMOTION_TYPE_PRODUCT_DISCOUNT:
+            self._replace_products(existing.id, promotion_type_id, promotion_inputs.discount_percent, product_ids)
+            self._replace_customers(existing.id, PROMOTION_AUDIENCE_ALL, [])
+        else:
+            self._replace_products(existing.id, promotion_type_id, promotion_inputs.discount_percent, [])
+            self._replace_customers(existing.id, audience_type, customer_ids)
         self.db.commit()
         self.db.refresh(existing)
         return 'Promotion updated successfully'
@@ -321,13 +399,22 @@ class PromotionClass(BaseDomainService):
         )
 
     def delete(self, id):
+        self.db.query(PromotionCustomerModel).filter(PromotionCustomerModel.promotion_id == id).delete(
+            synchronize_session=False
+        )
         self.db.query(PromotionProductModel).filter(PromotionProductModel.promotion_id == id).delete(
             synchronize_session=False
         )
         return self.delete_entity(PromotionModel, id)
 
-    def validate_coupon(self, coupon_code, product_ids, subtotal):
-        return self.pricing.validate_coupon(coupon_code, product_ids, subtotal)
+    def validate_coupon(self, coupon_code, product_ids, subtotal, items=None, customer_rut=None):
+        return self.pricing.validate_coupon(
+            coupon_code, product_ids, subtotal, items=items, customer_rut=customer_rut
+        )
+
+    def get_visible_coupons(self, customer_rut=None):
+        coupons = self.pricing.get_visible_coupon_banners(customer_rut)
+        return {'status': 'success', 'data': coupons}
 
     def generate_coupon_code(self):
         for _ in range(25):
@@ -342,19 +429,67 @@ class PromotionClass(BaseDomainService):
         return {'status': 'error', 'message': 'No se pudo generar un código único.'}
 
     def get_usage_summary(self, promotion_id=None):
-        query = self.db.query(
-            PromotionUsageModel.promotion_id,
-            func.sum(PromotionUsageModel.total_discount_lost).label('total_discount_lost'),
-            func.count(PromotionUsageModel.id).label('usage_count'),
+        if not promotion_id:
+            query = self.db.query(
+                PromotionUsageModel.promotion_id,
+                func.sum(PromotionUsageModel.total_discount_lost).label('total_discount_lost'),
+                func.count(PromotionUsageModel.id).label('usage_count'),
+            )
+            rows = query.group_by(PromotionUsageModel.promotion_id).all()
+            return [
+                {
+                    'promotion_id': row.promotion_id,
+                    'usage_count': int(row.usage_count or 0),
+                    'total_discount_lost': float(row.total_discount_lost or 0),
+                }
+                for row in rows
+            ]
+
+        promotion = (
+            self.db.query(PromotionModel).filter(PromotionModel.id == int(promotion_id)).first()
         )
-        if promotion_id:
-            query = query.filter(PromotionUsageModel.promotion_id == promotion_id)
-        rows = query.group_by(PromotionUsageModel.promotion_id).all()
-        return [
-            {
-                'promotion_id': row.promotion_id,
-                'usage_count': int(row.usage_count or 0),
-                'total_discount_lost': float(row.total_discount_lost or 0),
-            }
-            for row in rows
-        ]
+        if not promotion:
+            return {'status': 'error', 'message': 'Promoción no encontrada.'}
+
+        usages = (
+            self.db.query(PromotionUsageModel)
+            .filter(PromotionUsageModel.promotion_id == int(promotion_id))
+            .all()
+        )
+
+        total_original = 0.0
+        total_paid = 0.0
+        total_discount = 0.0
+        for usage in usages:
+            quantity = max(int(usage.quantity or 1), 1)
+            original_unit = float(usage.original_unit_price or 0)
+            promotional_unit = float(usage.promotional_unit_price or 0)
+            line_discount = float(usage.total_discount_lost or 0)
+            if line_discount <= 0 and original_unit > promotional_unit:
+                line_discount = (original_unit - promotional_unit) * quantity
+            total_original += original_unit * quantity
+            total_paid += promotional_unit * quantity
+            total_discount += line_discount
+
+        total_original = round(total_original, 2)
+        total_paid = round(total_paid, 2)
+        total_discount = round(total_discount, 2)
+        effective_percent = (
+            round((total_discount / total_original) * 100, 2) if total_original > 0 else 0.0
+        )
+
+        return {
+            'status': 'success',
+            'data': {
+                'promotion_id': promotion.id,
+                'promotion_name': promotion.name,
+                'promotion_type_id': int(promotion.promotion_type_id or 0),
+                'coupon_code': promotion.coupon_code,
+                'usage_count': len(usages),
+                'total_original_amount': total_original,
+                'total_paid_amount': total_paid,
+                'total_discount_amount': total_discount,
+                'effective_discount_percent': effective_percent,
+                'configured_discount_percent': int(round(float(promotion.discount_percent or 0))),
+            },
+        }

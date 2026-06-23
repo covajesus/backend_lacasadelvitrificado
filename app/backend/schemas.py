@@ -136,6 +136,8 @@ class StorePromotion(BaseModel):
     start_date: Optional[str] = None
     end_date: Optional[str] = None
     status_id: int = 1
+    audience_type: int = 1
+    customer_ids: Optional[list[int]] = None
 
 class UpdatePromotion(BaseModel):
     promotion_type_id: int = 1
@@ -149,11 +151,20 @@ class UpdatePromotion(BaseModel):
     start_date: Optional[str] = None
     end_date: Optional[str] = None
     status_id: int = 1
+    audience_type: int = 1
+    customer_ids: Optional[list[int]] = None
+
+class ValidateCouponItem(BaseModel):
+    product_id: int
+    quantity: int = 1
+    unit_price: float = 0
 
 class ValidateCoupon(BaseModel):
     coupon_code: str
     product_ids: list[int] = []
     subtotal: float = 0
+    items: Optional[list[ValidateCouponItem]] = None
+    customer_rut: Optional[str] = None
 
 class UpdateSupplier(BaseModel):
     identification_number: str
@@ -259,6 +270,7 @@ class StoreSale(BaseModel):
     total: float
     cart: List[CartItem]
     shipping_method_id: int
+    coupon_code: Optional[str] = None
 
     @classmethod
     def as_form(
@@ -271,7 +283,8 @@ class StoreSale(BaseModel):
         tax: float = Form(...),
         total: float = Form(...),
         cart: str = Form(...),
-        shipping_method_id: int = Form(...)
+        shipping_method_id: int = Form(...),
+        coupon_code: Optional[str] = Form(None),
     ):
         try:
             # Parse the cart JSON string
@@ -326,7 +339,8 @@ class StoreSale(BaseModel):
                 tax=tax,
                 total=total,
                 cart=validated_cart,
-                shipping_method_id=shipping_method_id
+                shipping_method_id=shipping_method_id,
+                coupon_code=(coupon_code or '').strip().upper() or None,
             )
         except json.JSONDecodeError as e:
             raise ValueError(f"Invalid JSON in cart field: {str(e)}")

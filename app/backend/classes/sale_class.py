@@ -14,7 +14,6 @@ from zoneinfo import ZoneInfo
 from sqlalchemy import func, or_, and_
 from app.backend.classes.whatsapp_class import WhatsappClass
 from app.backend.services.promotions.promotion_pricing_service import PromotionPricingService
-from app.backend.services.promotions.promotion_pricing_service import PromotionPricingService
 from app.backend.core.constants import SaleStatus
 
 
@@ -586,6 +585,27 @@ class SaleClass:
             else:
                 # Solo obtener shipping_cost si shipping_method_id == 2
                 shipping_cost = self.get_shipping_cost()
+
+            if sale_inputs.rol_id not in (1, 2) and getattr(sale_inputs, 'coupon_code', None):
+                pricing_service = PromotionPricingService(self.db)
+                coupon_items = []
+                for item in sale_inputs.cart:
+                    unit_price = float(item.public_sale_price or 0)
+                    coupon_items.append({
+                        'product_id': item.id,
+                        'quantity': item.quantity,
+                        'unit_price': unit_price,
+                        'public_sale_price': unit_price,
+                    })
+                coupon_validation = pricing_service.validate_coupon(
+                    sale_inputs.coupon_code,
+                    [item.id for item in sale_inputs.cart],
+                    sum(row['unit_price'] * row['quantity'] for row in coupon_items),
+                    items=coupon_items,
+                    customer_rut=sale_inputs.customer_rut,
+                )
+                if coupon_validation.get('status') != 'success':
+                    return coupon_validation
             
             # Calcular total basado en costos del kardex si el rol es 1 o 2
             if sale_inputs.rol_id == 1 or sale_inputs.rol_id == 2:
@@ -654,10 +674,27 @@ class SaleClass:
                 self.db.add(sale_product)
             
             if sale_inputs.rol_id not in (1, 2):
-                PromotionPricingService(self.db).record_product_discount_usages(
+                pricing_service = PromotionPricingService(self.db)
+                pricing_service.record_product_discount_usages(
                     [{'product_id': item.id, 'quantity': item.quantity} for item in sale_inputs.cart],
                     sale_id=new_sale.id,
                 )
+                if getattr(sale_inputs, 'coupon_code', None):
+                    coupon_items = []
+                    for item in sale_inputs.cart:
+                        unit_price = float(item.public_sale_price or 0)
+                        coupon_items.append({
+                            'product_id': item.id,
+                            'quantity': item.quantity,
+                            'unit_price': unit_price,
+                            'public_sale_price': unit_price,
+                        })
+                    pricing_service.record_coupon_usages(
+                        sale_inputs.coupon_code,
+                        coupon_items,
+                        sale_id=new_sale.id,
+                        customer_rut=sale_inputs.customer_rut,
+                    )
 
             self.db.commit()
 
