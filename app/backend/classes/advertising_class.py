@@ -252,8 +252,6 @@ class AdvertisingClass(BaseDomainService):
         customers = promo_data.get('customers') or []
         product_id = self._resolve_campaign_product_id(int(promotion_id))
         site_url = WhatsappClass.get_campaign_site_url()
-        if product_id:
-            site_url = f'{site_url}?product_id={product_id}'
 
         return {
             'status': 'success',

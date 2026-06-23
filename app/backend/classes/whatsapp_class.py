@@ -2931,12 +2931,11 @@ class WhatsappClass:
         base = self.get_campaign_site_base_url()
         token = AuthenticationClass(self.db).generate_campaign_login_token(int(customer_id), phone)
         phone_param = re.sub(r'\D', '', str(phone or ''))
-        url = (
-            f"{base}/shoppings/login"
-            f"?phone={phone_param}&customer_id={int(customer_id)}&token={token}"
-        )
+        # Ruta sin query string: WhatsApp en celular abre un navegador interno que suele
+        # perder ?phone=...&token=... al usar botones URL de plantilla Meta.
+        url = f"{base}/shoppings/login/c/{int(customer_id)}/{phone_param}/{token}"
         if product_id:
-            url += f"&product_id={int(product_id)}"
+            url += f"/{int(product_id)}"
         return url
 
     def _campaign_url_button_suffix(self, site_url: str | None) -> str:
