@@ -1,13 +1,17 @@
 from datetime import datetime
 from decimal import Decimal, ROUND_HALF_UP
 
+from sqlalchemy import func
+
 from app.backend.classes.inventory_stock import sale_acceptance_unit_cost_from_movements
 from app.backend.core.constants import RequestReasonPrefix
 from app.backend.core.exceptions import ValidationError
 from app.backend.db.models import (
     InternalUseRequestModel,
     InternalUseRequestItemModel,
+    LotItemModel,
     ProductModel,
+    UnitFeatureModel,
     UnitMeasureModel,
     CustomerModel,
     SettingModel,
@@ -85,8 +89,32 @@ class InternalUseClass(LinkedRequestService):
     def _inventory_units(self, unit_quantity) -> int:
         return InventorySaleBridge.inventory_units(unit_quantity)
 
-    def _serialize_item(self, item):
-        return {
+    def _get_product_sale_unit_price(self, product_id: int) -> Decimal:
+        """Precio unitario de venta al público (sin descuentos de cliente)."""
+        row = (
+            self.db.query(
+                UnitFeatureModel.quantity_per_package,
+                func.max(LotItemModel.public_sale_price).label("public_sale_price"),
+            )
+            .select_from(ProductModel)
+            .outerjoin(UnitFeatureModel, UnitFeatureModel.product_id == ProductModel.id)
+            .outerjoin(LotItemModel, LotItemModel.product_id == ProductModel.id)
+            .filter(ProductModel.id == int(product_id))
+            .group_by(UnitFeatureModel.quantity_per_package)
+            .first()
+        )
+        if not row:
+            return Decimal("0")
+
+        qpp = Decimal(str(row.quantity_per_package or 1))
+        if qpp <= 0:
+            qpp = Decimal("1")
+
+        package_price = Decimal(str(row.public_sale_price or 0))
+        return (package_price / qpp).quantize(Decimal("1"), rounding=ROUND_HALF_UP)
+
+    def _serialize_item(self, item, *, include_sale_analysis: bool = False):
+        payload = {
             "id": item.id,
             "product_id": item.product_id,
             "product_name": item.product_name,
@@ -95,6 +123,75 @@ class InternalUseClass(LinkedRequestService):
             "line_total": float(item.line_total) if item.line_total is not None else 0,
             "unit_measure": item.unit_measure or "",
         }
+
+        if not include_sale_analysis:
+            return payload
+
+        qty = Decimal(str(item.unit_quantity or 0))
+        line_cost = Decimal(str(item.line_total or 0))
+        sale_unit = self._get_product_sale_unit_price(item.product_id)
+        line_sale = (qty * sale_unit).quantize(Decimal("1"), rounding=ROUND_HALF_UP)
+        line_margin = line_sale - line_cost
+
+        payload.update(
+            {
+                "unit_sale_price": float(sale_unit),
+                "line_sale_total": float(line_sale),
+                "line_margin": float(line_margin),
+            }
+        )
+        return payload
+
+    def _serialize_request(
+        self,
+        request,
+        items=None,
+        items_summary=None,
+        *,
+        include_items: bool = False,
+        include_sale_analysis: bool = False,
+    ):
+        items = items if items is not None else self._request_items(request.id)
+        summary = items_summary or self._items_quantity_summary(items)
+        if items:
+            subtotal, tax, total = self._calculate_totals(items)
+        else:
+            subtotal = Decimal(str(request.subtotal or 0))
+            tax = Decimal(str(request.tax or 0))
+            total = Decimal(str(request.total or 0))
+
+        payload = {
+            "id": request.id,
+            "description": request.description or "",
+            "notes": request.notes or "",
+            "sale_id": request.sale_id,
+            "subtotal": float(subtotal),
+            "tax": float(tax),
+            "total": float(total),
+            "cost_total": float(total),
+            "items_count": summary.get("items_count", 0),
+            "quantity_label": summary.get("quantity_label", "—"),
+            "added_date": request.added_date.strftime("%Y-%m-%d %H:%M:%S") if request.added_date else None,
+            "updated_date": request.updated_date.strftime("%Y-%m-%d %H:%M:%S") if request.updated_date else None,
+        }
+
+        if include_items:
+            serialized_items = [
+                self._serialize_item(item, include_sale_analysis=include_sale_analysis)
+                for item in items
+            ]
+            payload["items"] = serialized_items
+
+            if include_sale_analysis and serialized_items:
+                potential_sale_total = sum(
+                    Decimal(str(row.get("line_sale_total") or 0)) for row in serialized_items
+                )
+                cost_total = Decimal(str(total))
+                potential_margin = potential_sale_total - cost_total
+                payload["potential_sale_total"] = float(potential_sale_total)
+                payload["potential_margin"] = float(potential_margin)
+
+        return payload
 
     def _items_quantity_summary(self, items):
         return summarize_items_by_unit(
@@ -112,31 +209,6 @@ class InternalUseClass(LinkedRequestService):
             .order_by(InternalUseRequestItemModel.id)
             .all()
         )
-
-    def _serialize_request(self, request, items=None, items_summary=None):
-        items = items if items is not None else self._request_items(request.id)
-        summary = items_summary or self._items_quantity_summary(items)
-        if items:
-            subtotal, tax, total = self._calculate_totals(items)
-        else:
-            subtotal = Decimal(str(request.subtotal or 0))
-            tax = Decimal(str(request.tax or 0))
-            total = Decimal(str(request.total or 0))
-
-        return {
-            "id": request.id,
-            "description": request.description or "",
-            "notes": request.notes or "",
-            "sale_id": request.sale_id,
-            "subtotal": float(subtotal),
-            "tax": float(tax),
-            "total": float(total),
-            "items_count": summary.get("items_count", 0),
-            "quantity_label": summary.get("quantity_label", "—"),
-            "items": [self._serialize_item(item) for item in items],
-            "added_date": request.added_date.strftime("%Y-%m-%d %H:%M:%S") if request.added_date else None,
-            "updated_date": request.updated_date.strftime("%Y-%m-%d %H:%M:%S") if request.updated_date else None,
-        }
 
     def _delivery_address(self, internal_use_request_id, description):
         desc = (description or "").strip()
@@ -229,7 +301,13 @@ class InternalUseClass(LinkedRequestService):
             return {"status": "error", "message": "Registro de uso interno no encontrado."}
 
         items = self._request_items(internal_use_id)
-        return self._serialize_request(request, items, self._items_quantity_summary(items))
+        return self._serialize_request(
+            request,
+            items,
+            self._items_quantity_summary(items),
+            include_items=True,
+            include_sale_analysis=True,
+        )
 
     def _get_all(self, page, items_per_page, description, rol_id):
         if is_restricted_customer_role(rol_id):
@@ -245,7 +323,11 @@ class InternalUseClass(LinkedRequestService):
 
         def serialize_row(row):
             items = self._request_items(row.id)
-            return self._serialize_request(row, items, self._items_quantity_summary(items))
+            return self._serialize_request(
+                row,
+                items,
+                self._items_quantity_summary(items),
+            )
 
         if page > 0:
             return paginate_query(
