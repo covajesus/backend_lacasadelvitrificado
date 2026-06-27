@@ -133,6 +133,7 @@ class InternalUseClass(LinkedRequestService):
             "total": float(total),
             "items_count": summary.get("items_count", 0),
             "quantity_label": summary.get("quantity_label", "—"),
+            "items": [self._serialize_item(item) for item in items],
             "added_date": request.added_date.strftime("%Y-%m-%d %H:%M:%S") if request.added_date else None,
             "updated_date": request.updated_date.strftime("%Y-%m-%d %H:%M:%S") if request.updated_date else None,
         }
@@ -214,6 +215,21 @@ class InternalUseClass(LinkedRequestService):
 
     def get_all(self, page=0, items_per_page=10, description=None, rol_id=None):
         return self.safe(lambda: self._get_all(page, items_per_page, description, rol_id))
+
+    def get(self, internal_use_id: int):
+        return self.safe(lambda: self._get_one(int(internal_use_id)))
+
+    def _get_one(self, internal_use_id: int):
+        request = (
+            self.db.query(InternalUseRequestModel)
+            .filter(InternalUseRequestModel.id == internal_use_id)
+            .first()
+        )
+        if not request:
+            return {"status": "error", "message": "Registro de uso interno no encontrado."}
+
+        items = self._request_items(internal_use_id)
+        return self._serialize_request(request, items, self._items_quantity_summary(items))
 
     def _get_all(self, page, items_per_page, description, rol_id):
         if is_restricted_customer_role(rol_id):

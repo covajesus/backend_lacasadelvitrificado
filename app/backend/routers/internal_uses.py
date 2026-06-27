@@ -59,6 +59,16 @@ def store(
     return {"message": data}
 
 
+@internal_uses.get("/{id}")
+def show(
+    id: int,
+    session_user: UserLogin = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+):
+    data = InternalUseClass(db).get(id)
+    return {"message": data}
+
+
 @internal_uses.delete("/delete/{id}")
 def delete(
     id: int,
