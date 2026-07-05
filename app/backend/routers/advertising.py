@@ -111,9 +111,8 @@ def send(
 def send_progress(
     id: int,
     session_user: UserLogin = Depends(get_current_active_user),
-    db: Session = Depends(get_db),
 ):
-    data = AdvertisingClass(db).get_send_progress(id)
+    data = AdvertisingClass.get_send_progress_static(id)
     return {"message": data}
 
 

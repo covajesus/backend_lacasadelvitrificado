@@ -959,11 +959,15 @@ class AdvertisingClass(BaseDomainService):
             failure_details=failure_details[:10],
         )
 
-    def get_send_progress(self, campaign_id: int):
-        job = self._get_job(int(campaign_id))
+    @classmethod
+    def get_send_progress_static(cls, campaign_id: int):
+        job = cls._get_job(int(campaign_id))
         if not job:
             return {'status': 'error', 'message': 'No hay envío en curso para esta campaña.'}
         return {'status': 'success', 'data': job}
+
+    def get_send_progress(self, campaign_id: int):
+        return self.get_send_progress_static(campaign_id)
 
     def _create_campaign_delivery(self, campaign_id: int, customer_id: int) -> AdvertisingCampaignDeliveryModel:
         row = AdvertisingCampaignDeliveryModel(

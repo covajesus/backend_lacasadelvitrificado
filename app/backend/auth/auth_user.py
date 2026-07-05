@@ -17,7 +17,10 @@ def hash_password(password: str) -> str:
     """Genera un hash bcrypt de una contraseña"""
     return bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
 
-def get_current_user(token: str = Depends(oauth2_scheme)):
+def get_current_user(
+    token: str = Depends(oauth2_scheme),
+    db: Session = Depends(get_db),
+):
     try:
         decoded_token = jwt.decode(token, os.environ['SECRET_KEY'], algorithms=[os.environ['ALGORITHM']])
         username = decoded_token.get("sub")
@@ -26,25 +29,14 @@ def get_current_user(token: str = Depends(oauth2_scheme)):
     except JWTError:
         raise HTTPException(status_code=401, detail="Could not validate credentials", headers={"WWW-Authenticate": "Bearer"})
 
-    user = get_user(username)
+    user = db.query(UserModel).filter(UserModel.rut == username).first()
 
-    if user is None or user == "":
+    if user is None:
         raise HTTPException(status_code=401, detail="Could not validate credentials", headers={"WWW-Authenticate": "Bearer"})
     return user
-    
+
 def get_current_active_user(current_user: UserModel = Depends(get_current_user)):
     return current_user
-
-def get_user(rut):
-    db: Session = next(get_db())
-
-    user = db.query(UserModel). \
-                    filter(UserModel.rut == rut). \
-                    first()
-    
-    if not user:
-        return None
-    return user
 
 def generate_bcrypt_hash(input_string):
     encoded_string = input_string.encode('utf-8')

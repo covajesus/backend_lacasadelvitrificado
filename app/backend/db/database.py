@@ -12,6 +12,7 @@ _POOL_KWARGS = {
     "pool_pre_ping": True,
     "pool_recycle": 300,
     "pool_timeout": 30,
+    "pool_reset_on_return": "rollback",
     "echo": False,
 }
 
