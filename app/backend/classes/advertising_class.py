@@ -687,6 +687,7 @@ class AdvertisingClass(BaseDomainService):
             return 'La campaña ya fue enviada.'
 
         promotion_id = int(campaign.promotion_id) if campaign.promotion_id else None
+        is_custom_message = not promotion_id
         if promotion_id:
             _, promotion_error = self._get_active_promotion(promotion_id)
             if promotion_error:
@@ -702,6 +703,10 @@ class AdvertisingClass(BaseDomainService):
         )
         if not whatsapp_message.strip():
             return 'No se pudo generar el mensaje de la campaña.'
+
+        image_url = None
+        if campaign.image_path:
+            image_url = FileClass(self.db).get(campaign.image_path)
 
         if is_custom_message and not image_url and not WhatsappClass.get_custom_campaign_default_image_url():
             return (
