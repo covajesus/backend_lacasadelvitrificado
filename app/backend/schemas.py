@@ -517,6 +517,16 @@ class ShoppingProductInput(BaseModel):
             return float(normalized)
         return value
 
+    @field_validator('discount_percentage', mode='before')
+    @classmethod
+    def parse_decimal_discount(cls, value):
+        if isinstance(value, str):
+            normalized = value.strip().replace(',', '.')
+            if not normalized:
+                return 0.0
+            return float(normalized)
+        return float(value) if value is not None else 0.0
+
 class ShoppingList(BaseModel):
     page: int
 

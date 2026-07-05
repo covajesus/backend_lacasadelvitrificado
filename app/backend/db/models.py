@@ -86,7 +86,7 @@ class ShoppingProductModel(Base):
     quantity = Column(Integer)
     quantity_to_buy = Column(Float)
     original_unit_cost = Column(Float)
-    discount_percentage = Column(Integer)
+    discount_percentage = Column(Float)
     final_unit_cost = Column(Float)
     total_amount = Column(Float)
     added_date = Column(DateTime())
