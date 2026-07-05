@@ -3098,14 +3098,16 @@ class WhatsappClass:
             }
         )
 
-        components.append(
-            {
-                'type': 'button',
-                'sub_type': 'url',
-                'index': '0',
-                'parameters': [{'type': 'text', 'text': url_suffix[:1024]}],
-            }
-        )
+        # custom_advertisement_v1: botón URL estático en Meta, sin parámetros.
+        if not is_custom_message:
+            components.append(
+                {
+                    'type': 'button',
+                    'sub_type': 'url',
+                    'index': '0',
+                    'parameters': [{'type': 'text', 'text': url_suffix[:1024]}],
+                }
+            )
 
         payload = {
             'messaging_product': 'whatsapp',

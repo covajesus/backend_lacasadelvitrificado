@@ -347,7 +347,7 @@ class AdvertisingClass(BaseDomainService):
                 'message_variable': self.build_campaign_whatsapp_message(None, message),
                 'has_url_button': True,
                 'site_button_label': WhatsappClass.get_custom_site_button_label(),
-                'site_url': WhatsappClass.get_campaign_site_url(),
+                'site_url': WhatsappClass.get_campaign_site_base_url(),
             },
         }
 
@@ -445,7 +445,11 @@ class AdvertisingClass(BaseDomainService):
                 if is_custom_message
                 else WhatsappClass.CAMPAIGN_SITE_BUTTON_LABEL
             ),
-            'site_url': WhatsappClass.get_campaign_site_url(),
+            'site_url': (
+                WhatsappClass.get_campaign_site_base_url()
+                if is_custom_message
+                else WhatsappClass.get_campaign_site_url()
+            ),
             'image_path': image_path,
             'image_url': image_url,
             'audience_type': audience_type,
@@ -829,10 +833,14 @@ class AdvertisingClass(BaseDomainService):
                 customer.phone,
                 whatsapp_message,
                 image_url=image_url,
-                site_url=whatsapp.build_campaign_site_url_for_customer(
-                    customer.id,
-                    customer.phone,
-                    product_id=campaign_product_id if not is_custom_message else None,
+                site_url=(
+                    None
+                    if is_custom_message
+                    else whatsapp.build_campaign_site_url_for_customer(
+                        customer.id,
+                        customer.phone,
+                        product_id=campaign_product_id,
+                    )
                 ),
                 promotion_type_id=promotion_type_id,
                 template_body_params=template_body_params,
