@@ -326,8 +326,7 @@ class AdvertisingClass(BaseDomainService):
         if not body:
             return ''
 
-        lines = [body, '', 'Toca el botón *Ir a la promoción* para ver la tienda.']
-        return '\n'.join(lines)
+        return body
 
     def get_message_preview(self, message: str | None = None):
         whatsapp_message = self.build_campaign_whatsapp_message(None, message)
@@ -337,8 +336,7 @@ class AdvertisingClass(BaseDomainService):
             'status': 'success',
             'data': {
                 'whatsapp_message': whatsapp_message,
-                'site_button_label': WhatsappClass.CAMPAIGN_SITE_BUTTON_LABEL,
-                'site_url': WhatsappClass.get_campaign_site_url(),
+                'has_url_button': False,
             },
         }
 
@@ -416,6 +414,7 @@ class AdvertisingClass(BaseDomainService):
             int(promotion_id) if promotion_id else None,
             getattr(row, 'message', None),
         )
+        is_custom_message = not promotion_id
 
         return {
             'id': row.id,
@@ -425,8 +424,11 @@ class AdvertisingClass(BaseDomainService):
             'promotion_type_label': promotion_type_label,
             'message': row.message,
             'whatsapp_message': whatsapp_preview,
-            'site_button_label': WhatsappClass.CAMPAIGN_SITE_BUTTON_LABEL,
-            'site_url': WhatsappClass.get_campaign_site_url(),
+            'has_url_button': not is_custom_message,
+            'site_button_label': (
+                None if is_custom_message else WhatsappClass.CAMPAIGN_SITE_BUTTON_LABEL
+            ),
+            'site_url': None if is_custom_message else WhatsappClass.get_campaign_site_url(),
             'image_path': image_path,
             'image_url': image_url,
             'audience_type': audience_type,
@@ -763,6 +765,7 @@ class AdvertisingClass(BaseDomainService):
         campaign_product_id = self._resolve_campaign_product_id(promotion_id)
         promotion_type_id = None
         template_body_params = None
+        is_custom_message = not promotion_id
         if promotion_id:
             promotion_row, _ = self._get_active_promotion(int(promotion_id))
             if promotion_row:
@@ -783,13 +786,18 @@ class AdvertisingClass(BaseDomainService):
                 customer.phone,
                 whatsapp_message,
                 image_url=image_url,
-                site_url=whatsapp.build_campaign_site_url_for_customer(
-                    customer.id,
-                    customer.phone,
-                    product_id=campaign_product_id,
+                site_url=(
+                    None
+                    if is_custom_message
+                    else whatsapp.build_campaign_site_url_for_customer(
+                        customer.id,
+                        customer.phone,
+                        product_id=campaign_product_id,
+                    )
                 ),
                 promotion_type_id=promotion_type_id,
                 template_body_params=template_body_params,
+                is_custom_message=is_custom_message,
             )
             message_id = str(result.get('message_id') or '').strip()
             if message_id:

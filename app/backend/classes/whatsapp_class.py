@@ -2971,14 +2971,36 @@ class WhatsappClass:
             suffix = f'{suffix}?{parsed.query}' if suffix else parsed.query
         return suffix or 'shoppings/login'
 
+    @classmethod
+    def get_campaign_template_language(cls, is_custom_message: bool = False) -> str:
+        if is_custom_message:
+            return (
+                os.getenv('WHATSAPP_CAMPAIGN_TEMPLATE_CUSTOM_LANG')
+                or os.getenv('WHATSAPP_CAMPAIGN_TEMPLATE_LANG')
+                or 'es'
+            ).strip()
+        return (os.getenv('WHATSAPP_CAMPAIGN_TEMPLATE_LANG') or 'es').strip()
+
+    @classmethod
+    def has_custom_image_template(cls) -> bool:
+        return bool((os.getenv('WHATSAPP_CAMPAIGN_TEMPLATE_CUSTOM_IMAGE_NAME') or '').strip())
+
     def _get_campaign_template_name(
         self,
         has_image: bool,
         promotion_type_id: int | None = None,
+        is_custom_message: bool = False,
     ) -> str:
         from app.backend.services.promotions.promotion_pricing_service import (
             PROMOTION_TYPE_PRODUCT_DISCOUNT,
         )
+
+        if is_custom_message:
+            if has_image and self.has_custom_image_template():
+                return os.getenv('WHATSAPP_CAMPAIGN_TEMPLATE_CUSTOM_IMAGE_NAME', '').strip()
+            return (
+                os.getenv('WHATSAPP_CAMPAIGN_TEMPLATE_CUSTOM_NAME') or 'custom_advertisement_v1'
+            ).strip()
 
         if int(promotion_type_id or 0) == PROMOTION_TYPE_PRODUCT_DISCOUNT:
             if has_image:
@@ -3004,21 +3026,31 @@ class WhatsappClass:
         site_url: str | None,
         promotion_type_id: int | None = None,
         template_body_params: list[str] | None = None,
+        is_custom_message: bool = False,
     ) -> tuple[dict, str]:
         from app.backend.services.promotions.promotion_pricing_service import (
             PROMOTION_TYPE_PRODUCT_DISCOUNT,
         )
 
-        template_name = self._get_campaign_template_name(bool(image_url), promotion_type_id)
-        language_code = (os.getenv('WHATSAPP_CAMPAIGN_TEMPLATE_LANG') or 'es').strip()
+        template_name = self._get_campaign_template_name(
+            bool(image_url),
+            promotion_type_id,
+            is_custom_message=is_custom_message,
+        )
+        language_code = self.get_campaign_template_language(is_custom_message=is_custom_message)
         url_suffix = self._campaign_url_button_suffix(site_url)
 
         components: list[dict] = []
-        if image_url:
+        effective_image_url = image_url
+        if is_custom_message and image_url and not self.has_custom_image_template():
+            # custom_advertisement_v1 es solo texto; no enviar header de imagen salvo plantilla aparte.
+            effective_image_url = None
+
+        if effective_image_url:
             components.append(
                 {
                     'type': 'header',
-                    'parameters': [{'type': 'image', 'image': {'link': image_url}}],
+                    'parameters': [{'type': 'image', 'image': {'link': effective_image_url}}],
                 }
             )
 
@@ -3035,23 +3067,29 @@ class WhatsappClass:
         else:
             clean_message = self._clean_text_for_whatsapp(message or '').strip()
             if not clean_message:
-                clean_message = 'Tenemos una promoción especial para ti.'
+                clean_message = (
+                    'Tenemos novedades para ti.'
+                    if is_custom_message
+                    else 'Tenemos una promoción especial para ti.'
+                )
             body_parameters = [{'type': 'text', 'text': clean_message[:1024]}]
 
-        components.extend(
-            [
-                {
-                    'type': 'body',
-                    'parameters': body_parameters,
-                },
+        components.append(
+            {
+                'type': 'body',
+                'parameters': body_parameters,
+            }
+        )
+
+        if not is_custom_message:
+            components.append(
                 {
                     'type': 'button',
                     'sub_type': 'url',
                     'index': '0',
                     'parameters': [{'type': 'text', 'text': url_suffix[:1024]}],
-                },
-            ]
-        )
+                }
+            )
 
         payload = {
             'messaging_product': 'whatsapp',
@@ -3073,6 +3111,7 @@ class WhatsappClass:
         site_url: str | None = None,
         promotion_type_id: int | None = None,
         template_body_params: list[str] | None = None,
+        is_custom_message: bool = False,
     ) -> dict:
         """Envía campaña con plantilla MARKETING (válida fuera de la ventana de 24 h)."""
         url = 'https://graph.facebook.com/v22.0/790586727468909/messages'
@@ -3093,6 +3132,7 @@ class WhatsappClass:
             site_url,
             promotion_type_id=promotion_type_id,
             template_body_params=template_body_params,
+            is_custom_message=is_custom_message,
         )
 
         try:
