@@ -700,8 +700,8 @@ class ShoppingClass:
                     updated_date=datetime.utcnow()
                 )
                 self.db.add(new_shopping_product)
-                self.db.commit()
-                self.db.refresh(new_shopping_product)
+
+            self.db.commit()
 
             return {"detail": "Shopping stored successfully", "shopping_id": new_shopping.id}
         except Exception as e:

@@ -99,12 +99,14 @@ class AdvertisingClass(BaseDomainService):
         with cls._send_jobs_lock:
             cls._send_jobs.pop(int(campaign_id), None)
 
+    @staticmethod
     def _wait_for_whatsapp_delivery_status(
-        self,
         message_ids: list[str],
         timeout_seconds: float = CAMPAIGN_DELIVERY_WAIT_SECONDS,
     ) -> dict[str, dict]:
         """Espera webhooks de Meta (sent/delivered/failed) antes de contar éxitos."""
+        from app.backend.db.database import background_session
+
         unique_ids = [str(mid).strip() for mid in message_ids if str(mid or '').strip()]
         if not unique_ids:
             return {}
@@ -114,11 +116,12 @@ class AdvertisingClass(BaseDomainService):
         resolved: dict[str, dict] = {}
 
         while pending and time.time() < deadline:
-            rows = (
-                self.db.query(WhatsAppMessageModel)
-                .filter(WhatsAppMessageModel.message_id.in_(list(pending)))
-                .all()
-            )
+            with background_session() as db:
+                rows = (
+                    db.query(WhatsAppMessageModel)
+                    .filter(WhatsAppMessageModel.message_id.in_(list(pending)))
+                    .all()
+                )
             for row in rows:
                 status = str(row.status or 'sent').strip().lower()
                 if status in CAMPAIGN_DELIVERY_SUCCESS_STATUSES or status == 'failed':
@@ -132,11 +135,12 @@ class AdvertisingClass(BaseDomainService):
                 time.sleep(CAMPAIGN_DELIVERY_POLL_SECONDS)
 
         if pending:
-            rows = (
-                self.db.query(WhatsAppMessageModel)
-                .filter(WhatsAppMessageModel.message_id.in_(list(pending)))
-                .all()
-            )
+            with background_session() as db:
+                rows = (
+                    db.query(WhatsAppMessageModel)
+                    .filter(WhatsAppMessageModel.message_id.in_(list(pending)))
+                    .all()
+                )
             found = {row.message_id: row for row in rows}
             for message_id in pending:
                 row = found.get(message_id)
@@ -756,9 +760,9 @@ class AdvertisingClass(BaseDomainService):
 
     @staticmethod
     def _send_campaign_worker(campaign_id: int) -> None:
-        from app.backend.db.database import SessionLocal
+        from app.backend.db.database import BackgroundSessionLocal
 
-        db = SessionLocal()
+        db = BackgroundSessionLocal()
         try:
             AdvertisingClass(db)._send_campaign_with_progress(campaign_id)
         except Exception as exc:
@@ -803,7 +807,8 @@ class AdvertisingClass(BaseDomainService):
             )
             return
 
-        whatsapp = WhatsappClass(self.db)
+        from app.backend.db.database import BackgroundSessionLocal
+
         sent_count = 0
         failed_count = 0
         failure_details: list[str] = []
@@ -819,6 +824,7 @@ class AdvertisingClass(BaseDomainService):
                 template_body_params = self.get_product_discount_template_body_params(int(promotion_id))
 
         for index, customer in enumerate(recipients, start=1):
+            whatsapp = WhatsappClass(self.db)
             customer_label = customer.social_reason or customer.identification_number or f'Cliente #{customer.id}'
             self._update_job(
                 campaign_id,
@@ -877,16 +883,22 @@ class AdvertisingClass(BaseDomainService):
                 failed_count=failed_count,
                 current_customer=customer_label,
             )
-            time.sleep(0.35)
+            self.db.commit()
+            if index < len(recipients):
+                self.db.close()
+                time.sleep(0.35)
+                self.db = BackgroundSessionLocal()
 
         if pending_deliveries:
             self._update_job(
                 campaign_id,
                 current_customer='Verificando entrega con Meta…',
             )
-            delivery_status = self._wait_for_whatsapp_delivery_status(
+            self.db.close()
+            delivery_status = AdvertisingClass._wait_for_whatsapp_delivery_status(
                 [item['message_id'] for item in pending_deliveries]
             )
+            self.db = BackgroundSessionLocal()
             for item in pending_deliveries:
                 info = delivery_status.get(item['message_id'], {'status': 'unknown'})
                 delivery_row = (
@@ -918,6 +930,15 @@ class AdvertisingClass(BaseDomainService):
             failed_count,
             failure_details,
         )
+
+        campaign = (
+            self.db.query(AdvertisingCampaignModel)
+            .filter(AdvertisingCampaignModel.id == campaign_id)
+            .first()
+        )
+        if not campaign:
+            self._update_job(campaign_id, done=True, error='Campaña no encontrada al finalizar.')
+            return
 
         campaign.status_id = STATUS_SENT
         campaign.sent_count = sent_count
