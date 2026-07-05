@@ -24,6 +24,9 @@ load_dotenv()
 
 class WhatsappClass:
     CAMPAIGN_SITE_BUTTON_LABEL = 'Ir a la promoción'
+    CAMPAIGN_CUSTOM_SITE_BUTTON_LABEL = 'Ir a la web'
+    CUSTOM_TEMPLATE_INTRO = '¡Hola! Tenemos un nuevo mensaje para ti'
+    CUSTOM_TEMPLATE_OUTRO = 'Toca el botón *Ir a la web*.'
     _chat_sessions = {}
     _EXIT_WORDS = frozenset(
         {
@@ -2931,6 +2934,18 @@ class WhatsappClass:
             self.db.rollback()
 
     @classmethod
+    def get_custom_campaign_default_image_url(cls) -> str | None:
+        url = (os.getenv('WHATSAPP_CAMPAIGN_CUSTOM_DEFAULT_IMAGE_URL') or '').strip()
+        return url or None
+
+    @classmethod
+    def get_custom_site_button_label(cls) -> str:
+        return (
+            os.getenv('WHATSAPP_CAMPAIGN_CUSTOM_SITE_BUTTON_LABEL')
+            or cls.CAMPAIGN_CUSTOM_SITE_BUTTON_LABEL
+        ).strip()
+
+    @classmethod
     def get_campaign_site_base_url(cls) -> str:
         return (os.getenv('WHATSAPP_CAMPAIGN_SITE_URL') or 'https://lacasadelvitrificado.com').strip().rstrip('/')
 
@@ -2983,7 +2998,12 @@ class WhatsappClass:
 
     @classmethod
     def has_custom_image_template(cls) -> bool:
-        return bool((os.getenv('WHATSAPP_CAMPAIGN_TEMPLATE_CUSTOM_IMAGE_NAME') or '').strip())
+        return True
+
+    def _resolve_custom_campaign_image_url(self, image_url: str | None) -> str | None:
+        if image_url:
+            return image_url
+        return self.get_custom_campaign_default_image_url()
 
     def _get_campaign_template_name(
         self,
@@ -2996,8 +3016,6 @@ class WhatsappClass:
         )
 
         if is_custom_message:
-            if has_image and self.has_custom_image_template():
-                return os.getenv('WHATSAPP_CAMPAIGN_TEMPLATE_CUSTOM_IMAGE_NAME', '').strip()
             return (
                 os.getenv('WHATSAPP_CAMPAIGN_TEMPLATE_CUSTOM_NAME') or 'custom_advertisement_v1'
             ).strip()
@@ -3042,9 +3060,8 @@ class WhatsappClass:
 
         components: list[dict] = []
         effective_image_url = image_url
-        if is_custom_message and image_url and not self.has_custom_image_template():
-            # custom_advertisement_v1 es solo texto; no enviar header de imagen salvo plantilla aparte.
-            effective_image_url = None
+        if is_custom_message:
+            effective_image_url = self._resolve_custom_campaign_image_url(image_url)
 
         if effective_image_url:
             components.append(
@@ -3081,15 +3098,14 @@ class WhatsappClass:
             }
         )
 
-        if not is_custom_message:
-            components.append(
-                {
-                    'type': 'button',
-                    'sub_type': 'url',
-                    'index': '0',
-                    'parameters': [{'type': 'text', 'text': url_suffix[:1024]}],
-                }
-            )
+        components.append(
+            {
+                'type': 'button',
+                'sub_type': 'url',
+                'index': '0',
+                'parameters': [{'type': 'text', 'text': url_suffix[:1024]}],
+            }
+        )
 
         payload = {
             'messaging_product': 'whatsapp',

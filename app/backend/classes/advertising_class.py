@@ -328,15 +328,26 @@ class AdvertisingClass(BaseDomainService):
 
         return body
 
+    def build_custom_whatsapp_preview(self, message: str | None = None) -> str:
+        body = (message or '').strip()
+        if not body:
+            return ''
+        intro = WhatsappClass.CUSTOM_TEMPLATE_INTRO
+        outro = WhatsappClass.CUSTOM_TEMPLATE_OUTRO
+        return '\n'.join([intro, '', body, '', outro])
+
     def get_message_preview(self, message: str | None = None):
-        whatsapp_message = self.build_campaign_whatsapp_message(None, message)
+        whatsapp_message = self.build_custom_whatsapp_preview(message)
         if not whatsapp_message.strip():
             return 'Debe escribir el mensaje de WhatsApp.'
         return {
             'status': 'success',
             'data': {
                 'whatsapp_message': whatsapp_message,
-                'has_url_button': False,
+                'message_variable': self.build_campaign_whatsapp_message(None, message),
+                'has_url_button': True,
+                'site_button_label': WhatsappClass.get_custom_site_button_label(),
+                'site_url': WhatsappClass.get_campaign_site_url(),
             },
         }
 
@@ -410,11 +421,15 @@ class AdvertisingClass(BaseDomainService):
                 promotion_name = promotion.name
                 promotion_type_label = PromotionClass(self.db)._type_label(promotion.promotion_type_id)
 
-        whatsapp_preview = self.build_campaign_whatsapp_message(
-            int(promotion_id) if promotion_id else None,
-            getattr(row, 'message', None),
-        )
         is_custom_message = not promotion_id
+        whatsapp_preview = (
+            self.build_custom_whatsapp_preview(getattr(row, 'message', None))
+            if is_custom_message
+            else self.build_campaign_whatsapp_message(
+                int(promotion_id) if promotion_id else None,
+                getattr(row, 'message', None),
+            )
+        )
 
         return {
             'id': row.id,
@@ -424,11 +439,13 @@ class AdvertisingClass(BaseDomainService):
             'promotion_type_label': promotion_type_label,
             'message': row.message,
             'whatsapp_message': whatsapp_preview,
-            'has_url_button': not is_custom_message,
+            'has_url_button': True,
             'site_button_label': (
-                None if is_custom_message else WhatsappClass.CAMPAIGN_SITE_BUTTON_LABEL
+                WhatsappClass.get_custom_site_button_label()
+                if is_custom_message
+                else WhatsappClass.CAMPAIGN_SITE_BUTTON_LABEL
             ),
-            'site_url': None if is_custom_message else WhatsappClass.get_campaign_site_url(),
+            'site_url': WhatsappClass.get_campaign_site_url(),
             'image_path': image_path,
             'image_url': image_url,
             'audience_type': audience_type,
@@ -686,6 +703,12 @@ class AdvertisingClass(BaseDomainService):
         if not whatsapp_message.strip():
             return 'No se pudo generar el mensaje de la campaña.'
 
+        if is_custom_message and not image_url and not WhatsappClass.get_custom_campaign_default_image_url():
+            return (
+                'La plantilla custom_advertisement_v1 requiere imagen. '
+                'Adjunte una imagen a la campaña o configure WHATSAPP_CAMPAIGN_CUSTOM_DEFAULT_IMAGE_URL.'
+            )
+
         existing_job = self._get_job(campaign_id)
         if existing_job and not existing_job.get('done'):
             return {
@@ -749,13 +772,29 @@ class AdvertisingClass(BaseDomainService):
 
         recipients = self._resolve_recipients(campaign)
         promotion_id = int(campaign.promotion_id) if campaign.promotion_id else None
+        is_custom_message = not promotion_id
         whatsapp_message = self.build_campaign_whatsapp_message(
             promotion_id,
             campaign.message,
         )
+        if not whatsapp_message.strip():
+            self._update_job(campaign_id, done=True, error='No se pudo generar el mensaje de la campaña.')
+            return
+
         image_url = None
         if campaign.image_path:
             image_url = FileClass(self.db).get(campaign.image_path)
+
+        if is_custom_message and not image_url and not WhatsappClass.get_custom_campaign_default_image_url():
+            self._update_job(
+                campaign_id,
+                done=True,
+                error=(
+                    'La plantilla custom_advertisement_v1 requiere imagen. '
+                    'Adjunte una imagen a la campaña o configure WHATSAPP_CAMPAIGN_CUSTOM_DEFAULT_IMAGE_URL.'
+                ),
+            )
+            return
 
         whatsapp = WhatsappClass(self.db)
         sent_count = 0
@@ -765,7 +804,6 @@ class AdvertisingClass(BaseDomainService):
         campaign_product_id = self._resolve_campaign_product_id(promotion_id)
         promotion_type_id = None
         template_body_params = None
-        is_custom_message = not promotion_id
         if promotion_id:
             promotion_row, _ = self._get_active_promotion(int(promotion_id))
             if promotion_row:
@@ -786,14 +824,10 @@ class AdvertisingClass(BaseDomainService):
                 customer.phone,
                 whatsapp_message,
                 image_url=image_url,
-                site_url=(
-                    None
-                    if is_custom_message
-                    else whatsapp.build_campaign_site_url_for_customer(
-                        customer.id,
-                        customer.phone,
-                        product_id=campaign_product_id,
-                    )
+                site_url=whatsapp.build_campaign_site_url_for_customer(
+                    customer.id,
+                    customer.phone,
+                    product_id=campaign_product_id if not is_custom_message else None,
                 ),
                 promotion_type_id=promotion_type_id,
                 template_body_params=template_body_params,
