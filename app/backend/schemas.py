@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field, EmailStr, validator
+from pydantic import BaseModel, Field, EmailStr, validator, field_validator
 from fastapi import UploadFile, File
 from typing import Union, List, Dict, Optional
 from datetime import datetime, date
@@ -506,6 +506,16 @@ class ShoppingProductInput(BaseModel):
     final_unit_cost: float
     total_amount: float
     unit_measure_id: int
+
+    @field_validator('quantity', 'quantity_to_buy', mode='before')
+    @classmethod
+    def parse_decimal_quantity(cls, value):
+        if isinstance(value, str):
+            normalized = value.strip().replace(',', '.')
+            if not normalized:
+                return 0
+            return float(normalized)
+        return value
 
 class ShoppingList(BaseModel):
     page: int

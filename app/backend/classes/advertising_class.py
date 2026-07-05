@@ -29,9 +29,10 @@ AUDIENCE_SELECTED = 2
 STATUS_DRAFT = 0
 STATUS_SENT = 1
 
-CAMPAIGN_DELIVERY_WAIT_SECONDS = 15.0
+CAMPAIGN_DELIVERY_WAIT_SECONDS = 30.0
 CAMPAIGN_DELIVERY_POLL_SECONDS = 0.5
-CAMPAIGN_DELIVERY_SUCCESS_STATUSES = frozenset({'delivered', 'read'})
+# Meta confirma envío con `sent`; delivered/read pueden llegar tarde por webhook.
+CAMPAIGN_DELIVERY_SUCCESS_STATUSES = frozenset({'sent', 'delivered', 'read'})
 
 
 def _has_valid_phone(phone: str | None) -> bool:
@@ -153,11 +154,8 @@ class AdvertisingClass(BaseDomainService):
         if error_message:
             return error_message
         status = str(delivery_info.get('status') or '').strip().lower()
-        if status == 'sent':
-            return (
-                'Meta aceptó el mensaje pero no confirmó la entrega '
-                '(puede haber sido bloqueado por WhatsApp).'
-            )
+        if status == 'unknown':
+            return 'WhatsApp/Meta no confirmó el estado del mensaje.'
         return 'WhatsApp/Meta no entregó el mensaje.'
 
     @staticmethod
@@ -1178,7 +1176,7 @@ class AdvertisingClass(BaseDomainService):
         delivered_count = int(stats['delivered_count'] or 0)
         failed_count = int(stats['failed_count'] or 0)
 
-        successful_count = delivered_count
+        successful_count = delivered_count + int(stats['sent_count'] or 0)
         if int(campaign.sent_count or 0) != successful_count or int(campaign.failed_count or 0) != failed_count:
             campaign.sent_count = successful_count
             campaign.failed_count = failed_count
