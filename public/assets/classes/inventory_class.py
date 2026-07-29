@@ -478,10 +478,9 @@ class InventoryClass:
                 self.db.commit()
                 print(f"[+] Lot_item actualizado para producto {product_id}")
 
-            movement_unit_cost = self.weighted_unit_cost_after_purchase(
-                product_id, inventory_inputs.stock, inventory_inputs.unit_cost
-            )
-            print(f"[+] Unit cost para movimiento (ponderado desde movimientos): {movement_unit_cost}")
+            # Costo de ESTA entrada (no promediar con el kardex: el promedio se calcula al consultar).
+            movement_unit_cost = int(round(float(inventory_inputs.unit_cost or 0)))
+            print(f"[+] Unit cost para movimiento (costo de la entrada): {movement_unit_cost}")
 
             # Registrar el movimiento de inventario
             inventory_movement = InventoryMovementModel(
@@ -489,7 +488,7 @@ class InventoryClass:
                 lot_item_id=lot_item.id,
                 movement_type_id=3,  # Tipo de movimiento: Rectificación de Entrada
                 quantity=inventory_inputs.stock,
-                unit_cost=movement_unit_cost,  # Usa costo del kardex si existe
+                unit_cost=movement_unit_cost,
                 reason='Ajuste de inventario realizado.',
                 added_date=datetime.now()
             )
@@ -615,10 +614,9 @@ class InventoryClass:
             self.db.commit()
             self.db.refresh(new_lot_item)
 
-            movement_unit_cost = self.weighted_unit_cost_after_purchase(
-                inventory_inputs.product_id, inventory_inputs.stock, inventory_inputs.unit_cost
-            )
-            print(f"[+] Unit cost para movimiento (ponderado desde movimientos): {movement_unit_cost}")
+            # Costo de ESTA entrada (no promediar con el kardex: el promedio se calcula al consultar).
+            movement_unit_cost = int(round(float(inventory_inputs.unit_cost or 0)))
+            print(f"[+] Unit cost para movimiento (costo de la entrada): {movement_unit_cost}")
 
             # Crear lote asociado
             new_inventory_movement = InventoryMovementModel(
@@ -626,7 +624,7 @@ class InventoryClass:
                 lot_item_id=new_lot_item.id,
                 movement_type_id=1,
                 quantity=inventory_inputs.stock,
-                unit_cost=movement_unit_cost,  # Usa costo del kardex si existe
+                unit_cost=movement_unit_cost,
                 reason='Agregado producto al inventario.',
                 added_date=datetime.now()
             )

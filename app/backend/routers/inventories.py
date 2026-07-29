@@ -135,11 +135,20 @@ def create_inventory_from_shopping(
         
         for product_data in products_data:
             try:
-                # Calcular el unit_cost automáticamente
+                product_id = product_data["product_id"]
+                stock_packages = int(product_data.get("stock") or 0)
+                if stock_packages <= 0:
+                    continue
+
+                # Pre-inventario guarda paquetes; el kardex usa unidad base (Lts, etc.)
+                qpp = inventory_class._quantity_per_package_for_product(product_id)
+                stock_base = stock_packages * qpp
+
+                # Calcular el unit_cost automáticamente (CLP por unidad base)
                 result_calc = shopping_class.calculate_unit_cost_for_product(
                     shopping_id, 
-                    product_data["product_id"], 
-                    product_data["stock"]
+                    product_id, 
+                    stock_packages  # calculate_unit_cost espera paquetes y multiplica por qpp
                 )
                 
                 # Obtener el precio_x_litro del resultado (ahora devuelve un diccionario)
@@ -148,9 +157,9 @@ def create_inventory_from_shopping(
                 # Crear el objeto StoreInventory
                 store_inventory = StoreInventory(
                     user_id=session_user.id,
-                    product_id=product_data["product_id"],
+                    product_id=product_id,
                     location_id=1,  # Default location, puede ser parametrizable
-                    stock=product_data["stock"],
+                    stock=stock_base,
                     unit_cost=int(calculated_unit_cost),  # Convertir a int según el schema
                     public_sale_price=int(product_data.get("final_unit_cost", 0) * 1.3),  # Margen del 30%
                     private_sale_price=int(product_data.get("final_unit_cost", 0) * 1.2),  # Margen del 20%
@@ -163,15 +172,17 @@ def create_inventory_from_shopping(
                 # Crear el inventario
                 result = inventory_class.store(store_inventory)
                 created_inventories.append({
-                    "product_id": product_data["product_id"],
+                    "product_id": product_id,
                     "product_name": product_data["product"],
+                    "stock_packages": stock_packages,
+                    "stock_base_units": stock_base,
                     "calculated_unit_cost": calculated_unit_cost,
                     "result": result
                 })
                 
             except Exception as e:
                 errors.append({
-                    "product_id": product_data["product_id"],
+                    "product_id": product_data.get("product_id"),
                     "error": str(e)
                 })
         
