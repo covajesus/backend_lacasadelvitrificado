@@ -309,7 +309,16 @@ class ShoppingClass:
             # Obtener porcentaje de descuento desde settings
             settings = self.db.query(SettingModel).first()
             prepaid_discount_percentage = float(settings.prepaid_discount) if settings and settings.prepaid_discount and has_prepaid else 0.0
-            
+
+            # Una fila de shoppings_products por product_id: si hay duplicados en compra
+            # y en pre_inventory, un join solo por product_id hace producto cartesiano (2×2=4).
+            shopping_product_ids = (
+                self.db.query(func.min(ShoppingProductModel.id).label("id"))
+                .filter(ShoppingProductModel.shopping_id == id)
+                .group_by(ShoppingProductModel.product_id)
+                .subquery()
+            )
+
             query = (
                 self.db.query(
                     ShoppingProductModel.product_id,
@@ -327,13 +336,18 @@ class ShoppingClass:
                     PreInventoryStockModel.stock,
                     PreInventoryStockModel.lot_number
                 )
-                .join(PreInventoryStockModel, PreInventoryStockModel.product_id == ShoppingProductModel.product_id)
+                .join(shopping_product_ids, ShoppingProductModel.id == shopping_product_ids.c.id)
+                .join(
+                    PreInventoryStockModel,
+                    and_(
+                        PreInventoryStockModel.product_id == ShoppingProductModel.product_id,
+                        PreInventoryStockModel.shopping_id == id,
+                    ),
+                )
                 .join(ProductModel, ProductModel.id == ShoppingProductModel.product_id)
                 .join(UnitMeasureModel, UnitMeasureModel.id == ShoppingProductModel.unit_measure_id)
                 .join(CategoryModel, CategoryModel.id == ProductModel.category_id)
-                .filter(ShoppingProductModel.shopping_id == id)
-                .filter(PreInventoryStockModel.shopping_id == id)
-                .order_by(ShoppingProductModel.id)
+                .order_by(PreInventoryStockModel.id)
             )
 
             if page > 0:
