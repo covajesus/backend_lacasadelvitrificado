@@ -917,6 +917,10 @@ class ShoppingClass:
             total_productos_clp = 0
             
             for pre_stock in pre_inventory_stocks:
+                # Una sola vez por product_id (filas duplicadas en pre_inventory no deben inflar el total)
+                if pre_stock.product_id in product_amounts_clp:
+                    continue
+
                 # Obtener el stock (cantidad de paquetes)
                 stock_quantity = pre_stock.stock or 0
                 
@@ -958,8 +962,8 @@ class ShoppingClass:
                     print(f"    real_quantity = {stock_quantity} * {quantity_per_package} = {real_quantity}")
                     print(f"    product_amount_clp = {final_unit_cost} * {real_quantity} * {euro_value} = {product_amount_clp}")
                     product_amounts_clp[pre_stock.product_id] = product_amount_clp
-                    total_productos_clp += product_amount_clp
 
+            total_productos_clp = sum(product_amounts_clp.values())
             # Calcular el porcentaje de participación de cada producto en CLP
             # Fórmula: percentage = productAmountCLP / totalProductosCLP
             # Ajustar el último porcentaje para que la suma sea exactamente 1.0 (100%)
