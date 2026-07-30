@@ -20,6 +20,7 @@ from app.backend.db.models import (
 from app.backend.schemas import ShoppingCreateInput
 from app.backend.classes.product_class import ProductClass
 from app.backend.classes.inventory_stock import average_unit_cost_for_product
+from collections import defaultdict, deque
 from datetime import datetime
 from sqlalchemy import or_, and_, func
 
@@ -310,17 +311,12 @@ class ShoppingClass:
             settings = self.db.query(SettingModel).first()
             prepaid_discount_percentage = float(settings.prepaid_discount) if settings and settings.prepaid_discount and has_prepaid else 0.0
 
-            # Una fila de shoppings_products por product_id: si hay duplicados en compra
-            # y en pre_inventory, un join solo por product_id hace producto cartesiano (2×2=4).
-            shopping_product_ids = (
-                self.db.query(func.min(ShoppingProductModel.id).label("id"))
-                .filter(ShoppingProductModel.shopping_id == id)
-                .group_by(ShoppingProductModel.product_id)
-                .subquery()
-            )
-
-            query = (
+            # Misma línea de compra puede repetir product_id a propósito (ej. EcoGold 2 veces).
+            # Emparejar por orden: cada shoppings_products con el siguiente pre_inventory
+            # del mismo product_id. Evita el producto cartesiano (2×2=4) del join solo por product_id.
+            shopping_rows = (
                 self.db.query(
+                    ShoppingProductModel.id.label("shopping_product_id"),
                     ShoppingProductModel.product_id,
                     ShoppingProductModel.quantity,
                     ShoppingProductModel.quantity_to_buy,
@@ -333,45 +329,52 @@ class ShoppingClass:
                     ShoppingProductModel.discount_percentage,
                     ShoppingProductModel.total_amount,
                     ShoppingProductModel.final_unit_cost,
-                    PreInventoryStockModel.stock,
-                    PreInventoryStockModel.lot_number
-                )
-                .join(shopping_product_ids, ShoppingProductModel.id == shopping_product_ids.c.id)
-                .join(
-                    PreInventoryStockModel,
-                    and_(
-                        PreInventoryStockModel.product_id == ShoppingProductModel.product_id,
-                        PreInventoryStockModel.shopping_id == id,
-                    ),
                 )
                 .join(ProductModel, ProductModel.id == ShoppingProductModel.product_id)
                 .join(UnitMeasureModel, UnitMeasureModel.id == ShoppingProductModel.unit_measure_id)
                 .join(CategoryModel, CategoryModel.id == ProductModel.category_id)
-                .order_by(PreInventoryStockModel.id)
+                .filter(ShoppingProductModel.shopping_id == id)
+                .order_by(ShoppingProductModel.id)
+                .all()
             )
 
+            pre_rows = (
+                self.db.query(PreInventoryStockModel)
+                .filter(PreInventoryStockModel.shopping_id == id)
+                .order_by(PreInventoryStockModel.id)
+                .all()
+            )
+            pre_by_product = defaultdict(deque)
+            for pre in pre_rows:
+                pre_by_product[pre.product_id].append(pre)
+
+            paired = []
+            for shopping_product in shopping_rows:
+                pre_queue = pre_by_product.get(shopping_product.product_id)
+                pre = pre_queue.popleft() if pre_queue else None
+                paired.append((shopping_product, pre))
+
             if page > 0:
-                total_items = query.count()
+                total_items = len(paired)
                 total_pages = max((total_items + items_per_page - 1) // items_per_page, 1)
 
                 if page < 1 or page > total_pages:
                     return {"status": "error", "message": "Invalid page number"}
 
-                data = query.offset((page - 1) * items_per_page).limit(items_per_page).all()
+                data = paired[(page - 1) * items_per_page : page * items_per_page]
 
                 if not data:
                     return {"status": "error", "message": "No data found"}
 
                 serialized_data = []
-                for shopping_product in data:
-                    # Calcular final_unit_cost considerando descuento de prepago
+                for shopping_product, pre in data:
                     final_unit_cost = shopping_product.final_unit_cost or 0
                     if has_prepaid and prepaid_discount_percentage > 0:
                         final_unit_cost = final_unit_cost * (1 - prepaid_discount_percentage / 100)
-                    # Redondear a 2 decimales
                     final_unit_cost = round(final_unit_cost, 2)
                     
                     serialized_data.append({
+                        "id": shopping_product.shopping_product_id,
                         "product_id": shopping_product.product_id,
                         "quantity": shopping_product.quantity,
                         "unit_measure_id": shopping_product.unit_measure_id,
@@ -384,8 +387,8 @@ class ShoppingClass:
                         "category": shopping_product.category,
                         "discount_percentage": shopping_product.discount_percentage,
                         "total_amount": shopping_product.total_amount,
-                        "stock": shopping_product.stock,
-                        "lot_number": shopping_product.lot_number
+                        "stock": pre.stock if pre else 0,
+                        "lot_number": pre.lot_number if pre else None,
                     })
 
                 return {
@@ -397,18 +400,18 @@ class ShoppingClass:
                 }
 
             else:
-                data = query.all()
+                if not paired:
+                    return {"status": "error", "message": "No data found"}
 
                 serialized_data = []
-                for shopping_product in data:
-                    # Calcular final_unit_cost considerando descuento de prepago
+                for shopping_product, pre in paired:
                     final_unit_cost = shopping_product.final_unit_cost or 0
                     if has_prepaid and prepaid_discount_percentage > 0:
                         final_unit_cost = final_unit_cost * (1 - prepaid_discount_percentage / 100)
-                    # Redondear a 2 decimales
                     final_unit_cost = round(final_unit_cost, 2)
                     
                     serialized_data.append({
+                        "id": shopping_product.shopping_product_id,
                         "product_id": shopping_product.product_id,
                         "quantity": shopping_product.quantity,
                         "unit_measure_id": shopping_product.unit_measure_id,
@@ -421,8 +424,8 @@ class ShoppingClass:
                         "discount_percentage": shopping_product.discount_percentage,
                         "total_amount": shopping_product.total_amount,
                         "final_unit_cost": final_unit_cost,
-                        "stock": shopping_product.stock,
-                        "lot_number": shopping_product.lot_number
+                        "stock": pre.stock if pre else 0,
+                        "lot_number": pre.lot_number if pre else None,
                     })
 
                 return serialized_data
@@ -435,6 +438,7 @@ class ShoppingClass:
         try:
             query = (
                 self.db.query(
+                    ShoppingProductModel.id,
                     ShoppingProductModel.product_id,
                     ShoppingProductModel.quantity,
                     ShoppingProductModel.quantity_to_buy,
@@ -470,6 +474,7 @@ class ShoppingClass:
                     return {"status": "error", "message": "No data found"}
 
                 serialized_data = [{
+                    "id": shopping_product.id,
                     "product_id": shopping_product.product_id,
                     "quantity": shopping_product.quantity,
                     "unit_measure_id": shopping_product.unit_measure_id,
@@ -497,6 +502,7 @@ class ShoppingClass:
                 data = query.all()
 
                 serialized_data = [{
+                    "id": shopping_product.id,
                     "product_id": shopping_product.product_id,
                     "quantity": shopping_product.quantity,
                     "unit_measure_id": shopping_product.unit_measure_id,
@@ -917,11 +923,7 @@ class ShoppingClass:
             total_productos_clp = 0
             
             for pre_stock in pre_inventory_stocks:
-                # Una sola vez por product_id (filas duplicadas en pre_inventory no deben inflar el total)
-                if pre_stock.product_id in product_amounts_clp:
-                    continue
-
-                # Obtener el stock (cantidad de paquetes)
+                # Varias filas del mismo product_id son válidas (ej. EcoGold 2×48): sumar montos.
                 stock_quantity = pre_stock.stock or 0
                 
                 # Obtener final_unit_cost de shopping_products
@@ -961,7 +963,9 @@ class ShoppingClass:
                     print(f"    quantity_per_package: {quantity_per_package}")
                     print(f"    real_quantity = {stock_quantity} * {quantity_per_package} = {real_quantity}")
                     print(f"    product_amount_clp = {final_unit_cost} * {real_quantity} * {euro_value} = {product_amount_clp}")
-                    product_amounts_clp[pre_stock.product_id] = product_amount_clp
+                    product_amounts_clp[pre_stock.product_id] = (
+                        product_amounts_clp.get(pre_stock.product_id, 0) + product_amount_clp
+                    )
 
             total_productos_clp = sum(product_amounts_clp.values())
             # Calcular el porcentaje de participación de cada producto en CLP
