@@ -282,7 +282,7 @@ class UnitFeatureModel(Base):
 
     id = Column(Integer, primary_key=True)
     product_id = Column(Integer)
-    quantity_per_package = Column(Integer)
+    quantity_per_package = Column(Float)  # decimal permitido (ej. 5.5 kg/paq)
     quantity_per_pallet = Column(Integer)
     weight_per_unit = Column(String(255))
     weight_per_pallet = Column(String(255))

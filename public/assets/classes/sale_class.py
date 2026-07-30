@@ -1,6 +1,7 @@
 import re
+from decimal import Decimal, ROUND_HALF_UP
 
-from app.backend.db.models import SaleModel, CustomerModel, SaleProductModel, ProductModel, InventoryModel, UnitMeasureModel, SupplierModel, CategoryModel, LotItemModel, LotModel, InventoryMovementModel, UnitFeatureModel, SettingModel, UserModel, BudgetModel, BudgetProductModel
+from app.backend.db.models import SaleModel, CustomerModel, SaleProductModel, ProductModel, InventoryModel, UnitMeasureModel, SupplierModel, CategoryModel, LotItemModel, LotModel, InventoryMovementModel, UnitFeatureModel, SettingModel, UserModel, BudgetModel, BudgetProductModel, SampleRequestModel, UnitSaleRequestModel, UnitSaleRequestItemModel, InternalUseRequestModel, InternalUseRequestItemModel
 from app.backend.classes.inventory_stock import (
     fifo_lots_available,
     stock_sum_for_product,
@@ -10,8 +11,10 @@ from app.backend.classes.inventory_stock import (
 )
 from datetime import datetime
 from zoneinfo import ZoneInfo
-from sqlalchemy import func
+from sqlalchemy import func, or_, and_
 from app.backend.classes.whatsapp_class import WhatsappClass
+from app.backend.services.promotions.promotion_pricing_service import PromotionPricingService
+from app.backend.core.constants import SaleStatus
 
 
 def _inventory_movement_added_at():
@@ -38,25 +41,26 @@ class SaleClass:
         self.db = db
 
     def _quantity_per_package(self, product_id):
-        """Unidades de inventario por paquete (``unit_features``). Sin fila o valor inválido → 1."""
+        """Unidades de inventario por paquete (``unit_features``). Puede ser decimal (5.5). Sin fila → 1."""
         q = (
             self.db.query(UnitFeatureModel.quantity_per_package)
             .filter(UnitFeatureModel.product_id == product_id)
             .scalar()
         )
         if q is None:
-            return 1
+            return 1.0
         try:
-            n = int(q)
+            n = float(q)
         except (TypeError, ValueError):
-            return 1
-        return n if n > 0 else 1
+            return 1.0
+        return n if n > 0 else 1.0
 
     def _order_qty_to_base_units(self, product_id, order_qty):
         """Cantidad del pedido (p. ej. paquetes) × ``quantity_per_package`` → unidades de inventario/movimiento."""
         if order_qty is None:
             return 0
-        return int(order_qty) * self._quantity_per_package(product_id)
+        # Paquetes enteros × qpp (puede ser 5.5) → redondear a unidades base enteras
+        return int(round(float(order_qty) * self._quantity_per_package(product_id)))
 
     def _packages_from_base_units(self, product_id, base_units):
         """
@@ -222,6 +226,123 @@ class SaleClass:
         else:
             return {"status": "error", "message": f"Stock insuficiente para: {insufficient}"}
 
+    def _exclude_sample_sales(self, query):
+        """Oculta pedidos internos de muestras ($0), rechazados y ventas unitarias eliminadas."""
+        sample_sale_ids = (
+            self.db.query(SampleRequestModel.sale_id)
+            .filter(SampleRequestModel.sale_id.isnot(None))
+        )
+        active_unit_sale_ids = (
+            self.db.query(UnitSaleRequestModel.sale_id)
+            .filter(UnitSaleRequestModel.sale_id.isnot(None))
+        )
+        return query.filter(
+            SaleModel.status_id != 3,
+            SaleModel.total > 0,
+            ~or_(
+                SaleModel.id.in_(sample_sale_ids),
+                SaleModel.delivery_address.like("[MUESTRA #%"),
+                and_(
+                    SaleModel.delivery_address.like("[VENTA UNITARIA #%"),
+                    ~SaleModel.id.in_(active_unit_sale_ids),
+                ),
+                and_(
+                    SaleModel.delivery_address.like("[USO INTERNO #%"),
+                    ~SaleModel.id.in_(
+                        self.db.query(InternalUseRequestModel.sale_id).filter(
+                            InternalUseRequestModel.sale_id.isnot(None)
+                        )
+                    ),
+                ),
+            ),
+        )
+
+    def _unit_sale_totals_for_sale_id(self, sale_id):
+        """Totales desde líneas de venta unitaria (precio manual), si el pedido proviene de una."""
+        request = (
+            self.db.query(UnitSaleRequestModel)
+            .filter(UnitSaleRequestModel.sale_id == sale_id)
+            .first()
+        )
+        if not request:
+            return None
+
+        items = (
+            self.db.query(UnitSaleRequestItemModel)
+            .filter(UnitSaleRequestItemModel.unit_sale_request_id == request.id)
+            .all()
+        )
+        if not items:
+            return None
+
+        subtotal = sum(Decimal(str(item.line_total or 0)) for item in items)
+        tax = (subtotal * Decimal("0.19")).quantize(Decimal("1"), rounding=ROUND_HALF_UP)
+        total = subtotal + tax
+        return int(subtotal), int(tax), int(total)
+
+    def _unit_sale_items_for_sale_id(self, sale_id):
+        request = (
+            self.db.query(UnitSaleRequestModel)
+            .filter(UnitSaleRequestModel.sale_id == sale_id)
+            .first()
+        )
+        if not request:
+            return None
+
+        items = (
+            self.db.query(UnitSaleRequestItemModel)
+            .filter(UnitSaleRequestItemModel.unit_sale_request_id == request.id)
+            .order_by(UnitSaleRequestItemModel.id)
+            .all()
+        )
+        return items or None
+
+    def _internal_use_totals_for_sale_id(self, sale_id):
+        request = (
+            self.db.query(InternalUseRequestModel)
+            .filter(InternalUseRequestModel.sale_id == sale_id)
+            .first()
+        )
+        if not request:
+            return None
+
+        items = (
+            self.db.query(InternalUseRequestItemModel)
+            .filter(InternalUseRequestItemModel.internal_use_request_id == request.id)
+            .all()
+        )
+        if not items:
+            return None
+
+        subtotal = sum(Decimal(str(item.line_total or 0)) for item in items)
+        tax = Decimal("0")
+        total = subtotal
+        return int(subtotal), int(tax), int(total)
+
+    def _internal_use_items_for_sale_id(self, sale_id):
+        request = (
+            self.db.query(InternalUseRequestModel)
+            .filter(InternalUseRequestModel.sale_id == sale_id)
+            .first()
+        )
+        if not request:
+            return None
+        return (
+            self.db.query(InternalUseRequestItemModel)
+            .filter(InternalUseRequestItemModel.internal_use_request_id == request.id)
+            .order_by(InternalUseRequestItemModel.id)
+            .all()
+        )
+
+    def _resolve_sale_totals(self, sale_id, subtotal, tax, total):
+        unit_totals = self._unit_sale_totals_for_sale_id(sale_id)
+        if unit_totals:
+            return unit_totals
+        internal_totals = self._internal_use_totals_for_sale_id(sale_id)
+        if internal_totals:
+            return internal_totals
+        return subtotal, tax, total
+
     def get_all(self, rol_id = None, rut = None, page=0, items_per_page=10):
         customer = self.db.query(CustomerModel).filter(CustomerModel.identification_number == rut).first()
         
@@ -241,6 +362,7 @@ class SaleClass:
                     .join(CustomerModel, CustomerModel.id == SaleModel.customer_id, isouter=True)
                     .order_by(SaleModel.id.desc())
                 )
+                query = self._exclude_sample_sales(query)
             else:
                 query = (
                     self.db.query(
@@ -257,10 +379,11 @@ class SaleClass:
                     .filter(SaleModel.customer_id == customer.id if customer else None)
                     .order_by(SaleModel.id.desc())
                 )
+                query = self._exclude_sample_sales(query)
 
             if page > 0:
                 total_items = query.count()
-                total_pages = (total_items + items_per_page - 1)
+                total_pages = max((total_items + items_per_page - 1) // items_per_page, 1)
 
                 if page < 1 or page > total_pages:
                     return {"status": "error", "message": "Invalid page number"}
@@ -270,16 +393,21 @@ class SaleClass:
                 if not data:
                     return {"status": "error", "message": "No data found"}
 
-                serialized_data = [{
-                    "id": sale.id,
-                    "subtotal": sale.subtotal,
-                    "shipping_cost": sale.shipping_cost,
-                    "tax": sale.tax,
-                    "total": sale.total,
-                    "status_id": sale.status_id,
-                    "added_date": sale.added_date.strftime("%Y-%m-%d %H:%M:%S"),
-                    "customer_name": sale.customer_name
-                } for sale in data]
+                serialized_data = []
+                for sale in data:
+                    subtotal, tax, total = self._resolve_sale_totals(
+                        sale.id, sale.subtotal, sale.tax, sale.total
+                    )
+                    serialized_data.append({
+                        "id": sale.id,
+                        "subtotal": subtotal,
+                        "shipping_cost": sale.shipping_cost,
+                        "tax": tax,
+                        "total": total,
+                        "status_id": sale.status_id,
+                        "added_date": sale.added_date.strftime("%Y-%m-%d %H:%M:%S"),
+                        "customer_name": sale.customer_name
+                    })
 
                 return {
                     "total_items": total_items,
@@ -292,16 +420,21 @@ class SaleClass:
             else:
                 data = query.all()
 
-                serialized_data = [{  
-                    "id": sale.id,
-                    "subtotal": sale.subtotal,
-                    "shipping_cost": sale.shipping_cost,
-                    "tax": sale.tax,
-                    "total": sale.total,
-                    "status_id": sale.status_id,
-                    "added_date": sale.added_date.strftime("%Y-%m-%d %H:%M:%S"),
-                    "customer_name": sale.customer_name
-                } for sale in data]
+                serialized_data = []
+                for sale in data:
+                    subtotal, tax, total = self._resolve_sale_totals(
+                        sale.id, sale.subtotal, sale.tax, sale.total
+                    )
+                    serialized_data.append({
+                        "id": sale.id,
+                        "subtotal": subtotal,
+                        "shipping_cost": sale.shipping_cost,
+                        "tax": tax,
+                        "total": total,
+                        "status_id": sale.status_id,
+                        "added_date": sale.added_date.strftime("%Y-%m-%d %H:%M:%S"),
+                        "customer_name": sale.customer_name
+                    })
 
                 return serialized_data
 
@@ -332,6 +465,7 @@ class SaleClass:
                 continue
             
             product_name, minimum_stock = product_info
+            minimum_stock = int(minimum_stock or 0)
             
             # Verificar si hay suficiente stock (inventario en unidades base)
             if total_stock < needed_base:
@@ -452,6 +586,27 @@ class SaleClass:
             else:
                 # Solo obtener shipping_cost si shipping_method_id == 2
                 shipping_cost = self.get_shipping_cost()
+
+            if sale_inputs.rol_id not in (1, 2) and getattr(sale_inputs, 'coupon_code', None):
+                pricing_service = PromotionPricingService(self.db)
+                coupon_items = []
+                for item in sale_inputs.cart:
+                    unit_price = float(item.public_sale_price or 0)
+                    coupon_items.append({
+                        'product_id': item.id,
+                        'quantity': item.quantity,
+                        'unit_price': unit_price,
+                        'public_sale_price': unit_price,
+                    })
+                coupon_validation = pricing_service.validate_coupon(
+                    sale_inputs.coupon_code,
+                    [item.id for item in sale_inputs.cart],
+                    sum(row['unit_price'] * row['quantity'] for row in coupon_items),
+                    items=coupon_items,
+                    customer_rut=sale_inputs.customer_rut,
+                )
+                if coupon_validation.get('status') != 'success':
+                    return coupon_validation
             
             # Calcular total basado en costos del kardex si el rol es 1 o 2
             if sale_inputs.rol_id == 1 or sale_inputs.rol_id == 2:
@@ -475,6 +630,10 @@ class SaleClass:
                 else:
                     # Mantener el cálculo original para otros casos
                     total = subtotal + tax
+
+            coupon_code = None
+            if sale_inputs.rol_id not in (1, 2) and getattr(sale_inputs, 'coupon_code', None):
+                coupon_code = (sale_inputs.coupon_code or '').strip().upper() or None
   
             new_sale = SaleModel(
                 customer_id=customer_id,
@@ -487,6 +646,7 @@ class SaleClass:
                 total=total,
                 payment_support=photo_path,
                 delivery_address=sale_inputs.delivery_address,
+                coupon_code=coupon_code,
                 added_date=datetime.now()
             )
             self.db.add(new_sale)
@@ -518,7 +678,10 @@ class SaleClass:
                     price=price
                 )
                 self.db.add(sale_product)
-            
+
+            if status_id in (SaleStatus.IN_PROCESS, SaleStatus.DELIVERED):
+                PromotionPricingService(self.db).record_sale_promotion_usages(new_sale.id)
+
             self.db.commit()
 
             # Alerta WhatsApp al admin solo con envío a domicilio (no retiro en tienda).
@@ -551,6 +714,8 @@ class SaleClass:
         sales_products = self.db.query(SaleProductModel).filter(SaleProductModel.sale_id == sale_id).all()
 
         try:
+            PromotionPricingService(self.db).remove_sale_promotion_usages(sale_id)
+
             for sales_product in sales_products:
                 # Obtener el movimiento de inventario original
                 inventory_movement = self.db.query(InventoryMovementModel).filter(
@@ -581,6 +746,7 @@ class SaleClass:
 
                     print(f"[REVERSE] Movimiento reverso creado para producto {sales_product.product_id}: {reverse_quantity}")
 
+            self.db.commit()
             return "Inventory reversed successfully"
         except Exception as e:
             self.db.rollback()
@@ -605,11 +771,17 @@ class SaleClass:
             ).join(CustomerModel, CustomerModel.id == SaleModel.customer_id, isouter=True).filter(SaleModel.id == id).first()
 
             if data_query:
+                subtotal, tax, total = self._resolve_sale_totals(
+                    data_query.id,
+                    data_query.subtotal,
+                    data_query.tax,
+                    data_query.total,
+                )
                 sale_data = {
                     "id": data_query.id,
-                    "subtotal": data_query.subtotal,
-                    "tax": data_query.tax,
-                    "total": data_query.total,
+                    "subtotal": subtotal,
+                    "tax": tax,
+                    "total": total,
                     "shipping_cost": data_query.shipping_cost,
                     "status_id": data_query.status_id,
                     "dte_type_id": data_query.dte_type_id,
@@ -631,9 +803,14 @@ class SaleClass:
     
     def details(self, id):
         try:
+            pricing_service = PromotionPricingService(self.db)
+            discounts_map = pricing_service.get_active_product_discounts_map()
+
             data_query = self.db.query(
                 SaleProductModel.id,
+                SaleProductModel.product_id,
                 SaleProductModel.quantity,
+                SaleProductModel.price,
                 SaleModel.subtotal,
                 SaleModel.shipping_cost,
                 SaleModel.tax,
@@ -651,16 +828,65 @@ class SaleClass:
             if not data_query:
                 return {"error": "No se encontraron datos para el campo especificado."}
             
+            unit_sale_items = self._unit_sale_items_for_sale_id(id)
+            unit_sale_queues = {}
+            if unit_sale_items:
+                for us_item in unit_sale_items:
+                    unit_sale_queues.setdefault(us_item.product_id, []).append(us_item)
+
+            internal_use_items = self._internal_use_items_for_sale_id(id)
+            internal_use_queues = {}
+            if internal_use_items:
+                for iu_item in internal_use_items:
+                    internal_use_queues.setdefault(iu_item.product_id, []).append(iu_item)
+
             sale_data = []
+            resolved_subtotal = None
+            resolved_tax = None
+            resolved_total = None
+            is_unit_sale_order = bool(unit_sale_items)
+            is_internal_use_order = bool(internal_use_items)
 
             for data in data_query:
+                if resolved_subtotal is None:
+                    resolved_subtotal, resolved_tax, resolved_total = self._resolve_sale_totals(
+                        id,
+                        data.subtotal,
+                        data.tax,
+                        data.total,
+                    )
+
+                us_item = None
+                if unit_sale_items:
+                    queue = unit_sale_queues.get(data.product_id)
+                    if queue:
+                        us_item = queue.pop(0)
+
+                iu_item = None
+                if internal_use_items:
+                    queue = internal_use_queues.get(data.product_id)
+                    if queue:
+                        iu_item = queue.pop(0)
+
+                qty_item = us_item or iu_item
+
                 sale_details = {
                     "id": data.id,
+                    "product_id": data.product_id,
                     "quantity": data.quantity,
-                    "subtotal": data.subtotal,
-                    "tax": data.tax,
+                    "price": data.price,
+                    "is_unit_sale_order": is_unit_sale_order,
+                    "is_internal_use_order": is_internal_use_order,
+                    "is_unit_sale": us_item is not None,
+                    "is_internal_use": iu_item is not None,
+                    "unit_measure": (qty_item.unit_measure or "") if qty_item else None,
+                    "unit_quantity": float(qty_item.unit_quantity) if qty_item and qty_item.unit_quantity is not None else None,
+                    "unit_price": float(getattr(qty_item, "unit_price", None) or getattr(qty_item, "unit_cost", None) or 0) if qty_item else None,
+                    "line_total": float(qty_item.line_total) if qty_item and qty_item.line_total is not None else None,
+                    "subtotal": resolved_subtotal,
+                    "tax": resolved_tax,
                     "shipping_cost": data.shipping_cost,
-                    "total": data.total,
+                    "total": resolved_total,
                     "status_id": data.status_id,
                     "dte_type_id": data.dte_type_id,
                     "shipping_method_id": data.shipping_method_id,
@@ -670,6 +896,14 @@ class SaleClass:
                     "product": data.product,
                     "customer_name": data.customer_name
                 }
+
+                if data.product_id:
+                    promo = discounts_map.get(int(data.product_id))
+                    if promo:
+                        sale_details["has_product_promotion"] = True
+                        sale_details["promotion_discount_percent"] = promo["discount_percent"]
+                        sale_details["public_sale_price_original"] = promo["original_price"]
+                        sale_details["public_sale_price"] = promo["promotional_price"]
 
                 sale_data.append(sale_details)
 
@@ -898,6 +1132,8 @@ class SaleClass:
                                 self.db.add(sale_product)
                                 self.db.flush()
 
+                PromotionPricingService(self.db).record_sale_promotion_usages(id)
+
             existing_sale.status_id = status_id
             existing_sale.updated_date = datetime.utcnow()
 
@@ -912,6 +1148,45 @@ class SaleClass:
             if "could not obtain lock" in error_message.lower() or "lock" in error_message.lower() or "deadlock" in error_message.lower():
                 raise Exception(f"La venta está siendo procesada por otro proceso. Error: {error_message}")
             return {"status": "error", "message": error_message}
+
+    def delivered_order(self, order_id: int):
+        """
+        Mark sale/order as delivered (``status_id`` = ``SaleStatus.DELIVERED``)
+        and notify the customer via WhatsApp when a phone number exists.
+        """
+        change_result = self.change_status(order_id, SaleStatus.DELIVERED)
+
+        if isinstance(change_result, dict) and change_result.get("status") == "error":
+            return change_result
+        if change_result == "No data found":
+            return {"status": "error", "message": "Order not found"}
+        if change_result == "Sale already in this status":
+            return {"status": "success", "message": "Order already marked as delivered"}
+
+        try:
+            sale = self.db.query(SaleModel).filter(SaleModel.id == order_id).first()
+            if sale:
+                customer = (
+                    self.db.query(CustomerModel)
+                    .filter(CustomerModel.id == sale.customer_id)
+                    .first()
+                )
+                if customer and customer.phone:
+                    WhatsappClass(self.db).send_delivered_order(
+                        customer_phone=customer.phone,
+                        order_id=sale.id,
+                        sale_id=sale.id,
+                    )
+                    print(
+                        f"[DELIVERED_ORDER] WhatsApp alert sent to customer {customer.phone} "
+                        f"for order {order_id}"
+                    )
+                else:
+                    print("[DELIVERED_ORDER] Customer not found or missing phone; WhatsApp skipped")
+        except Exception as e:
+            print(f"[DELIVERED_ORDER] WhatsApp error for order {order_id}: {e}")
+
+        return {"status": "success", "message": "Order marked as delivered"}
 
     def get_sales_report(self, start_date=None, end_date=None):
         try:

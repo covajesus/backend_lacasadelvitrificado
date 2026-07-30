@@ -41,25 +41,26 @@ class SaleClass:
         self.db = db
 
     def _quantity_per_package(self, product_id):
-        """Unidades de inventario por paquete (``unit_features``). Sin fila o valor inválido → 1."""
+        """Unidades de inventario por paquete (``unit_features``). Puede ser decimal (5.5). Sin fila → 1."""
         q = (
             self.db.query(UnitFeatureModel.quantity_per_package)
             .filter(UnitFeatureModel.product_id == product_id)
             .scalar()
         )
         if q is None:
-            return 1
+            return 1.0
         try:
-            n = int(q)
+            n = float(q)
         except (TypeError, ValueError):
-            return 1
-        return n if n > 0 else 1
+            return 1.0
+        return n if n > 0 else 1.0
 
     def _order_qty_to_base_units(self, product_id, order_qty):
         """Cantidad del pedido (p. ej. paquetes) × ``quantity_per_package`` → unidades de inventario/movimiento."""
         if order_qty is None:
             return 0
-        return int(order_qty) * self._quantity_per_package(product_id)
+        # Paquetes enteros × qpp (puede ser 5.5) → redondear a unidades base enteras
+        return int(round(float(order_qty) * self._quantity_per_package(product_id)))
 
     def _packages_from_base_units(self, product_id, base_units):
         """

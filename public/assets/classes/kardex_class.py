@@ -18,11 +18,21 @@ class KardexClass:
         self.db = db
 
     @staticmethod
+    def _quantity_per_package_float(qpp) -> float:
+        """Respeta decimales (ej. 5.5 kg/paq). No usar int(): int(5.5)=5 → 33/5=6.6 paquetes."""
+        try:
+            v = float(qpp) if qpp is not None else 0.0
+        except (TypeError, ValueError):
+            return 0.0
+        return v if v > 0 else 0.0
+
+    @staticmethod
     def _kardex_list_row_dict(kardex):
         qty = int(kardex.quantity or 0)
-        qpp = kardex.quantity_per_package
-        qpp_val = int(qpp) if qpp is not None else 0
-        packages_count = round(qty / qpp_val, 2) if qpp_val > 0 else None
+        qpp_val = KardexClass._quantity_per_package_float(kardex.quantity_per_package)
+        packages_count = round(qty / qpp_val, 4) if qpp_val > 0 else None
+        # Mostrar qpp sin truncar (5.5 no 5)
+        qpp_out = round(qpp_val, 4) if qpp_val > 0 else None
         ac = int(kardex.average_cost or 0)
         return {
             "id": int(kardex.product_id or 0),
@@ -34,7 +44,7 @@ class KardexClass:
             "quantity": qty,
             "unit_measure_id": int(kardex.unit_measure_id) if kardex.unit_measure_id is not None else None,
             "unit_measure": (kardex.unit_measure or "").strip(),
-            "quantity_per_package": int(qpp) if qpp is not None else None,
+            "quantity_per_package": qpp_out,
             "packages_count": packages_count,
             "average_cost": ac,
             "total_value": qty * ac,
@@ -109,7 +119,7 @@ class KardexClass:
 
             if page > 0:
                 total_items = query.count()
-                total_pages = (total_items + items_per_page - 1) // items_per_page
+                total_pages = max((total_items + items_per_page - 1) // items_per_page, 1) // items_per_page
 
                 if page < 1 or page > total_pages:
                     return {"status": "error", "message": "Invalid page number"}
@@ -208,9 +218,9 @@ class KardexClass:
             if row:
                 qty = int(stock_sum_for_product(self.db, product_id))
                 ac = average_unit_cost_for_product(self.db, product_id)
-                qpp = row.quantity_per_package
-                qpp_val = int(qpp) if qpp is not None else 0
-                packages_count = round(qty / qpp_val, 2) if qpp_val > 0 else None
+                qpp_val = KardexClass._quantity_per_package_float(row.quantity_per_package)
+                packages_count = round(qty / qpp_val, 4) if qpp_val > 0 else None
+                qpp_out = round(qpp_val, 4) if qpp_val > 0 else None
                 return {
                     "id": row.product_id,
                     "product_id": row.product_id,
@@ -220,7 +230,7 @@ class KardexClass:
                     "quantity": qty,
                     "unit_measure_id": int(row.unit_measure_id) if row.unit_measure_id is not None else None,
                     "unit_measure": (row.unit_measure or "").strip(),
-                    "quantity_per_package": int(qpp) if qpp is not None else None,
+                    "quantity_per_package": qpp_out,
                     "packages_count": packages_count,
                     "average_cost": ac,
                     "total_value": qty * ac,

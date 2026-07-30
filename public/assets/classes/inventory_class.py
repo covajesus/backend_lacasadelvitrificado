@@ -24,16 +24,20 @@ class InventoryClass:
     def __init__(self, db):
         self.db = db
 
-    def _quantity_per_package_for_product(self, product_id: int) -> int:
+    def _quantity_per_package_for_product(self, product_id: int) -> float:
+        """``unit_features.quantity_per_package`` (puede ser decimal, ej. 5.5); si no hay fila o es 0 → 1."""
         row = (
             self.db.query(UnitFeatureModel)
             .filter(UnitFeatureModel.product_id == product_id)
             .first()
         )
         if row and row.quantity_per_package:
-            q = int(row.quantity_per_package)
-            return q if q > 0 else 1
-        return 1
+            try:
+                q = float(row.quantity_per_package)
+            except (TypeError, ValueError):
+                return 1.0
+            return q if q > 0 else 1.0
+        return 1.0
 
     def get_all(self, page=0, items_per_page=10):
         try:
