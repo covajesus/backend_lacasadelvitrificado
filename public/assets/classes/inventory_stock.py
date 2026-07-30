@@ -25,13 +25,37 @@ def _exclude_fifo_lot_consumption(query):
     return query.filter(~InventoryMovementModel.reason.like(f"{FIFO_LOT_CONSUMPTION_REASON_PREFIX}%"))
 
 
+def _as_stock_float(value) -> float:
+    """Stock puede ser decimal (10.36 L). No usar int(): trunca 10.36 → 10."""
+    try:
+        v = float(value or 0)
+    except (TypeError, ValueError):
+        return 0.0
+    return round(v, 4)
+
+
 def stock_sum_for_product(db, product_id):
     q = _exclude_fifo_lot_consumption(
         db.query(func.coalesce(func.sum(InventoryMovementModel.quantity), 0))
         .join(InventoryModel, InventoryModel.id == InventoryMovementModel.inventory_id)
         .filter(InventoryModel.product_id == product_id)
     )
-    return int(q.scalar() or 0)
+    return _as_stock_float(q.scalar())
+
+
+def movement_stock_by_product_subquery(db):
+    """
+    Stock por producto = suma de ``inventories_movements.quantity`` en **todos** los
+    inventarios del SKU (misma regla que ``stock_sum_for_product``).
+    """
+    return _exclude_fifo_lot_consumption(
+        db.query(
+            InventoryModel.product_id.label("product_id"),
+            func.coalesce(func.sum(InventoryMovementModel.quantity), 0).label("movement_stock"),
+        )
+        .join(InventoryMovementModel, InventoryMovementModel.inventory_id == InventoryModel.id)
+        .group_by(InventoryModel.product_id)
+    ).subquery()
 
 
 def stock_sum_for_inventory(db, inventory_id):
@@ -39,7 +63,7 @@ def stock_sum_for_inventory(db, inventory_id):
         db.query(func.coalesce(func.sum(InventoryMovementModel.quantity), 0))
         .filter(InventoryMovementModel.inventory_id == inventory_id)
     )
-    return int(q.scalar() or 0)
+    return _as_stock_float(q.scalar())
 
 
 def lot_balance_subquery(db):

@@ -27,8 +27,17 @@ class KardexClass:
         return v if v > 0 else 0.0
 
     @staticmethod
+    def _stock_float(qty) -> float:
+        """Stock decimal (10.36 L). int(10.36)=10 → paquetes 0.9653 en vez de 1."""
+        try:
+            v = float(qty or 0)
+        except (TypeError, ValueError):
+            return 0.0
+        return round(v, 4)
+
+    @staticmethod
     def _kardex_list_row_dict(kardex):
-        qty = int(kardex.quantity or 0)
+        qty = KardexClass._stock_float(kardex.quantity)
         qpp_val = KardexClass._quantity_per_package_float(kardex.quantity_per_package)
         packages_count = round(qty / qpp_val, 4) if qpp_val > 0 else None
         # Mostrar qpp sin truncar (5.5 no 5)
@@ -47,7 +56,7 @@ class KardexClass:
             "quantity_per_package": qpp_out,
             "packages_count": packages_count,
             "average_cost": ac,
-            "total_value": qty * ac,
+            "total_value": int(round(qty * ac)),
             "max_public_sale_price": int(kardex.max_public_sale_price or 0),
             "max_private_sale_price": int(kardex.max_private_sale_price or 0),
             "added_date": kardex.added_date.strftime("%Y-%m-%d %H:%M:%S") if kardex.added_date else None,
@@ -132,7 +141,7 @@ class KardexClass:
                 serialized_data = []
                 for row in data:
                     pid = row.product_id
-                    qty = int(stock_sum_for_product(self.db, pid))
+                    qty = stock_sum_for_product(self.db, pid)
                     ac = average_unit_cost_for_product(self.db, pid)
                     serialized_data.append(
                         self._kardex_list_row_dict(
@@ -166,7 +175,7 @@ class KardexClass:
             serialized_data = []
             for row in data:
                 pid = row.product_id
-                qty = int(stock_sum_for_product(self.db, pid))
+                qty = stock_sum_for_product(self.db, pid)
                 ac = average_unit_cost_for_product(self.db, pid)
                 serialized_data.append(
                     self._kardex_list_row_dict(
@@ -216,7 +225,7 @@ class KardexClass:
             )
 
             if row:
-                qty = int(stock_sum_for_product(self.db, product_id))
+                qty = stock_sum_for_product(self.db, product_id)
                 ac = average_unit_cost_for_product(self.db, product_id)
                 qpp_val = KardexClass._quantity_per_package_float(row.quantity_per_package)
                 packages_count = round(qty / qpp_val, 4) if qpp_val > 0 else None
@@ -233,7 +242,7 @@ class KardexClass:
                     "quantity_per_package": qpp_out,
                     "packages_count": packages_count,
                     "average_cost": ac,
-                    "total_value": qty * ac,
+                    "total_value": int(round(qty * ac)),
                     "added_date": row.added_date.strftime("%Y-%m-%d %H:%M:%S") if row.added_date else None,
                     "updated_date": row.updated_date.strftime("%Y-%m-%d %H:%M:%S") if row.updated_date else None,
                 }
@@ -249,7 +258,7 @@ class KardexClass:
             total_quantity = 0
             total_value = 0
             for pid in pids:
-                q = int(stock_sum_for_product(self.db, pid))
+                q = stock_sum_for_product(self.db, pid)
                 c = average_unit_cost_for_product(self.db, pid)
                 total_quantity += q
                 total_value += q * c
