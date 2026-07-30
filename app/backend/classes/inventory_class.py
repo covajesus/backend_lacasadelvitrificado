@@ -761,7 +761,7 @@ class InventoryClass:
                     "lot_item_id": row.lot_item_id,
                     "movement_type_id": row.movement_type_id,
                     "movement_type": row.movement_type,
-                    "quantity": int(row.quantity) if row.quantity is not None else 0,
+                    "quantity": float(row.quantity) if row.quantity is not None else 0,
                     "unit_cost": int(row.unit_cost) if row.unit_cost is not None else 0,
                     "reason": row.reason,
                     "added_date": row.added_date.strftime("%Y-%m-%d %H:%M:%S")

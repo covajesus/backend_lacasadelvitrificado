@@ -405,7 +405,7 @@ class InventoryMovementModel(Base):
     inventory_id = Column(Integer, ForeignKey('inventories.id'))
     lot_item_id = Column(Integer, ForeignKey('lot_items.id'))
     movement_type_id = Column(Integer, ForeignKey('movement_types.id'))
-    quantity = Column(Integer)
+    quantity = Column(Float)  # decimal permitido (ej. 10.36 L)
     unit_cost = Column(Integer)
     reason = Column(Text())
     added_date = Column(DateTime())
