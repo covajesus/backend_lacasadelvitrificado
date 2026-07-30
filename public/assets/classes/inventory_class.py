@@ -77,7 +77,7 @@ class InventoryClass:
 
             if page > 0:
                 total_items = query.count()
-                total_pages = max((total_items + items_per_page - 1) // items_per_page, 1) // items_per_page
+                total_pages = (total_items + items_per_page - 1) // items_per_page
 
                 if page < 1 or page > total_pages:
                     return {"status": "error", "message": "Invalid page number"}
@@ -148,7 +148,6 @@ class InventoryClass:
 
             stock = stock_sum_for_inventory(self.db, id)
 
-            # Fila de referencia para edición: preferir primera **no salida** (entrada/ajuste).
             ref_mov = (
                 self.db.query(InventoryMovementModel)
                 .filter(InventoryMovementModel.inventory_id == inv.id)
@@ -235,8 +234,8 @@ class InventoryClass:
             # Actualizar campos del inventario
             inventory.product_id = inventory_inputs.product_id
             inventory.location_id = inventory_inputs.location_id
-            inventory.minimum_stock = int(inventory_inputs.minimum_stock)
-            inventory.maximum_stock = int(inventory_inputs.maximum_stock)
+            inventory.minimum_stock = inventory_inputs.minimum_stock
+            inventory.maximum_stock = inventory_inputs.maximum_stock
             inventory.last_update = datetime.now()
 
             new_uc = int(inventory_inputs.unit_cost or 0)
@@ -325,7 +324,6 @@ class InventoryClass:
                         )
                     )
 
-            # Precio privado = costo medio × paquete; mismo valor en **todos** los ``lot_items`` del producto
             if lot_item_for_private is not None:
                 self.db.flush()
                 pid = int(inventory_inputs.product_id)
@@ -761,7 +759,7 @@ class InventoryClass:
                     "lot_item_id": row.lot_item_id,
                     "movement_type_id": row.movement_type_id,
                     "movement_type": row.movement_type,
-                    "quantity": float(row.quantity) if row.quantity is not None else 0,
+                    "quantity": int(row.quantity) if row.quantity is not None else 0,
                     "unit_cost": int(row.unit_cost) if row.unit_cost is not None else 0,
                     "reason": row.reason,
                     "added_date": row.added_date.strftime("%Y-%m-%d %H:%M:%S")

@@ -73,7 +73,8 @@ class KardexClass:
                 self.db.query(
                     LotItemModel.product_id.label("product_id"),
                     func.max(LotItemModel.public_sale_price).label("max_public_sale_price"),
-                    func.max(LotItemModel.private_sale_price).label("max_private_sale_price"),
+                    # Privado en ventas/kardex: promedio entre lotes (cada lote = costo paquete de su compra)
+                    func.round(func.avg(LotItemModel.private_sale_price)).label("max_private_sale_price"),
                 )
                 .group_by(LotItemModel.product_id)
                 .subquery()

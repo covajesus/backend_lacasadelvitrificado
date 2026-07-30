@@ -156,7 +156,7 @@ class ProductClass:
                     ProductModel.short_description,
                     ProductModel.description,
                     func.max(LotItemModel.public_sale_price).label("public_sale_price"),
-                    func.max(LotItemModel.private_sale_price).label("private_sale_price")
+                    func.round(func.avg(LotItemModel.private_sale_price)).label("private_sale_price")
                 )
                 .join(UnitMeasureModel, UnitMeasureModel.id == ProductModel.unit_measure_id, isouter=True)
                 .join(SupplierModel, SupplierModel.id == ProductModel.supplier_id, isouter=True)
@@ -269,7 +269,7 @@ class ProductClass:
                         ProductModel.short_description,
                         ProductModel.description,
                         func.max(LotItemModel.public_sale_price).label("public_sale_price"),
-                        func.max(LotItemModel.private_sale_price).label("private_sale_price"),
+                        func.round(func.avg(LotItemModel.private_sale_price)).label("private_sale_price"),
                         func.coalesce(func.max(movement_stock_sq.c.movement_stock), 0).label("total_stock"),
                         func.group_concat(LotModel.lot_number.op('ORDER BY')(LotModel.lot_number)).label("lot_numbers"),
                         func.max(UnitFeatureModel.sample_size).label("sample_size"),
@@ -375,7 +375,7 @@ class ProductClass:
                         ProductModel.short_description,
                         ProductModel.description,
                         func.max(LotItemModel.public_sale_price).label("public_sale_price"),
-                        func.max(LotItemModel.private_sale_price).label("private_sale_price"),
+                        func.round(func.avg(LotItemModel.private_sale_price)).label("private_sale_price"),
                         func.coalesce(func.max(movement_stock_sq.c.movement_stock), 0).label("total_stock"),
                         func.group_concat(LotModel.lot_number.op('ORDER BY')(LotModel.lot_number)).label("lot_numbers"),
                         func.max(UnitFeatureModel.sample_size).label("sample_size"),
@@ -418,7 +418,7 @@ class ProductClass:
                         ProductModel.short_description,
                         ProductModel.description,
                         func.max(LotItemModel.public_sale_price).label("public_sale_price"),
-                        func.max(LotItemModel.private_sale_price).label("private_sale_price"),
+                        func.round(func.avg(LotItemModel.private_sale_price)).label("private_sale_price"),
                         func.coalesce(func.max(movement_stock_sq.c.movement_stock), 0).label("total_stock"),
                         func.group_concat(LotModel.lot_number.op('ORDER BY')(LotModel.lot_number)).label("lot_numbers"),
                         func.max(UnitFeatureModel.sample_size).label("sample_size"),
@@ -495,7 +495,7 @@ class ProductClass:
                     ProductModel.photo,
                     ProductModel.catalog,
                     func.max(LotItemModel.public_sale_price).label("public_sale_price"),
-                    func.max(LotItemModel.private_sale_price).label("private_sale_price"),
+                    func.round(func.avg(LotItemModel.private_sale_price)).label("private_sale_price"),
                     func.coalesce(func.max(movement_stock_sq.c.movement_stock), 0).label("total_stock"),
                     func.group_concat(LotModel.lot_number.op('ORDER BY')(LotModel.lot_number)).label("lot_numbers")
                 )
@@ -583,7 +583,7 @@ class ProductClass:
                     ProductModel.photo,
                     ProductModel.catalog,
                     func.max(LotItemModel.public_sale_price).label("public_sale_price"),
-                    func.max(LotItemModel.private_sale_price).label("private_sale_price")
+                    func.round(func.avg(LotItemModel.private_sale_price)).label("private_sale_price")
                 )
                 .join(LotItemModel, LotItemModel.product_id == ProductModel.id, isouter=True)
                 .filter(ProductModel.id == id)
@@ -681,7 +681,7 @@ class ProductClass:
                     ProductModel.photo,
                     ProductModel.catalog,
                     func.max(LotItemModel.public_sale_price).label("public_sale_price"),
-                    func.max(LotItemModel.private_sale_price).label("private_sale_price")
+                    func.round(func.avg(LotItemModel.private_sale_price)).label("private_sale_price")
                 )
                 .join(LotItemModel, LotItemModel.product_id == ProductModel.id, isouter=True)
                 .filter(ProductModel.id == id)
@@ -1037,7 +1037,7 @@ class ProductClass:
                     CategoryModel.category.label("category_name"),
                     UnitMeasureModel.unit_measure.label("unit_measure"),
                     func.max(LotItemModel.public_sale_price).label("public_sale_price"),
-                    func.max(LotItemModel.private_sale_price).label("private_sale_price"),
+                    func.round(func.avg(LotItemModel.private_sale_price)).label("private_sale_price"),
                     func.coalesce(func.max(movement_stock_sq.c.movement_stock), 0).label("total_stock"),
                 )
                 .join(SupplierModel, SupplierModel.id == ProductModel.supplier_id, isouter=True)
