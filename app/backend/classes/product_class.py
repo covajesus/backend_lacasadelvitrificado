@@ -11,7 +11,11 @@ from app.backend.db.models import (
     InventoryMovementModel,
 )
 from app.backend.classes.file_class import FileClass
-from app.backend.classes.inventory_stock import movement_stock_by_product_subquery, stock_sum_for_product
+from app.backend.classes.inventory_stock import (
+    movement_stock_by_product_subquery,
+    stock_sum_for_product,
+    private_package_cost_for_product,
+)
 from app.backend.services.promotions.promotion_pricing_service import PromotionPricingService
 from datetime import datetime
 import re
@@ -26,6 +30,11 @@ class ProductClass:
         if not product_data or not isinstance(product_data, dict):
             return product_data
         try:
+            pid = product_data.get("id") or product_data.get("product_id")
+            if pid:
+                product_data["private_sale_price"] = private_package_cost_for_product(
+                    self.db, int(pid)
+                )
             return PromotionPricingService(self.db).enrich_product_dict(product_data)
         except Exception:
             return product_data
@@ -34,6 +43,14 @@ class ProductClass:
         if not products:
             return products
         try:
+            for product_data in products:
+                if not isinstance(product_data, dict):
+                    continue
+                pid = product_data.get("id") or product_data.get("product_id")
+                if pid:
+                    product_data["private_sale_price"] = private_package_cost_for_product(
+                        self.db, int(pid)
+                    )
             return PromotionPricingService(self.db).enrich_product_list(products)
         except Exception:
             return products
@@ -195,7 +212,7 @@ class ProductClass:
                 } for product in data]
 
             return {
-                "data": serialized_data
+                "data": self._apply_product_promotions_list(serialized_data)
             }
 
         except Exception as e:

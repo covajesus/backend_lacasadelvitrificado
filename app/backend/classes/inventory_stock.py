@@ -147,3 +147,25 @@ def sale_acceptance_unit_cost_from_movements(db, product_id) -> int:
     no se usa ``sales_products.price`` ni precio de lista del pedido para este valor.
     """
     return int(average_unit_cost_for_product(db, product_id))
+
+
+def private_package_cost_for_product(db, product_id) -> int:
+    """
+    Precio privado = costo del paquete según costo promedio de inventario:
+    ``average_unit_cost_for_product × quantity_per_package`` (misma cifra que «Costo paq» en kardex).
+    """
+    from app.backend.db.models import UnitFeatureModel
+
+    ac = float(average_unit_cost_for_product(db, product_id) or 0)
+    qpp_row = (
+        db.query(UnitFeatureModel.quantity_per_package)
+        .filter(UnitFeatureModel.product_id == product_id)
+        .first()
+    )
+    try:
+        qpp = float(qpp_row[0]) if qpp_row and qpp_row[0] is not None else 0.0
+    except (TypeError, ValueError):
+        qpp = 0.0
+    if qpp <= 0:
+        return int(round(ac))
+    return int(round(ac * qpp))

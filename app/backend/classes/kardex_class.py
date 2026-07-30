@@ -43,6 +43,8 @@ class KardexClass:
         # Mostrar qpp sin truncar (5.5 no 5)
         qpp_out = round(qpp_val, 4) if qpp_val > 0 else None
         ac = int(kardex.average_cost or 0)
+        # Privado = mismo valor que «Costo paq» (costo promedio × L/Kg por paquete)
+        private_pkg = int(round(float(ac) * qpp_val)) if qpp_val > 0 else ac
         return {
             "id": int(kardex.product_id or 0),
             "product_id": int(kardex.product_id or 0),
@@ -58,7 +60,7 @@ class KardexClass:
             "average_cost": ac,
             "total_value": int(round(qty * ac)),
             "max_public_sale_price": int(kardex.max_public_sale_price or 0),
-            "max_private_sale_price": int(kardex.max_private_sale_price or 0),
+            "max_private_sale_price": private_pkg,
             "added_date": kardex.added_date.strftime("%Y-%m-%d %H:%M:%S") if kardex.added_date else None,
             "updated_date": kardex.updated_date.strftime("%Y-%m-%d %H:%M:%S") if kardex.updated_date else None,
         }
