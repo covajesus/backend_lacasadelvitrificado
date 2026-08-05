@@ -170,6 +170,7 @@ class AdvertisingList(BaseModel):
     page: int
     q: Optional[str] = None
     status_id: Optional[int] = None
+    delivery_status: Optional[str] = None
 
 class StoreAdvertising(BaseModel):
     name: str
@@ -704,6 +705,7 @@ class UpdateSettings(BaseModel):
     shop_address: str
     payment_card_url: str
     prepaid_discount: Optional[int] = 0
+    maximum_profit_discount_percent: int = Field(default=100, ge=0, le=100)
     phone: str
 
     @validator("phone", pre=True)

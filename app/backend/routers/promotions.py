@@ -42,6 +42,23 @@ def list_promotions(
     return {"message": data}
 
 
+@promotions.get("/pricing-rules")
+def pricing_rules(
+    session_user: UserLogin = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+):
+    return {"message": PromotionClass(db).get_pricing_rules()}
+
+
+@promotions.get("/pricing-rules/{product_id}")
+def product_pricing_rules(
+    product_id: int,
+    session_user: UserLogin = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+):
+    return {"message": PromotionClass(db).get_pricing_rules(product_id)}
+
+
 @promotions.post("/store")
 def store(
     promotion_inputs: StorePromotion,

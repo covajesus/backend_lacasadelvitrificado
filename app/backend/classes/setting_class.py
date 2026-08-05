@@ -50,6 +50,9 @@ class SettingClass(BaseDomainService):
         existing_setting.shop_address = form_data.shop_address
         existing_setting.payment_card_url = form_data.payment_card_url
         existing_setting.prepaid_discount = form_data.prepaid_discount
+        existing_setting.maximum_profit_discount_percent = (
+            form_data.maximum_profit_discount_percent
+        )
         existing_setting.phone = form_data.phone
         existing_setting.updated_date = datetime.now()
         self.db.commit()
@@ -75,6 +78,11 @@ class SettingClass(BaseDomainService):
                     "shop_address": row.shop_address,
                     "payment_card_url": row.payment_card_url,
                     "prepaid_discount": row.prepaid_discount,
+                    "maximum_profit_discount_percent": (
+                        row.maximum_profit_discount_percent
+                        if row.maximum_profit_discount_percent is not None
+                        else 100
+                    ),
                     "phone": row.phone,
                 },
             )

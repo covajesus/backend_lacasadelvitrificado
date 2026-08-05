@@ -15,7 +15,9 @@ from app.backend.db.models import (
     PromotionUsageModel,
     SaleModel,
     SaleProductModel,
+    SettingModel,
 )
+from app.backend.classes.inventory_stock import private_package_cost_for_product
 
 PROMOTION_TYPE_PRODUCT_DISCOUNT = 1
 PROMOTION_TYPE_COUPON = 2
@@ -79,16 +81,61 @@ class PromotionPricingService:
         )
         return _to_float(price)
 
-    def calculate_promotional_price(self, base_price: float, discount_percent: float) -> dict:
+    def get_maximum_profit_discount_percent(self) -> float:
+        value = (
+            self.db.query(SettingModel.maximum_profit_discount_percent)
+            .filter(SettingModel.id == 1)
+            .scalar()
+        )
+        percent = _to_float(100 if value is None else value)
+        return min(100.0, max(0.0, percent))
+
+    def get_product_package_cost(self, product_id: int) -> float:
+        return _to_float(private_package_cost_for_product(self.db, int(product_id)))
+
+    def validate_profit_discount_percent(self, discount_percent: float) -> str | None:
+        percent = _to_float(discount_percent)
+        maximum = self.get_maximum_profit_discount_percent()
+        if percent > maximum:
+            return (
+                f'El máximo permitido para promociones es {maximum:g}% '
+                'de la ganancia del producto.'
+            )
+        return None
+
+    def get_pricing_rules(self, product_id: int | None = None) -> dict:
+        maximum = self.get_maximum_profit_discount_percent()
+        data = {'maximum_profit_discount_percent': maximum}
+        if product_id:
+            public_price = self.get_product_public_price(product_id)
+            package_cost = self.get_product_package_cost(product_id)
+            data.update({
+                'product_id': int(product_id),
+                'public_sale_price': public_price,
+                'package_cost': package_cost,
+                'profit_amount': _round_price(max(public_price - package_cost, 0)),
+            })
+        return {'status': 'success', 'data': data}
+
+    def calculate_promotional_price(
+        self,
+        base_price: float,
+        discount_percent: float,
+        package_cost: float,
+    ) -> dict:
         base = _to_float(base_price)
         percent = _to_float(discount_percent)
-        promo = _round_price(base * (1 - percent / 100))
-        discount_amount = _round_price(base - promo)
+        cost = _to_float(package_cost)
+        profit = max(base - cost, 0)
+        discount_amount = _round_price(profit * percent / 100)
+        promo = _round_price(base - discount_amount)
         return {
             'original_price': base,
             'promotional_price': promo,
             'discount_amount': discount_amount,
             'discount_percent': percent,
+            'package_cost': cost,
+            'profit_amount': _round_price(profit),
         }
 
     def get_active_product_discounts_map(self) -> dict[int, dict]:
@@ -108,17 +155,22 @@ class PromotionPricingService:
             raise
 
         result: dict[int, dict] = {}
+        maximum_discount = self.get_maximum_profit_discount_percent()
         for promotion, promo_product in rows:
             if not self.is_promotion_active(promotion, now):
                 continue
             product_id = int(promo_product.product_id)
             if product_id in result:
                 continue
+            discount_percent = min(
+                _to_float(promotion.discount_percent),
+                maximum_discount,
+            )
             result[product_id] = {
                 'promotion_id': promotion.id,
                 'promotion_type_id': PROMOTION_TYPE_PRODUCT_DISCOUNT,
                 'promotion_name': promotion.name,
-                'discount_percent': _to_float(promotion.discount_percent),
+                'discount_percent': discount_percent,
                 'original_price': _to_float(promo_product.original_price),
                 'promotional_price': _to_float(promo_product.promotional_price),
                 'discount_amount': _to_float(promo_product.discount_amount),
@@ -277,7 +329,14 @@ class PromotionPricingService:
         if original <= 0:
             original = promo['original_price']
 
-        pricing = self.calculate_promotional_price(original, promo['discount_percent'])
+        package_cost = _to_float(product_dict.get('private_sale_price'))
+        if package_cost <= 0:
+            package_cost = self.get_product_package_cost(int(product_id))
+        pricing = self.calculate_promotional_price(
+            original,
+            promo['discount_percent'],
+            package_cost,
+        )
         product_dict['public_sale_price_original'] = original
         product_dict['public_sale_price'] = pricing['promotional_price']
         product_dict['promotion_id'] = promo['promotion_id']
@@ -302,7 +361,14 @@ class PromotionPricingService:
             original = _to_float(item.get('public_sale_price'))
             if original <= 0:
                 original = promo['original_price']
-            pricing = self.calculate_promotional_price(original, promo['discount_percent'])
+            package_cost = _to_float(item.get('private_sale_price'))
+            if package_cost <= 0:
+                package_cost = self.get_product_package_cost(int(product_id))
+            pricing = self.calculate_promotional_price(
+                original,
+                promo['discount_percent'],
+                package_cost,
+            )
             item['public_sale_price_original'] = original
             item['public_sale_price'] = pricing['promotional_price']
             item['promotion_id'] = promo['promotion_id']
@@ -402,6 +468,9 @@ class PromotionPricingService:
         product_pricing = []
         total_discount = 0.0
         discount_percent = _to_float(promotion.discount_percent)
+        discount_error = self.validate_profit_discount_percent(discount_percent)
+        if discount_error:
+            return {'status': 'error', 'message': discount_error}
         excluded_products: list[dict] = []
 
         if not allowed_ids:
@@ -425,7 +494,23 @@ class PromotionPricingService:
                 original = unit_prices.get(product_id, 0)
                 if original <= 0:
                     original = self.get_product_public_price(product_id)
-                pricing = self.calculate_promotional_price(original, discount_percent)
+                package_cost = self.get_product_package_cost(product_id)
+                if package_cost <= 0 or original <= package_cost:
+                    product_name = self._get_product_names_map([product_id]).get(
+                        product_id, f'Producto #{product_id}'
+                    )
+                    return {
+                        'status': 'error',
+                        'message': (
+                            f'No se puede aplicar el cupón a {product_name}: '
+                            'el producto no tiene una ganancia positiva validable.'
+                        ),
+                    }
+                pricing = self.calculate_promotional_price(
+                    original,
+                    discount_percent,
+                    package_cost,
+                )
                 line_discount = _round_price(pricing['discount_amount'] * quantity)
                 product_pricing.append({
                     'product_id': product_id,
@@ -457,10 +542,25 @@ class PromotionPricingService:
                     continue
                 quantity = quantities.get(product_id, 1)
                 original = _to_float(row.original_price)
-                promotional = _to_float(row.promotional_price)
-                discount_per_unit = _to_float(row.discount_amount)
-                if discount_per_unit <= 0 and original > promotional:
-                    discount_per_unit = _round_price(original - promotional)
+                package_cost = self.get_product_package_cost(product_id)
+                if package_cost <= 0 or original <= package_cost:
+                    product_name = self._get_product_names_map([product_id]).get(
+                        product_id, f'Producto #{product_id}'
+                    )
+                    return {
+                        'status': 'error',
+                        'message': (
+                            f'No se puede aplicar el cupón a {product_name}: '
+                            'el producto no tiene una ganancia positiva validable.'
+                        ),
+                    }
+                pricing = self.calculate_promotional_price(
+                    original,
+                    discount_percent,
+                    package_cost,
+                )
+                promotional = pricing['promotional_price']
+                discount_per_unit = pricing['discount_amount']
                 line_discount = _round_price(discount_per_unit * quantity)
                 product_pricing.append({
                     'product_id': product_id,

@@ -214,6 +214,9 @@ class PromotionClass(BaseDomainService):
         )
         return self.list_wrapped(query, self._serialize_row)
 
+    def get_pricing_rules(self, product_id=None):
+        return self.pricing.get_pricing_rules(product_id=product_id)
+
     def _validate_inputs(self, promotion_inputs, promotion_id=None):
         promotion_type_id = int(promotion_inputs.promotion_type_id or PROMOTION_TYPE_PRODUCT_DISCOUNT)
         if promotion_type_id not in (PROMOTION_TYPE_PRODUCT_DISCOUNT, PROMOTION_TYPE_COUPON):
@@ -222,6 +225,9 @@ class PromotionClass(BaseDomainService):
         discount = float(promotion_inputs.discount_percent or 0)
         if discount < 0 or discount > 100:
             return 'El descuento debe estar entre 0 y 100.'
+        discount_error = self.pricing.validate_profit_discount_percent(discount)
+        if discount_error:
+            return discount_error
 
         product_ids = [int(pid) for pid in (promotion_inputs.product_ids or []) if pid]
         if promotion_type_id == PROMOTION_TYPE_PRODUCT_DISCOUNT:
@@ -229,6 +235,13 @@ class PromotionClass(BaseDomainService):
                 product_ids = [int(promotion_inputs.product_id)]
             if len(product_ids) != 1:
                 return 'Debe seleccionar un producto para el descuento.'
+            product_id = product_ids[0]
+            public_price = self.pricing.get_product_public_price(product_id)
+            package_cost = self.pricing.get_product_package_cost(product_id)
+            if package_cost <= 0:
+                return 'El producto no tiene un costo de paquete válido para calcular la promoción.'
+            if public_price <= package_cost:
+                return 'El producto no tiene una ganancia positiva para aplicar una promoción.'
 
         if promotion_type_id == PROMOTION_TYPE_COUPON:
             coupon_code = (promotion_inputs.coupon_code or '').strip().upper()
@@ -276,7 +289,12 @@ class PromotionClass(BaseDomainService):
 
         for product_id in product_ids:
             base_price = self.pricing.get_product_public_price(product_id)
-            pricing = self.pricing.calculate_promotional_price(base_price, discount_percent)
+            package_cost = self.pricing.get_product_package_cost(product_id)
+            pricing = self.pricing.calculate_promotional_price(
+                base_price,
+                discount_percent,
+                package_cost,
+            )
             self.db.add(
                 PromotionProductModel(
                     promotion_id=promotion_id,

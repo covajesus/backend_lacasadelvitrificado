@@ -137,6 +137,7 @@ def campaign_deliveries(
         id,
         page=payload.page,
         items_per_page=20,
+        delivery_status=payload.delivery_status,
     )
     return {"message": data}
 

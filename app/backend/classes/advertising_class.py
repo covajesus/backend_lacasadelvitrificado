@@ -3,7 +3,7 @@ import threading
 import time
 from datetime import datetime
 
-from sqlalchemy import or_
+from sqlalchemy import case, or_
 
 from app.backend.classes.file_class import FileClass
 from app.backend.classes.promotion_class import PromotionClass
@@ -111,44 +111,48 @@ class AdvertisingClass(BaseDomainService):
         if not unique_ids:
             return {}
 
+        def fetch_statuses(ids: set[str]) -> dict[str, dict]:
+            """Lee columnas planas: al cerrar la sesión los objetos ORM quedan detached."""
+            with background_session() as db:
+                rows = (
+                    db.query(
+                        WhatsAppMessageModel.message_id,
+                        WhatsAppMessageModel.status,
+                        WhatsAppMessageModel.error_code,
+                        WhatsAppMessageModel.error_message,
+                    )
+                    .filter(WhatsAppMessageModel.message_id.in_(list(ids)))
+                    .all()
+                )
+                return {
+                    row.message_id: {
+                        'status': str(row.status or 'sent').strip().lower(),
+                        'error_code': row.error_code,
+                        'error_message': row.error_message,
+                    }
+                    for row in rows
+                }
+
         deadline = time.time() + timeout_seconds
         pending = set(unique_ids)
         resolved: dict[str, dict] = {}
 
         while pending and time.time() < deadline:
-            with background_session() as db:
-                rows = (
-                    db.query(WhatsAppMessageModel)
-                    .filter(WhatsAppMessageModel.message_id.in_(list(pending)))
-                    .all()
-                )
-            for row in rows:
-                status = str(row.status or 'sent').strip().lower()
+            for message_id, info in fetch_statuses(pending).items():
+                status = info['status']
                 if status in CAMPAIGN_DELIVERY_SUCCESS_STATUSES or status == 'failed':
-                    resolved[row.message_id] = {
-                        'status': status,
-                        'error_code': row.error_code,
-                        'error_message': row.error_message,
-                    }
-                    pending.discard(row.message_id)
+                    resolved[message_id] = info
+                    pending.discard(message_id)
             if pending:
                 time.sleep(CAMPAIGN_DELIVERY_POLL_SECONDS)
 
         if pending:
-            with background_session() as db:
-                rows = (
-                    db.query(WhatsAppMessageModel)
-                    .filter(WhatsAppMessageModel.message_id.in_(list(pending)))
-                    .all()
-                )
-            found = {row.message_id: row for row in rows}
+            found = fetch_statuses(pending)
             for message_id in pending:
-                row = found.get(message_id)
-                resolved[message_id] = {
-                    'status': str(row.status or 'sent').strip().lower() if row else 'unknown',
-                    'error_code': row.error_code if row else None,
-                    'error_message': row.error_message if row else None,
-                }
+                resolved[message_id] = found.get(
+                    message_id,
+                    {'status': 'unknown', 'error_code': None, 'error_message': None},
+                )
 
         return resolved
 
@@ -895,10 +899,16 @@ class AdvertisingClass(BaseDomainService):
                 current_customer='Verificando entrega con Meta…',
             )
             self.db.close()
-            delivery_status = AdvertisingClass._wait_for_whatsapp_delivery_status(
-                [item['message_id'] for item in pending_deliveries]
-            )
-            self.db = BackgroundSessionLocal()
+            try:
+                delivery_status = AdvertisingClass._wait_for_whatsapp_delivery_status(
+                    [item['message_id'] for item in pending_deliveries]
+                )
+            except Exception as exc:
+                # Un fallo verificando con Meta no debe perder el resultado del envío.
+                print(f"[ADVERTISING SEND] Error verificando entrega de campaña {campaign_id}: {exc}")
+                delivery_status = {}
+            finally:
+                self.db = BackgroundSessionLocal()
             for item in pending_deliveries:
                 info = delivery_status.get(item['message_id'], {'status': 'unknown'})
                 delivery_row = (
@@ -1243,7 +1253,13 @@ class AdvertisingClass(BaseDomainService):
             },
         }
 
-    def get_campaign_deliveries(self, campaign_id: int, page: int = 0, items_per_page: int = 20):
+    def get_campaign_deliveries(
+        self,
+        campaign_id: int,
+        page: int = 0,
+        items_per_page: int = 20,
+        delivery_status: str | None = None,
+    ):
         campaign = (
             self.db.query(AdvertisingCampaignModel)
             .filter(AdvertisingCampaignModel.id == int(campaign_id))
@@ -1257,6 +1273,7 @@ class AdvertisingClass(BaseDomainService):
         page = max(int(page or 0), 0)
         items_per_page = min(max(int(items_per_page or 20), 1), 100)
         offset = page * items_per_page
+        status_filter = str(delivery_status or '').strip().lower()
 
         base_query = (
             self.db.query(
@@ -1268,9 +1285,31 @@ class AdvertisingClass(BaseDomainService):
             .join(CustomerModel, CustomerModel.id == AdvertisingCampaignDeliveryModel.customer_id)
             .filter(AdvertisingCampaignDeliveryModel.campaign_id == int(campaign_id))
         )
+        if status_filter and status_filter != 'all':
+            if status_filter == 'not_delivered':
+                # No llegó al teléfono: fallidos o sin confirmación de entrega/lectura.
+                base_query = base_query.filter(
+                    ~AdvertisingCampaignDeliveryModel.status.in_(('delivered', 'read'))
+                )
+            else:
+                base_query = base_query.filter(
+                    AdvertisingCampaignDeliveryModel.status == status_filter
+                )
         total = base_query.count()
+        # Fallidos primero para revisar rápido a quién no le llegó.
+        status_order = case(
+            (AdvertisingCampaignDeliveryModel.status == 'failed', 0),
+            (AdvertisingCampaignDeliveryModel.status == 'pending', 1),
+            (AdvertisingCampaignDeliveryModel.status == 'sent', 2),
+            (AdvertisingCampaignDeliveryModel.status == 'delivered', 3),
+            (AdvertisingCampaignDeliveryModel.status == 'read', 4),
+            else_=5,
+        )
         rows = (
-            base_query.order_by(AdvertisingCampaignDeliveryModel.id.asc())
+            base_query.order_by(
+                status_order.asc(),
+                AdvertisingCampaignDeliveryModel.id.asc(),
+            )
             .offset(offset)
             .limit(items_per_page)
             .all()
