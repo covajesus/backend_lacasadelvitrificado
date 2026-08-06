@@ -680,7 +680,9 @@ class SaleClass:
                 self.db.add(sale_product)
 
             if status_id in (SaleStatus.IN_PROCESS, SaleStatus.DELIVERED):
-                PromotionPricingService(self.db).record_sale_promotion_usages(new_sale.id)
+                # Admin (precio privado / kardex) y uso interno no registran usos de promoción
+                if sale_inputs.rol_id not in (1, 2):
+                    PromotionPricingService(self.db).record_sale_promotion_usages(new_sale.id)
 
             self.db.commit()
 
@@ -897,7 +899,7 @@ class SaleClass:
                     "customer_name": data.customer_name
                 }
 
-                if data.product_id:
+                if data.product_id and not is_internal_use_order:
                     promo = discounts_map.get(int(data.product_id))
                     if promo:
                         sale_details["has_product_promotion"] = True

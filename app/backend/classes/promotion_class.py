@@ -225,9 +225,6 @@ class PromotionClass(BaseDomainService):
         discount = float(promotion_inputs.discount_percent or 0)
         if discount < 0 or discount > 100:
             return 'El descuento debe estar entre 0 y 100.'
-        discount_error = self.pricing.validate_profit_discount_percent(discount)
-        if discount_error:
-            return discount_error
 
         product_ids = [int(pid) for pid in (promotion_inputs.product_ids or []) if pid]
         if promotion_type_id == PROMOTION_TYPE_PRODUCT_DISCOUNT:
@@ -238,10 +235,13 @@ class PromotionClass(BaseDomainService):
             product_id = product_ids[0]
             public_price = self.pricing.get_product_public_price(product_id)
             package_cost = self.pricing.get_product_package_cost(product_id)
-            if package_cost <= 0:
-                return 'El producto no tiene un costo de paquete válido para calcular la promoción.'
-            if public_price <= package_cost:
-                return 'El producto no tiene una ganancia positiva para aplicar una promoción.'
+            discount_error = self.pricing.validate_discount_against_profit(
+                public_price,
+                package_cost,
+                discount,
+            )
+            if discount_error:
+                return discount_error
 
         if promotion_type_id == PROMOTION_TYPE_COUPON:
             coupon_code = (promotion_inputs.coupon_code or '').strip().upper()
