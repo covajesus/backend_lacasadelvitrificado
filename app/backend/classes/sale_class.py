@@ -806,7 +806,8 @@ class SaleClass:
     def details(self, id):
         try:
             pricing_service = PromotionPricingService(self.db)
-            discounts_map = pricing_service.get_active_product_discounts_map()
+            # Solo usos realmente registrados en ESTA venta (no promos activas actuales)
+            sale_usages = pricing_service.get_sale_promotion_usages_by_product(id)
 
             data_query = self.db.query(
                 SaleProductModel.id,
@@ -899,13 +900,18 @@ class SaleClass:
                     "customer_name": data.customer_name
                 }
 
+                # Solo marcar promo si esta línea se cobró realmente a precio promocional
                 if data.product_id and not is_internal_use_order:
-                    promo = discounts_map.get(int(data.product_id))
-                    if promo:
-                        sale_details["has_product_promotion"] = True
-                        sale_details["promotion_discount_percent"] = promo["discount_percent"]
-                        sale_details["public_sale_price_original"] = promo["original_price"]
-                        sale_details["public_sale_price"] = promo["promotional_price"]
+                    usage = sale_usages.get(int(data.product_id))
+                    charged = float(data.price or 0)
+                    if usage:
+                        promo_price = float(usage["promotional_price"] or 0)
+                        original = float(usage["original_price"] or 0)
+                        if promo_price > 0 and abs(charged - promo_price) <= 1:
+                            sale_details["has_product_promotion"] = True
+                            sale_details["promotion_discount_percent"] = usage["discount_percent"]
+                            sale_details["public_sale_price_original"] = original
+                            sale_details["public_sale_price"] = promo_price
 
                 sale_data.append(sale_details)
 

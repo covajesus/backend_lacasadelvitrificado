@@ -732,6 +732,45 @@ class PromotionPricingService:
                 coupon_code=coupon_code.strip().upper(),
             )
 
+    def get_sale_promotion_usages_by_product(self, sale_id: int) -> dict[int, dict]:
+        """Usos de promoción realmente registrados para una venta, por product_id."""
+        try:
+            rows = (
+                self.db.query(PromotionUsageModel)
+                .filter(PromotionUsageModel.sale_id == int(sale_id))
+                .all()
+            )
+        except (ProgrammingError, OperationalError) as error:
+            _rollback_db(self.db)
+            if self._promotions_schema_missing(error):
+                return {}
+            raise
+
+        result: dict[int, dict] = {}
+        for row in rows:
+            product_id = int(row.product_id or 0)
+            if not product_id:
+                continue
+            original = _to_float(row.original_unit_price)
+            promotional = _to_float(row.promotional_unit_price)
+            percent = 0.0
+            if original > 0 and promotional < original:
+                percent = round((original - promotional) * 100 / original)
+            # Preferir descuento de producto sobre cupón si ambos existen
+            existing = result.get(product_id)
+            if existing and existing.get('promotion_type_id') == PROMOTION_TYPE_PRODUCT_DISCOUNT:
+                if int(row.promotion_type_id or 0) != PROMOTION_TYPE_PRODUCT_DISCOUNT:
+                    continue
+            result[product_id] = {
+                'promotion_id': row.promotion_id,
+                'promotion_type_id': int(row.promotion_type_id or 0),
+                'original_price': original,
+                'promotional_price': promotional,
+                'discount_percent': percent,
+                'coupon_code': row.coupon_code,
+            }
+        return result
+
     def record_product_discount_usages(self, product_items, budget_id=None, sale_id=None):
         discounts = self.get_active_product_discounts_map()
         if not discounts:
@@ -743,6 +782,13 @@ class PromotionPricingService:
             promo = discounts.get(product_id)
             if not promo:
                 continue
+            # Si viene precio cobrado (venta), solo registrar si realmente se vendió a precio promo
+            charged = item.get('unit_price')
+            if charged is not None:
+                charged_price = _to_float(charged)
+                promo_price = _to_float(promo.get('promotional_price'))
+                if charged_price <= 0 or abs(charged_price - promo_price) > 1:
+                    continue
             quantity = max(int(item.get('quantity') or 1), 1)
             self.record_usage(
                 promotion_id=promo['promotion_id'],
@@ -803,7 +849,11 @@ class PromotionPricingService:
                 return
 
             product_items = [
-                {'product_id': sp.product_id, 'quantity': sp.quantity}
+                {
+                    'product_id': sp.product_id,
+                    'quantity': sp.quantity,
+                    'unit_price': _to_float(sp.price),
+                }
                 for sp in sale_products
             ]
             self.record_product_discount_usages(product_items, sale_id=sale_id)

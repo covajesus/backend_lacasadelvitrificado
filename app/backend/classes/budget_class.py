@@ -11,7 +11,8 @@ from app.backend.db.models import (
     LotItemModel,
     LotModel,
     InventoryMovementModel,
-    CustomerProductDiscountModel
+    CustomerProductDiscountModel,
+    SettingModel,
 )
 from app.backend.classes.whatsapp_class import WhatsappClass
 from app.backend.services.promotions.promotion_pricing_service import PromotionPricingService
@@ -19,6 +20,97 @@ from app.backend.services.promotions.promotion_pricing_service import PromotionP
 class BudgetClass:
     def __init__(self, db):
         self.db = db
+
+    def _get_tax_percent(self) -> float:
+        setting = self.db.query(SettingModel).filter(SettingModel.id == 1).first()
+        if not setting or setting.tax_value is None:
+            return 19.0
+        try:
+            return float(setting.tax_value)
+        except (TypeError, ValueError):
+            return 19.0
+
+    def _customer_product_discount_percent(self, customer_id, product_id) -> float:
+        if not customer_id or int(customer_id) <= 0:
+            return 0.0
+        row = (
+            self.db.query(CustomerProductDiscountModel)
+            .filter(CustomerProductDiscountModel.customer_id == int(customer_id))
+            .filter(CustomerProductDiscountModel.product_id == int(product_id))
+            .first()
+        )
+        if not row:
+            return 0.0
+        return float(row.discount_percentage or 0)
+
+    def _resolve_budget_unit_price(self, product_id, customer_id=None, pricing_service=None, discounts_map=None):
+        """
+        Precio unitario para presupuesto: precio público con promoción activa (si hay),
+        y luego descuento de cliente si aplica. El presupuesto al cliente siempre usa
+        precio público/promo, nunca monto privado.
+        """
+        pricing = pricing_service or PromotionPricingService(self.db)
+        active = discounts_map if discounts_map is not None else pricing.get_active_product_discounts_map()
+        public_price = pricing.get_product_public_price(int(product_id))
+        unit_price = float(public_price or 0)
+        has_promotion = False
+        promotion_discount_percent = 0.0
+        original_price = unit_price
+
+        promo = active.get(int(product_id))
+        if promo and unit_price > 0:
+            package_cost = pricing.get_product_package_cost(int(product_id))
+            calculated = pricing.calculate_promotional_price(
+                unit_price,
+                promo.get('discount_percent') or 0,
+                package_cost,
+            )
+            unit_price = float(calculated['promotional_price'])
+            original_price = float(calculated['original_price'])
+            has_promotion = True
+            promotion_discount_percent = float(calculated['discount_percent'])
+
+        customer_discount = self._customer_product_discount_percent(customer_id, product_id)
+        if customer_discount > 0:
+            unit_price = unit_price * (1 - customer_discount / 100)
+
+        return {
+            'unit_price': round(unit_price, 2),
+            'original_price': original_price,
+            'has_promotion': has_promotion,
+            'promotion_discount_percent': promotion_discount_percent,
+            'customer_discount_percent': customer_discount,
+        }
+
+    def _build_priced_budget_products(self, products, customer_id=None):
+        pricing = PromotionPricingService(self.db)
+        discounts_map = pricing.get_active_product_discounts_map()
+        products_payload = []
+        calculated_subtotal = 0
+
+        for product in products:
+            product_id = int(getattr(product, 'product_id', 0) or 0)
+            quantity = int(getattr(product, 'quantity', 0) or 0)
+            if product_id <= 0 or quantity <= 0:
+                continue
+
+            priced = self._resolve_budget_unit_price(
+                product_id,
+                customer_id=customer_id,
+                pricing_service=pricing,
+                discounts_map=discounts_map,
+            )
+            amount = int(round(priced['unit_price'] * quantity))
+            products_payload.append({
+                'product_id': product_id,
+                'quantity': quantity,
+                'total': amount,
+                'unit_price': priced['unit_price'],
+                'has_promotion': priced['has_promotion'],
+            })
+            calculated_subtotal += amount
+
+        return products_payload, calculated_subtotal
 
     def _attach_promotion_to_budget_products(self, product_data):
         pricing_service = PromotionPricingService(self.db)
@@ -28,15 +120,21 @@ class BudgetClass:
             row = dict(item)
             product_id = row.get("product_id")
             quantity = row.get("quantity") or 0
+            stored_unit = None
             if quantity > 0 and row.get("total") is not None:
-                row["sale_price"] = int(row["total"] // quantity)
+                stored_unit = int(row["total"] // quantity)
+                row["sale_price"] = stored_unit
             if product_id:
                 promo = discounts_map.get(int(product_id))
                 if promo:
-                    row["has_product_promotion"] = True
-                    row["promotion_discount_percent"] = promo["discount_percent"]
-                    row["public_sale_price_original"] = promo["original_price"]
-                    row["public_sale_price"] = promo["promotional_price"]
+                    promo_price = int(round(float(promo["promotional_price"])))
+                    original = int(round(float(promo["original_price"])))
+                    # Solo marcar promoción si el precio guardado coincide con el promo
+                    if stored_unit is not None and abs(stored_unit - promo_price) <= 1:
+                        row["has_product_promotion"] = True
+                        row["promotion_discount_percent"] = promo["discount_percent"]
+                        row["public_sale_price_original"] = original
+                        row["public_sale_price"] = promo_price
             enriched.append(row)
         return enriched
 
@@ -185,27 +283,18 @@ class BudgetClass:
             if not customer:
                 return {"status": "error", "message": "Customer not found"}
 
-            calculated_subtotal = 0
-            products_payload = []
+            products_payload, calculated_subtotal = self._build_priced_budget_products(
+                budget_inputs.products,
+                customer_id=budget_inputs.customer_id,
+            )
+            if not products_payload:
+                return {"status": "error", "message": "Debe agregar al menos un producto al presupuesto."}
 
-            for product in budget_inputs.products:
-                amount = product.amount
-                if amount is None or amount <= 0:
-                    amount = round(product.sale_price * product.quantity)
-
-                amount = int(amount)
-
-                products_payload.append({
-                    "product_id": product.product_id,
-                    "quantity": product.quantity,
-                    "total": amount
-                })
-                calculated_subtotal += amount
-
-            subtotal = int(budget_inputs.subtotal) if budget_inputs.subtotal > 0 else calculated_subtotal
             shipping = int(budget_inputs.shipping) if budget_inputs.shipping else 0
-            tax = int(budget_inputs.tax)
-            total = int(budget_inputs.total) if budget_inputs.total > 0 else subtotal + shipping + tax
+            tax_percent = self._get_tax_percent()
+            tax = int(round((calculated_subtotal + shipping) * tax_percent / 100)) if tax_percent > 0 else 0
+            total = calculated_subtotal + shipping + tax
+            subtotal = calculated_subtotal
 
             new_budget = BudgetModel(
                 customer_id=budget_inputs.customer_id,
@@ -233,7 +322,7 @@ class BudgetClass:
                 self.db.add(new_product)
 
             PromotionPricingService(self.db).record_product_discount_usages(
-                products_payload,
+                [p for p in products_payload if p.get('has_promotion')],
                 budget_id=new_budget.id,
             )
 
@@ -263,27 +352,18 @@ class BudgetClass:
         skip_whatsapp_notification: Si es True, no envía el mensaje de revisión por WhatsApp.
         """
         try:
-            calculated_subtotal = 0
-            products_payload = []
+            products_payload, calculated_subtotal = self._build_priced_budget_products(
+                budget_inputs.products,
+                customer_id=None,
+            )
+            if not products_payload:
+                return {"status": "error", "message": "Debe agregar al menos un producto al presupuesto."}
 
-            for product in budget_inputs.products:
-                amount = product.amount
-                if amount is None or amount <= 0:
-                    amount = round(product.sale_price * product.quantity)
-
-                amount = int(amount)
-
-                products_payload.append({
-                    "product_id": product.product_id,
-                    "quantity": product.quantity,
-                    "total": amount
-                })
-                calculated_subtotal += amount
-
-            subtotal = int(budget_inputs.subtotal) if budget_inputs.subtotal > 0 else calculated_subtotal
             shipping = int(budget_inputs.shipping) if budget_inputs.shipping else 0
-            tax = int(budget_inputs.tax)
-            total = int(budget_inputs.total) if budget_inputs.total > 0 else subtotal + shipping + tax
+            tax_percent = self._get_tax_percent()
+            tax = int(round((calculated_subtotal + shipping) * tax_percent / 100)) if tax_percent > 0 else 0
+            total = calculated_subtotal + shipping + tax
+            subtotal = calculated_subtotal
 
             # Crear presupuesto con customer_id = -1 para indicar que no hay cliente guardado
             # Los datos del cliente se proporcionan en el request pero no se guardan en customers
@@ -313,7 +393,7 @@ class BudgetClass:
                 self.db.add(new_product)
 
             PromotionPricingService(self.db).record_product_discount_usages(
-                products_payload,
+                [p for p in products_payload if p.get('has_promotion')],
                 budget_id=new_budget.id,
             )
 
