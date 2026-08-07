@@ -238,7 +238,7 @@ class AdvertisingClass(BaseDomainService):
 
         promo_data = PromotionClass(self.db)._serialize_row(promotion)
         promotion_type_id = int(promo_data.get('promotion_type_id') or 0)
-        discount_percent = int(round(float(promo_data.get('discount_percent') or 0)))
+        discount_percent = round(float(promo_data.get('discount_percent') or 0), 2)
         lines = [f"🎉 *{promo_data.get('name', 'Promoción')}*"]
 
         description = (promo_data.get('description') or '').strip()
@@ -305,7 +305,7 @@ class AdvertisingClass(BaseDomainService):
         if products:
             product_name = products[0].get('product_name') or f"Producto #{products[0].get('product_id')}"
 
-        discount_percent = int(round(float(promo_data.get('discount_percent') or 0)))
+        discount_percent = round(float(promo_data.get('discount_percent') or 0), 2)
         start_date = _format_whatsapp_date(promo_data.get('start_date'))
         end_date = _format_whatsapp_date(promo_data.get('end_date'))
         if start_date or end_date:

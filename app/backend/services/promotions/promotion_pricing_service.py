@@ -358,7 +358,7 @@ class PromotionPricingService:
                 'id': promotion.id,
                 'name': promotion.name,
                 'coupon_code': promotion.coupon_code,
-                'discount_percent': int(round(_to_float(promotion.discount_percent))),
+                'discount_percent': round(_to_float(promotion.discount_percent), 2),
                 'minimum_purchase': _to_float(promotion.minimum_purchase),
                 'end_date': end_date,
                 'description': promotion.description,

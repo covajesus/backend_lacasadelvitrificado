@@ -636,6 +636,6 @@ class PromotionClass(BaseDomainService):
                 'total_paid_amount': total_paid,
                 'total_discount_amount': total_discount,
                 'effective_discount_percent': effective_percent,
-                'configured_discount_percent': int(round(float(promotion.discount_percent or 0))),
+                'configured_discount_percent': float(promotion.discount_percent or 0),
             },
         }
