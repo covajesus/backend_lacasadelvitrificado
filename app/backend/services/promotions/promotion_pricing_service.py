@@ -180,7 +180,6 @@ class PromotionPricingService:
         percent = _to_float(discount_percent)
         cost = _to_float(package_cost)
         profit = max(base - cost, 0)
-        # El % de promoción se aplica al precio de venta al público.
         discount_amount = _round_price(base * percent / 100)
         promo = _round_price(base - discount_amount)
         return {
