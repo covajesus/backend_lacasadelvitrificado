@@ -210,6 +210,8 @@ class PromotionModel(Base):
     name = Column(String(255), nullable=False)
     description = Column(Text, nullable=True)
     discount_percent = Column(Numeric(5, 2), default=0)
+    discount_mode = Column(String(20), default='percent')
+    discount_amount = Column(Numeric(12, 2), default=0)
     coupon_code = Column(String(50), nullable=True)
     minimum_purchase = Column(Numeric(12, 2), default=0)
     start_date = Column(DateTime(), nullable=True)

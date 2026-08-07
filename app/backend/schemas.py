@@ -131,6 +131,8 @@ class StorePromotion(BaseModel):
     name: str
     description: Optional[str] = None
     discount_percent: float = 0
+    discount_mode: str = 'percent'
+    discount_amount: float = 0
     coupon_code: Optional[str] = None
     minimum_purchase: float = 0
     start_date: Optional[str] = None
@@ -146,6 +148,8 @@ class UpdatePromotion(BaseModel):
     name: str
     description: Optional[str] = None
     discount_percent: float = 0
+    discount_mode: str = 'percent'
+    discount_amount: float = 0
     coupon_code: Optional[str] = None
     minimum_purchase: float = 0
     start_date: Optional[str] = None

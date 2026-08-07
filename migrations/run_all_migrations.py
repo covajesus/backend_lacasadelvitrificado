@@ -8,6 +8,7 @@ from pathlib import Path
 
 MIGRATIONS = [
     'run_add_maximum_profit_discount.py',
+    'run_add_promotion_discount_mode.py',
     'run_add_promotion_audience.py',
     'run_add_sales_coupon_code.py',
     'run_add_advertising_campaigns.py',

@@ -25,6 +25,8 @@ PROMOTION_TYPE_COUPON = 2
 PROMOTION_AUDIENCE_ALL = 1
 PROMOTION_AUDIENCE_SELECTED = 2
 ACCEPTED_SALE_STATUS_IDS = (2, 4)
+DISCOUNT_MODE_PERCENT = 'percent'
+DISCOUNT_MODE_AMOUNT = 'amount'
 
 
 def _to_float(value):
@@ -112,35 +114,86 @@ class PromotionPricingService:
         max_amount = self.max_allowed_discount_amount(base, package_cost)
         return min(100.0, max(0.0, (max_amount / base) * 100))
 
+    def normalize_discount_mode(self, discount_mode: str | None) -> str:
+        mode = (discount_mode or DISCOUNT_MODE_PERCENT).strip().lower()
+        if mode in (DISCOUNT_MODE_AMOUNT, 'monto', 'fixed'):
+            return DISCOUNT_MODE_AMOUNT
+        return DISCOUNT_MODE_PERCENT
+
+    def resolve_discount_inputs(
+        self,
+        public_price: float,
+        package_cost: float,
+        discount_mode: str | None,
+        discount_percent: float = 0,
+        discount_amount: float = 0,
+        *,
+        require_product_profit: bool = True,
+    ) -> tuple[dict | None, str | None]:
+        """Normaliza % o monto y valida que no supere el tope de ganancia sacrificable."""
+        base = _to_float(public_price)
+        cost = _to_float(package_cost)
+        mode = self.normalize_discount_mode(discount_mode)
+        profit = max(base - cost, 0)
+
+        if require_product_profit:
+            if cost <= 0 or profit <= 0:
+                return None, 'El producto no tiene una ganancia positiva para aplicar una promoción.'
+            if base <= 0:
+                return None, 'El producto no tiene precio de venta público configurado.'
+
+        max_amount = self.max_allowed_discount_amount(base, cost) if base > 0 else 0.0
+        maximum = self.get_maximum_profit_discount_percent()
+
+        if mode == DISCOUNT_MODE_AMOUNT:
+            amount = _round_price(discount_amount)
+            if amount <= 0:
+                return None, 'Debe indicar un monto de descuento mayor a 0.'
+            if base > 0 and amount > base:
+                return None, 'El monto de descuento no puede superar el precio público.'
+            if require_product_profit and amount > max_amount + 0.009:
+                return None, (
+                    f'El descuento de ${amount:,.0f} supera el máximo permitido '
+                    f'({maximum:g}% de la ganancia = ${max_amount:,.0f}).'
+                )
+            percent = round((amount / base) * 100, 2) if base > 0 else 0.0
+        else:
+            percent = round(_to_float(discount_percent), 2)
+            if percent <= 0 or percent > 100:
+                return None, 'El descuento debe estar entre 0 y 100.'
+            amount = _round_price(base * percent / 100) if base > 0 else 0.0
+            if require_product_profit and amount > max_amount + 0.009:
+                max_pct = (max_amount / base * 100) if base else 0
+                return None, (
+                    f'El descuento de {percent:g}% (${amount:,.0f}) supera el máximo '
+                    f'permitido ({maximum:g}% de la ganancia = ${max_amount:,.0f}, '
+                    f'aprox. {max_pct:.2f}% del precio público).'
+                )
+
+        return {
+            'discount_mode': mode,
+            'discount_percent': percent,
+            'discount_amount': amount,
+            'max_allowed_discount_amount': max_amount,
+        }, None
+
     def validate_discount_against_profit(
         self,
         public_price: float,
         package_cost: float,
         discount_percent: float,
+        discount_mode: str | None = DISCOUNT_MODE_PERCENT,
+        discount_amount: float = 0,
     ) -> str | None:
-        """
-        El % de promoción se aplica al precio público.
-        Se rechaza si el descuento en $ supera el % configurado de la ganancia.
-        """
-        base = _to_float(public_price)
-        percent = _to_float(discount_percent)
-        cost = _to_float(package_cost)
-        if percent < 0 or percent > 100:
-            return 'El descuento debe estar entre 0 y 100.'
-        profit = max(base - cost, 0)
-        if cost <= 0 or profit <= 0:
-            return 'El producto no tiene una ganancia positiva para aplicar una promoción.'
-        discount_amount = _round_price(base * percent / 100)
-        max_amount = self.max_allowed_discount_amount(base, cost)
-        maximum = self.get_maximum_profit_discount_percent()
-        if discount_amount > max_amount + 0.009:
-            max_pct = (max_amount / base * 100) if base else 0
-            return (
-                f'El descuento de {percent:g}% (${discount_amount:,.0f}) supera el máximo '
-                f'permitido ({maximum:g}% de la ganancia = ${max_amount:,.0f}, '
-                f'aprox. {max_pct:.2f}% del precio público).'
-            )
-        return None
+        _, error = self.resolve_discount_inputs(
+            public_price,
+            package_cost,
+            discount_mode,
+            discount_percent=discount_percent,
+            discount_amount=discount_amount,
+            require_product_profit=True,
+        )
+        return error
 
     def validate_profit_discount_percent(self, discount_percent: float) -> str | None:
         """Compatibilidad: solo valida rango 0–100. El tope de ganancia es por producto."""
@@ -175,18 +228,37 @@ class PromotionPricingService:
         base_price: float,
         discount_percent: float,
         package_cost: float,
+        discount_amount: float | None = None,
+        discount_mode: str | None = DISCOUNT_MODE_PERCENT,
+        *,
+        clamp_to_max_profit: bool = True,
     ) -> dict:
         base = _to_float(base_price)
-        percent = _to_float(discount_percent)
         cost = _to_float(package_cost)
         profit = max(base - cost, 0)
-        discount_amount = _round_price(base * percent / 100)
-        promo = _round_price(base - discount_amount)
+        mode = self.normalize_discount_mode(discount_mode)
+        max_amount = self.max_allowed_discount_amount(base, cost) if base > 0 else 0.0
+
+        if mode == DISCOUNT_MODE_AMOUNT:
+            amount = _round_price(max(_to_float(discount_amount), 0))
+            if clamp_to_max_profit and max_amount > 0:
+                amount = min(amount, max_amount)
+            amount = min(amount, base) if base > 0 else 0.0
+            percent = round((amount / base) * 100, 2) if base > 0 else 0.0
+        else:
+            percent = _to_float(discount_percent)
+            amount = _round_price(base * percent / 100)
+            if clamp_to_max_profit and max_amount > 0 and amount > max_amount:
+                amount = max_amount
+                percent = round((amount / base) * 100, 2) if base > 0 else 0.0
+
+        promo = _round_price(base - amount)
         return {
             'original_price': base,
             'promotional_price': promo,
-            'discount_amount': discount_amount,
+            'discount_amount': amount,
             'discount_percent': percent,
+            'discount_mode': mode,
             'package_cost': cost,
             'profit_amount': _round_price(profit),
         }
@@ -214,14 +286,21 @@ class PromotionPricingService:
             product_id = int(promo_product.product_id)
             if product_id in result:
                 continue
+            mode = self.normalize_discount_mode(getattr(promotion, 'discount_mode', None))
+            stored_amount = _to_float(getattr(promotion, 'discount_amount', 0) or 0)
             result[product_id] = {
                 'promotion_id': promotion.id,
                 'promotion_type_id': PROMOTION_TYPE_PRODUCT_DISCOUNT,
                 'promotion_name': promotion.name,
+                'discount_mode': mode,
                 'discount_percent': _to_float(promotion.discount_percent),
+                'discount_amount': (
+                    stored_amount
+                    if mode == DISCOUNT_MODE_AMOUNT and stored_amount > 0
+                    else _to_float(promo_product.discount_amount)
+                ),
                 'original_price': _to_float(promo_product.original_price),
                 'promotional_price': _to_float(promo_product.promotional_price),
-                'discount_amount': _to_float(promo_product.discount_amount),
             }
         return result
 
@@ -384,13 +463,16 @@ class PromotionPricingService:
             original,
             promo['discount_percent'],
             package_cost,
+            discount_amount=promo.get('discount_amount'),
+            discount_mode=promo.get('discount_mode'),
         )
         product_dict['public_sale_price_original'] = original
         product_dict['public_sale_price'] = pricing['promotional_price']
         product_dict['promotion_id'] = promo['promotion_id']
         product_dict['promotion_type_id'] = promo['promotion_type_id']
-        product_dict['promotion_discount_percent'] = promo['discount_percent']
+        product_dict['promotion_discount_percent'] = pricing['discount_percent']
         product_dict['promotion_discount_amount'] = pricing['discount_amount']
+        product_dict['promotion_discount_mode'] = pricing['discount_mode']
         product_dict['has_product_promotion'] = True
         return product_dict
 
@@ -416,13 +498,16 @@ class PromotionPricingService:
                 original,
                 promo['discount_percent'],
                 package_cost,
+                discount_amount=promo.get('discount_amount'),
+                discount_mode=promo.get('discount_mode'),
             )
             item['public_sale_price_original'] = original
             item['public_sale_price'] = pricing['promotional_price']
             item['promotion_id'] = promo['promotion_id']
             item['promotion_type_id'] = promo['promotion_type_id']
-            item['promotion_discount_percent'] = promo['discount_percent']
+            item['promotion_discount_percent'] = pricing['discount_percent']
             item['promotion_discount_amount'] = pricing['discount_amount']
+            item['promotion_discount_mode'] = pricing['discount_mode']
             item['has_product_promotion'] = True
             enriched.append(item)
         return enriched
@@ -515,9 +600,13 @@ class PromotionPricingService:
 
         product_pricing = []
         total_discount = 0.0
+        discount_mode = self.normalize_discount_mode(getattr(promotion, 'discount_mode', None))
         discount_percent = _to_float(promotion.discount_percent)
-        if discount_percent < 0 or discount_percent > 100:
+        discount_amount = _to_float(getattr(promotion, 'discount_amount', 0) or 0)
+        if discount_mode == DISCOUNT_MODE_PERCENT and (discount_percent < 0 or discount_percent > 100):
             return {'status': 'error', 'message': 'El descuento debe estar entre 0 y 100.'}
+        if discount_mode == DISCOUNT_MODE_AMOUNT and discount_amount <= 0:
+            return {'status': 'error', 'message': 'El cupón no tiene un monto de descuento válido.'}
         excluded_products: list[dict] = []
 
         if not allowed_ids:
@@ -546,6 +635,8 @@ class PromotionPricingService:
                     original,
                     package_cost,
                     discount_percent,
+                    discount_mode=discount_mode,
+                    discount_amount=discount_amount,
                 )
                 if profit_error:
                     product_name = self._get_product_names_map([product_id]).get(
@@ -559,6 +650,8 @@ class PromotionPricingService:
                     original,
                     discount_percent,
                     package_cost,
+                    discount_amount=discount_amount,
+                    discount_mode=discount_mode,
                 )
                 line_discount = _round_price(pricing['discount_amount'] * quantity)
                 product_pricing.append({
@@ -598,6 +691,8 @@ class PromotionPricingService:
                     original,
                     package_cost,
                     discount_percent,
+                    discount_mode=discount_mode,
+                    discount_amount=discount_amount,
                 )
                 if profit_error:
                     product_name = self._get_product_names_map([product_id]).get(
@@ -611,6 +706,8 @@ class PromotionPricingService:
                     original,
                     discount_percent,
                     package_cost,
+                    discount_amount=discount_amount,
+                    discount_mode=discount_mode,
                 )
                 promotional = pricing['promotional_price']
                 discount_per_unit = pricing['discount_amount']

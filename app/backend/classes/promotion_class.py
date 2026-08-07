@@ -130,6 +130,10 @@ class PromotionClass(BaseDomainService):
             'name': row.name,
             'description': row.description,
             'discount_percent': float(row.discount_percent or 0),
+            'discount_mode': self.pricing.normalize_discount_mode(
+                getattr(row, 'discount_mode', None)
+            ),
+            'discount_amount': float(getattr(row, 'discount_amount', 0) or 0),
             'coupon_code': row.coupon_code,
             'minimum_purchase': float(row.minimum_purchase or 0),
             'start_date': start,
@@ -158,6 +162,8 @@ class PromotionClass(BaseDomainService):
                 PromotionModel.name,
                 PromotionModel.description,
                 PromotionModel.discount_percent,
+                PromotionModel.discount_mode,
+                PromotionModel.discount_amount,
                 PromotionModel.coupon_code,
                 PromotionModel.minimum_purchase,
                 PromotionModel.start_date,
@@ -203,6 +209,8 @@ class PromotionClass(BaseDomainService):
                 PromotionModel.name,
                 PromotionModel.description,
                 PromotionModel.discount_percent,
+                PromotionModel.discount_mode,
+                PromotionModel.discount_amount,
                 PromotionModel.coupon_code,
                 PromotionModel.minimum_purchase,
                 PromotionModel.start_date,
@@ -217,14 +225,48 @@ class PromotionClass(BaseDomainService):
     def get_pricing_rules(self, product_id=None):
         return self.pricing.get_pricing_rules(product_id=product_id)
 
+    def _resolved_discount_fields(self, promotion_inputs, product_id=None):
+        mode = self.pricing.normalize_discount_mode(
+            getattr(promotion_inputs, 'discount_mode', None)
+        )
+        percent = float(getattr(promotion_inputs, 'discount_percent', 0) or 0)
+        amount = float(getattr(promotion_inputs, 'discount_amount', 0) or 0)
+        if product_id:
+            public_price = self.pricing.get_product_public_price(product_id)
+            package_cost = self.pricing.get_product_package_cost(product_id)
+            resolved, error = self.pricing.resolve_discount_inputs(
+                public_price,
+                package_cost,
+                mode,
+                discount_percent=percent,
+                discount_amount=amount,
+                require_product_profit=True,
+            )
+            if error:
+                return None, error
+            return resolved, None
+
+        # Cupón sin producto: validar rangos básicos; el tope se aplica al usar el cupón.
+        if mode == 'amount':
+            if amount <= 0:
+                return None, 'Debe indicar un monto de descuento mayor a 0.'
+            return {
+                'discount_mode': 'amount',
+                'discount_percent': 0.0,
+                'discount_amount': amount,
+            }, None
+        if percent <= 0 or percent > 100:
+            return None, 'El descuento debe estar entre 0 y 100.'
+        return {
+            'discount_mode': 'percent',
+            'discount_percent': percent,
+            'discount_amount': 0.0,
+        }, None
+
     def _validate_inputs(self, promotion_inputs, promotion_id=None):
         promotion_type_id = int(promotion_inputs.promotion_type_id or PROMOTION_TYPE_PRODUCT_DISCOUNT)
         if promotion_type_id not in (PROMOTION_TYPE_PRODUCT_DISCOUNT, PROMOTION_TYPE_COUPON):
             return 'Tipo de promoción no válido.'
-
-        discount = float(promotion_inputs.discount_percent or 0)
-        if discount < 0 or discount > 100:
-            return 'El descuento debe estar entre 0 y 100.'
 
         product_ids = [int(pid) for pid in (promotion_inputs.product_ids or []) if pid]
         if promotion_type_id == PROMOTION_TYPE_PRODUCT_DISCOUNT:
@@ -232,14 +274,11 @@ class PromotionClass(BaseDomainService):
                 product_ids = [int(promotion_inputs.product_id)]
             if len(product_ids) != 1:
                 return 'Debe seleccionar un producto para el descuento.'
-            product_id = product_ids[0]
-            public_price = self.pricing.get_product_public_price(product_id)
-            package_cost = self.pricing.get_product_package_cost(product_id)
-            discount_error = self.pricing.validate_discount_against_profit(
-                public_price,
-                package_cost,
-                discount,
-            )
+            _, discount_error = self._resolved_discount_fields(promotion_inputs, product_ids[0])
+            if discount_error:
+                return discount_error
+        else:
+            _, discount_error = self._resolved_discount_fields(promotion_inputs, None)
             if discount_error:
                 return discount_error
 
@@ -282,7 +321,15 @@ class PromotionClass(BaseDomainService):
                 )
             )
 
-    def _replace_products(self, promotion_id, promotion_type_id, discount_percent, product_ids):
+    def _replace_products(
+        self,
+        promotion_id,
+        promotion_type_id,
+        discount_percent,
+        product_ids,
+        discount_mode='percent',
+        discount_amount=0,
+    ):
         self.db.query(PromotionProductModel).filter(
             PromotionProductModel.promotion_id == promotion_id
         ).delete(synchronize_session=False)
@@ -294,6 +341,8 @@ class PromotionClass(BaseDomainService):
                 base_price,
                 discount_percent,
                 package_cost,
+                discount_amount=discount_amount,
+                discount_mode=discount_mode,
             )
             self.db.add(
                 PromotionProductModel(
@@ -319,6 +368,16 @@ class PromotionClass(BaseDomainService):
         if promotion_type_id == PROMOTION_TYPE_PRODUCT_DISCOUNT and promotion_inputs.product_id:
             product_ids = [int(promotion_inputs.product_id)]
 
+        product_id_for_discount = (
+            product_ids[0] if promotion_type_id == PROMOTION_TYPE_PRODUCT_DISCOUNT and product_ids else None
+        )
+        resolved, resolve_error = self._resolved_discount_fields(
+            promotion_inputs,
+            product_id_for_discount,
+        )
+        if resolve_error or not resolved:
+            return resolve_error or 'Descuento no válido.'
+
         coupon_code = None
         audience_type = PROMOTION_AUDIENCE_ALL
         customer_ids = []
@@ -332,7 +391,9 @@ class PromotionClass(BaseDomainService):
             product_id=product_ids[0] if promotion_type_id == PROMOTION_TYPE_PRODUCT_DISCOUNT else None,
             name=promotion_inputs.name.strip(),
             description=(promotion_inputs.description or '').strip() or None,
-            discount_percent=promotion_inputs.discount_percent,
+            discount_percent=resolved['discount_percent'],
+            discount_mode=resolved['discount_mode'],
+            discount_amount=resolved['discount_amount'],
             coupon_code=coupon_code,
             minimum_purchase=float(promotion_inputs.minimum_purchase or 0),
             start_date=_parse_optional_date(promotion_inputs.start_date),
@@ -345,10 +406,17 @@ class PromotionClass(BaseDomainService):
         self.db.add(new_row)
         self.db.flush()
         if promotion_type_id == PROMOTION_TYPE_PRODUCT_DISCOUNT:
-            self._replace_products(new_row.id, promotion_type_id, promotion_inputs.discount_percent, product_ids)
+            self._replace_products(
+                new_row.id,
+                promotion_type_id,
+                resolved['discount_percent'],
+                product_ids,
+                discount_mode=resolved['discount_mode'],
+                discount_amount=resolved['discount_amount'],
+            )
             self._replace_customers(new_row.id, PROMOTION_AUDIENCE_ALL, [])
         else:
-            self._replace_products(new_row.id, promotion_type_id, promotion_inputs.discount_percent, [])
+            self._replace_products(new_row.id, promotion_type_id, resolved['discount_percent'], [])
             self._replace_customers(new_row.id, audience_type, customer_ids)
         self.db.commit()
         self.db.refresh(new_row)
@@ -378,10 +446,22 @@ class PromotionClass(BaseDomainService):
         if promotion_type_id == PROMOTION_TYPE_PRODUCT_DISCOUNT and promotion_inputs.product_id:
             product_ids = [int(promotion_inputs.product_id)]
 
+        product_id_for_discount = (
+            product_ids[0] if promotion_type_id == PROMOTION_TYPE_PRODUCT_DISCOUNT and product_ids else None
+        )
+        resolved, resolve_error = self._resolved_discount_fields(
+            promotion_inputs,
+            product_id_for_discount,
+        )
+        if resolve_error or not resolved:
+            return resolve_error or 'Descuento no válido.'
+
         existing.product_id = product_ids[0] if promotion_type_id == PROMOTION_TYPE_PRODUCT_DISCOUNT else None
         existing.name = promotion_inputs.name.strip()
         existing.description = (promotion_inputs.description or '').strip() or None
-        existing.discount_percent = promotion_inputs.discount_percent
+        existing.discount_percent = resolved['discount_percent']
+        existing.discount_mode = resolved['discount_mode']
+        existing.discount_amount = resolved['discount_amount']
         existing.coupon_code = (
             (promotion_inputs.coupon_code or '').strip().upper()
             if promotion_type_id == PROMOTION_TYPE_COUPON
@@ -399,10 +479,17 @@ class PromotionClass(BaseDomainService):
             existing.audience_type = PROMOTION_AUDIENCE_ALL
         existing.updated_date = datetime.utcnow()
         if promotion_type_id == PROMOTION_TYPE_PRODUCT_DISCOUNT:
-            self._replace_products(existing.id, promotion_type_id, promotion_inputs.discount_percent, product_ids)
+            self._replace_products(
+                existing.id,
+                promotion_type_id,
+                resolved['discount_percent'],
+                product_ids,
+                discount_mode=resolved['discount_mode'],
+                discount_amount=resolved['discount_amount'],
+            )
             self._replace_customers(existing.id, PROMOTION_AUDIENCE_ALL, [])
         else:
-            self._replace_products(existing.id, promotion_type_id, promotion_inputs.discount_percent, [])
+            self._replace_products(existing.id, promotion_type_id, resolved['discount_percent'], [])
             self._replace_customers(existing.id, audience_type, customer_ids)
         self.db.commit()
         self.db.refresh(existing)
