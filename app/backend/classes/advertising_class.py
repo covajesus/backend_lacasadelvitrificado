@@ -256,21 +256,25 @@ class AdvertisingClass(BaseDomainService):
         else:
             products = promo_data.get('products') or []
             product_name = 'Producto'
+            special_price = 0.0
             if products:
                 product_name = products[0].get('product_name') or f"Producto #{products[0].get('product_id')}"
-            lines = [
-                '🥳 ¡Nueva promoción! 🎉',
-                f'📦 *Producto:* {product_name}',
-                f'💰 *Descuento:* {discount_percent}%',
-            ]
+                special_price = float(products[0].get('promotional_price') or 0)
             start_date = _format_whatsapp_date(promo_data.get('start_date'))
             end_date = _format_whatsapp_date(promo_data.get('end_date'))
             if start_date or end_date:
-                lines.append(f'🗓️ *Vigencia:* {start_date or "—"} al {end_date or "—"}')
+                validity = f'{start_date or "—"} al {end_date or "—"}'
             else:
-                lines.append('🗓️ *Vigencia:* —')
-            lines.append('')
-            lines.append('Toca el botón *Ir a la promoción*.')
+                validity = '—'
+            lines = [
+                '🎉¡Nueva promoción!🎉',
+                '',
+                f'📦*Producto:* {product_name}',
+                f'💰*Precio Especial:* {_format_clp(special_price)} + IVA',
+                f'📅 *Vigencia:* {validity}',
+                '',
+                'Toca el botón *Ir a la promoción*.',
+            ]
             extra = (extra_message or '').strip()
             if extra:
                 lines.append('')
@@ -302,10 +306,11 @@ class AdvertisingClass(BaseDomainService):
         promo_data = PromotionClass(self.db)._serialize_row(promotion)
         products = promo_data.get('products') or []
         product_name = 'Producto'
+        special_price = 0.0
         if products:
             product_name = products[0].get('product_name') or f"Producto #{products[0].get('product_id')}"
+            special_price = float(products[0].get('promotional_price') or 0)
 
-        discount_percent = round(float(promo_data.get('discount_percent') or 0), 2)
         start_date = _format_whatsapp_date(promo_data.get('start_date'))
         end_date = _format_whatsapp_date(promo_data.get('end_date'))
         if start_date or end_date:
@@ -316,7 +321,7 @@ class AdvertisingClass(BaseDomainService):
         whatsapp = WhatsappClass(self.db)
         return [
             whatsapp._clean_text_for_whatsapp(str(product_name))[:1024],
-            whatsapp._clean_text_for_whatsapp(f'{discount_percent}%')[:1024],
+            whatsapp._clean_text_for_whatsapp(_format_clp(special_price))[:1024],
             whatsapp._clean_text_for_whatsapp(validity)[:1024],
         ]
 

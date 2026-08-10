@@ -160,15 +160,16 @@ Crear en [Meta Business Manager](https://business.facebook.com/) → WhatsApp �
 Texto del cuerpo (3 variables):
 
 ```
-🥳 ¡Nueva promoción! 🎉
-📦 *Producto:* {{1}}
-💰 *Descuento:* {{2}}
-🗓️ *Vigencia:* {{3}}
+🎉¡Nueva promoción!🎉
+
+📦*Producto:* {{1}}
+💰*Precio Especial:* {{2}} + IVA
+📅 *Vigencia:* {{3}}
 
 Toca el botón *Ir a la promoción*.
 ```
 
-El API envía: `{{1}}` = nombre producto, `{{2}}` = descuento (ej. `15%`), `{{3}}` = vigencia (ej. `01-06-2026 al 30-06-2026`).
+El API envía: `{{1}}` = nombre producto, `{{2}}` = precio especial (ej. `$55.000`), `{{3}}` = vigencia (ej. `01-06-2026 al 30-06-2026`). El texto `+ IVA` va fijo en la plantilla de Meta.
 
 ### `campana_publicidad_v1` (cupón o mensaje libre, sin imagen)
 
