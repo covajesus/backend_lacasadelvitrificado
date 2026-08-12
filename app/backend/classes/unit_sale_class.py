@@ -4,7 +4,7 @@ from decimal import Decimal, ROUND_HALF_UP
 from sqlalchemy import func
 
 from app.backend.classes.inventory_stock import sale_acceptance_unit_cost_from_movements
-from app.backend.core.constants import RequestReasonPrefix, TaxPolicy
+from app.backend.core.constants import RequestReasonPrefix, TaxPolicy, SaleStatus
 from app.backend.core.exceptions import ValidationError
 from app.backend.db.models import (
     UnitSaleRequestModel,
@@ -163,11 +163,13 @@ class UnitSaleClass(LinkedRequestService):
 
         dte_type_id = 1
         dte_status_id = 1
+        payment_support = None
         if request.sale_id:
             sale = self.db.query(SaleModel).filter(SaleModel.id == request.sale_id).first()
             if sale:
                 dte_type_id = int(sale.dte_type_id or 1)
                 dte_status_id = int(sale.dte_status_id or 1)
+                payment_support = sale.payment_support or None
 
         return {
             "id": request.id,
@@ -178,6 +180,7 @@ class UnitSaleClass(LinkedRequestService):
             "sale_id": request.sale_id,
             "dte_type_id": dte_type_id,
             "dte_status_id": dte_status_id,
+            "payment_support": payment_support,
             "subtotal": float(subtotal),
             "tax": float(tax),
             "total": float(total),
@@ -247,9 +250,10 @@ class UnitSaleClass(LinkedRequestService):
             total=total,
             deduction_lines=self._to_deduction_lines(items),
             persist_totals=lambda req, s, t, tot: self._persist_request_totals(req, s, t, tot),
-            # Ventas unitarias: siempre boleta (dte_type_id=1).
+            # Ventas unitarias: siempre boleta; quedan en revisión de pago para adjuntar comprobante.
             dte_type_id=1,
             dte_status_id=status_id,
+            status_id=SaleStatus.PAYMENT_REVIEW,
         )
 
     @staticmethod
@@ -379,13 +383,18 @@ class UnitSaleClass(LinkedRequestService):
             self.db.add_all(items)
             self.db.flush()
 
-            self._create_or_refresh_sale(
+            sale_id = self._create_or_refresh_sale(
                 new_request,
                 items,
                 dte_status_id=getattr(unit_sale_inputs, 'dte_status_id', 1),
             )
             self.db.commit()
-            return "success"
+            return {
+                'status': 'success',
+                'message': 'success',
+                'sale_id': int(sale_id) if sale_id else None,
+                'unit_sale_id': int(new_request.id),
+            }
         except (ValueError, ValidationError) as e:
             self.db.rollback()
             return {"status": "error", "message": str(e)}
@@ -429,13 +438,18 @@ class UnitSaleClass(LinkedRequestService):
             self.db.add_all(items)
             self.db.flush()
 
-            self._create_or_refresh_sale(
+            sale_id = self._create_or_refresh_sale(
                 request,
                 items,
                 dte_status_id=getattr(unit_sale_inputs, 'dte_status_id', 1),
             )
             self.db.commit()
-            return "success"
+            return {
+                'status': 'success',
+                'message': 'success',
+                'sale_id': int(sale_id) if sale_id else None,
+                'unit_sale_id': int(request.id),
+            }
         except (ValueError, ValidationError) as e:
             self.db.rollback()
             return {"status": "error", "message": str(e)}

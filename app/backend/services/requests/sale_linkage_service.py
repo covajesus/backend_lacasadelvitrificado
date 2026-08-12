@@ -33,6 +33,7 @@ class SaleLinkageService:
         persist_totals: Optional[Callable[[Any, Decimal, Decimal, Decimal], None]] = None,
         dte_type_id: int = 2,
         dte_status_id: int = 2,
+        status_id: int = SaleStatus.DELIVERED,
     ) -> int:
         if not customer_id:
             raise ValidationError("Cliente inválido para generar el pedido.")
@@ -41,6 +42,7 @@ class SaleLinkageService:
         if persist_totals:
             persist_totals(request, subtotal, tax, total)
 
+        sale_status = int(status_id or SaleStatus.DELIVERED)
         sale_id = getattr(request, "sale_id", None)
         if sale_id:
             sale = self.db.query(SaleModel).filter(SaleModel.id == sale_id).first()
@@ -56,6 +58,7 @@ class SaleLinkageService:
                     now,
                     dte_type_id=dte_type_id,
                     dte_status_id=dte_status_id,
+                    status_id=sale_status,
                 )
                 self.inventory_bridge.deduct_lines(sale.id, deduction_lines)
                 return sale.id
@@ -65,7 +68,7 @@ class SaleLinkageService:
             shipping_method_id=1,
             dte_type_id=int(dte_type_id),
             dte_status_id=int(dte_status_id),
-            status_id=SaleStatus.DELIVERED,
+            status_id=sale_status,
             subtotal=int(subtotal),
             tax=int(tax),
             shipping_cost=0,
@@ -94,6 +97,7 @@ class SaleLinkageService:
         *,
         dte_type_id: int = 2,
         dte_status_id: int = 2,
+        status_id: int = SaleStatus.DELIVERED,
     ):
         sale.customer_id = customer_id
         sale.delivery_address = delivery_address
@@ -103,5 +107,5 @@ class SaleLinkageService:
         sale.total = int(total)
         sale.dte_type_id = int(dte_type_id)
         sale.dte_status_id = int(dte_status_id)
-        sale.status_id = SaleStatus.DELIVERED
+        sale.status_id = int(status_id)
         sale.updated_date = now
