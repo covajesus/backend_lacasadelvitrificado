@@ -787,6 +787,8 @@ class StoreUnitSaleRequest(BaseModel):
     customer_name: str
     customer_id: Optional[int] = None
     notes: Optional[str] = None
+    # 1 = Con DTE (boleta), 2 = Pago Sin DTE
+    dte_status_id: int = 1
     items: List[UnitSaleRequestItemInput]
 
 class UpdateUnitSaleRequest(BaseModel):
@@ -794,6 +796,8 @@ class UpdateUnitSaleRequest(BaseModel):
     customer_name: str
     customer_id: Optional[int] = None
     notes: Optional[str] = None
+    # 1 = Con DTE (boleta), 2 = Pago Sin DTE
+    dte_status_id: int = 1
     items: List[UnitSaleRequestItemInput]
 
 class InternalUseRequestList(BaseModel):

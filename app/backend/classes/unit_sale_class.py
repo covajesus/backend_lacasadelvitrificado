@@ -15,6 +15,7 @@ from app.backend.db.models import (
     LotItemModel,
     CustomerModel,
     CustomerProductDiscountModel,
+    SaleModel,
 )
 from app.backend.services.inventory.inventory_sale_bridge import InventorySaleBridge, SaleDeductionLine
 from app.backend.core.pagination import paginate_query
@@ -160,6 +161,14 @@ class UnitSaleClass(LinkedRequestService):
             tax = Decimal(str(request.tax or 0))
             total = Decimal(str(request.total or 0))
 
+        dte_type_id = 1
+        dte_status_id = 1
+        if request.sale_id:
+            sale = self.db.query(SaleModel).filter(SaleModel.id == request.sale_id).first()
+            if sale:
+                dte_type_id = int(sale.dte_type_id or 1)
+                dte_status_id = int(sale.dte_status_id or 1)
+
         return {
             "id": request.id,
             "customer_id": request.customer_id,
@@ -167,6 +176,8 @@ class UnitSaleClass(LinkedRequestService):
             "customer_name": request.customer_name,
             "notes": request.notes or "",
             "sale_id": request.sale_id,
+            "dte_type_id": dte_type_id,
+            "dte_status_id": dte_status_id,
             "subtotal": float(subtotal),
             "tax": float(tax),
             "total": float(total),
@@ -215,10 +226,11 @@ class UnitSaleClass(LinkedRequestService):
             )
         return lines
 
-    def _create_or_refresh_sale(self, unit_sale_request, items):
+    def _create_or_refresh_sale(self, unit_sale_request, items, dte_status_id: int = 1):
         if not unit_sale_request.customer_id:
             raise ValueError("Cliente inválido para generar el pedido de venta unitaria.")
 
+        status_id = 1 if int(dte_status_id or 1) == 1 else 2
         subtotal, tax, total = self._calculate_totals(items)
         delivery = self._delivery_address(
             unit_sale_request.id,
@@ -235,9 +247,9 @@ class UnitSaleClass(LinkedRequestService):
             total=total,
             deduction_lines=self._to_deduction_lines(items),
             persist_totals=lambda req, s, t, tot: self._persist_request_totals(req, s, t, tot),
-            # Ventas unitarias: siempre boleta (dte_type_id=1), igual que pedidos tipo boleta.
+            # Ventas unitarias: siempre boleta (dte_type_id=1).
             dte_type_id=1,
-            dte_status_id=2,
+            dte_status_id=status_id,
         )
 
     @staticmethod
@@ -367,7 +379,11 @@ class UnitSaleClass(LinkedRequestService):
             self.db.add_all(items)
             self.db.flush()
 
-            self._create_or_refresh_sale(new_request, items)
+            self._create_or_refresh_sale(
+                new_request,
+                items,
+                dte_status_id=getattr(unit_sale_inputs, 'dte_status_id', 1),
+            )
             self.db.commit()
             return "success"
         except (ValueError, ValidationError) as e:
@@ -413,7 +429,11 @@ class UnitSaleClass(LinkedRequestService):
             self.db.add_all(items)
             self.db.flush()
 
-            self._create_or_refresh_sale(request, items)
+            self._create_or_refresh_sale(
+                request,
+                items,
+                dte_status_id=getattr(unit_sale_inputs, 'dte_status_id', 1),
+            )
             self.db.commit()
             return "success"
         except (ValueError, ValidationError) as e:
