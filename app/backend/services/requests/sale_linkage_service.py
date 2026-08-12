@@ -31,6 +31,8 @@ class SaleLinkageService:
         total: Decimal,
         deduction_lines: Iterable[SaleDeductionLine],
         persist_totals: Optional[Callable[[Any, Decimal, Decimal, Decimal], None]] = None,
+        dte_type_id: int = 2,
+        dte_status_id: int = 2,
     ) -> int:
         if not customer_id:
             raise ValidationError("Cliente inválido para generar el pedido.")
@@ -45,7 +47,15 @@ class SaleLinkageService:
             if sale:
                 self.inventory_bridge.reverse_sale_inventory(sale.id)
                 self._apply_sale_fields(
-                    sale, customer_id, delivery_address, subtotal, tax, total, now
+                    sale,
+                    customer_id,
+                    delivery_address,
+                    subtotal,
+                    tax,
+                    total,
+                    now,
+                    dte_type_id=dte_type_id,
+                    dte_status_id=dte_status_id,
                 )
                 self.inventory_bridge.deduct_lines(sale.id, deduction_lines)
                 return sale.id
@@ -53,8 +63,8 @@ class SaleLinkageService:
         new_sale = SaleModel(
             customer_id=customer_id,
             shipping_method_id=1,
-            dte_type_id=2,
-            dte_status_id=2,
+            dte_type_id=int(dte_type_id),
+            dte_status_id=int(dte_status_id),
             status_id=SaleStatus.DELIVERED,
             subtotal=int(subtotal),
             tax=int(tax),
@@ -73,12 +83,25 @@ class SaleLinkageService:
         return new_sale.id
 
     @staticmethod
-    def _apply_sale_fields(sale, customer_id, delivery_address, subtotal, tax, total, now):
+    def _apply_sale_fields(
+        sale,
+        customer_id,
+        delivery_address,
+        subtotal,
+        tax,
+        total,
+        now,
+        *,
+        dte_type_id: int = 2,
+        dte_status_id: int = 2,
+    ):
         sale.customer_id = customer_id
         sale.delivery_address = delivery_address
         sale.subtotal = int(subtotal)
         sale.tax = int(tax)
         sale.shipping_cost = 0
         sale.total = int(total)
+        sale.dte_type_id = int(dte_type_id)
+        sale.dte_status_id = int(dte_status_id)
         sale.status_id = SaleStatus.DELIVERED
         sale.updated_date = now

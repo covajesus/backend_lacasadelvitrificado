@@ -235,6 +235,9 @@ class UnitSaleClass(LinkedRequestService):
             total=total,
             deduction_lines=self._to_deduction_lines(items),
             persist_totals=lambda req, s, t, tot: self._persist_request_totals(req, s, t, tot),
+            # Ventas unitarias: siempre boleta (dte_type_id=1), igual que pedidos tipo boleta.
+            dte_type_id=1,
+            dte_status_id=2,
         )
 
     @staticmethod
