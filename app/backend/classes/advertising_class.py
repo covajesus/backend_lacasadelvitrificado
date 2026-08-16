@@ -549,14 +549,6 @@ class AdvertisingClass(BaseDomainService):
         customer_ids = [int(cid) for cid in (getattr(inputs, 'customer_ids', None) or []) if cid]
         if audience_type == AUDIENCE_SELECTED and not customer_ids:
             return 'Debe seleccionar al menos un cliente.'
-        if campaign_id:
-            existing = (
-                self.db.query(AdvertisingCampaignModel)
-                .filter(AdvertisingCampaignModel.id == int(campaign_id))
-                .first()
-            )
-            if existing and int(existing.status_id or STATUS_DRAFT) == STATUS_SENT:
-                return 'No se puede editar una campaña ya enviada.'
         return None
 
     def _replace_customers(self, campaign_id: int, audience_type: int, customer_ids: list[int]):
@@ -637,6 +629,16 @@ class AdvertisingClass(BaseDomainService):
         existing.message = (getattr(inputs, 'message', None) or '').strip()
         existing.audience_type = audience_type
         existing.updated_date = datetime.utcnow()
+
+        # Si estaba enviada, al editar vuelve a borrador para poder reenviarla.
+        if int(existing.status_id or STATUS_DRAFT) == STATUS_SENT:
+            existing.status_id = STATUS_DRAFT
+            existing.sent_count = 0
+            existing.failed_count = 0
+            existing.sent_date = None
+            self.db.query(AdvertisingCampaignDeliveryModel).filter(
+                AdvertisingCampaignDeliveryModel.campaign_id == existing.id
+            ).delete(synchronize_session=False)
 
         if image_path:
             if existing.image_path and existing.image_path != image_path:
