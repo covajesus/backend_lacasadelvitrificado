@@ -154,8 +154,9 @@ class UnitSaleClass(LinkedRequestService):
     def _serialize_request(self, request, items=None, items_summary=None):
         items = items if items is not None else self._request_items(request.id)
         summary = items_summary or self._items_quantity_summary(items)
+        include_tax = Decimal(str(request.tax or 0)) > 0
         if items:
-            subtotal, tax, total = self._calculate_totals(items)
+            subtotal, tax, total = self._calculate_totals(items, include_tax=include_tax)
         else:
             subtotal = Decimal(str(request.subtotal or 0))
             tax = Decimal(str(request.tax or 0))
@@ -180,6 +181,7 @@ class UnitSaleClass(LinkedRequestService):
             "sale_id": request.sale_id,
             "dte_type_id": dte_type_id,
             "dte_status_id": dte_status_id,
+            "include_tax": include_tax,
             "payment_support": payment_support,
             "subtotal": float(subtotal),
             "tax": float(tax),
@@ -196,9 +198,13 @@ class UnitSaleClass(LinkedRequestService):
             f"Cobro aplicado · Descuento inventario automático"
         )
 
-    def _calculate_totals(self, items):
+    def _calculate_totals(self, items, include_tax: bool = True):
         subtotal = sum(Decimal(str(item.line_total or 0)) for item in items)
-        tax = (subtotal * TaxPolicy.UNIT_SALE_RATE).quantize(Decimal("1"), rounding=ROUND_HALF_UP)
+        tax = (
+            (subtotal * TaxPolicy.UNIT_SALE_RATE).quantize(Decimal("1"), rounding=ROUND_HALF_UP)
+            if include_tax
+            else Decimal("0")
+        )
         total = subtotal + tax
         return subtotal, tax, total
 
@@ -229,12 +235,21 @@ class UnitSaleClass(LinkedRequestService):
             )
         return lines
 
-    def _create_or_refresh_sale(self, unit_sale_request, items, dte_status_id: int = 1):
+    def _create_or_refresh_sale(
+        self,
+        unit_sale_request,
+        items,
+        dte_status_id: int = 1,
+        include_tax: bool = True,
+    ):
         if not unit_sale_request.customer_id:
             raise ValueError("Cliente inválido para generar el pedido de venta unitaria.")
 
         status_id = 1 if int(dte_status_id or 1) == 1 else 2
-        subtotal, tax, total = self._calculate_totals(items)
+        if not include_tax:
+            # Sin IVA implica siempre pago sin DTE.
+            status_id = 2
+        subtotal, tax, total = self._calculate_totals(items, include_tax=include_tax)
         delivery = self._delivery_address(
             unit_sale_request.id,
             unit_sale_request.customer_name,
@@ -387,6 +402,7 @@ class UnitSaleClass(LinkedRequestService):
                 new_request,
                 items,
                 dte_status_id=getattr(unit_sale_inputs, 'dte_status_id', 1),
+                include_tax=bool(getattr(unit_sale_inputs, 'include_tax', True)),
             )
             self.db.commit()
             return {
@@ -442,6 +458,7 @@ class UnitSaleClass(LinkedRequestService):
                 request,
                 items,
                 dte_status_id=getattr(unit_sale_inputs, 'dte_status_id', 1),
+                include_tax=bool(getattr(unit_sale_inputs, 'include_tax', True)),
             )
             self.db.commit()
             return {

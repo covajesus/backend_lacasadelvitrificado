@@ -203,11 +203,13 @@ WHATSAPP_CAMPAIGN_SITE_URL=https://lacasadelvitrificado.com
 
 El botón recibe el sufijo dinámico generado por el backend, por ejemplo:
 
-`shoppings/login?phone=56976357193&customer_id=12&token=...&product_id=45`
+`wa/t/Ab12Cd34Ef`
 
 - **No** pegues la URL completa en Meta: solo `https://lacasadelvitrificado.com/{{1}}`.
-- Si la campaña usa promoción **por producto**, se agrega `product_id` y el cliente entra directo a `/sales/product/detail/{id}`.
-- Si es **cupón** o mensaje libre, va al listado de ventas (`/sales`).
+- Cada envío crea un **token corto** en `campaign_access_tokens` (válido 48 h) ligado al cliente y, si aplica, al producto.
+- La landing `/wa/t/{token}` hace login automático, muestra el producto de la promo y botones **Comprar** / **Ver más productos**.
+- Si es **cupón** (sin producto), la landing manda a `/sales`.
+- El link legado `/shoppings/login/c/...` se mantiene como fallback.
 
 Tras aprobar las plantillas en Meta, desplegar el backend y reiniciar `fastapi.service`.
 

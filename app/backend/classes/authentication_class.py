@@ -1,8 +1,8 @@
-from app.backend.db.models import UserModel
+from app.backend.db.models import UserModel, CustomerModel, ProductModel, CampaignAccessTokenModel
 from fastapi import HTTPException
 from app.backend.classes.user_class import UserClass
 from app.backend.classes.customer_class import _normalize_phone_digits
-from app.backend.db.models import CustomerModel
+from app.backend.auth.auth_user import generate_bcrypt_hash
 from datetime import datetime, timedelta
 from typing import Union
 import os
@@ -10,6 +10,8 @@ from jose import jwt
 import json
 import bcrypt
 import hashlib
+import secrets
+import string
 
 # RUT de la empresa: no permitir login de shopping (solo RUT sin contraseña).
 _BLOCKED_SHOPPING_LOGIN_RUT = "77176777-K"
@@ -195,3 +197,132 @@ class AuthenticationClass:
             raise HTTPException(status_code=401, detail="El cliente no tiene RUT registrado")
 
         return self.authenticate_shopping_login(customer.identification_number)
+
+    def _generate_short_access_code(self, length: int = 10) -> str:
+        alphabet = string.ascii_letters + string.digits
+        for _ in range(20):
+            code = "".join(secrets.choice(alphabet) for _ in range(length))
+            exists = (
+                self.db.query(CampaignAccessTokenModel.id)
+                .filter(CampaignAccessTokenModel.token == code)
+                .first()
+            )
+            if not exists:
+                return code
+        return secrets.token_urlsafe(12)[:16]
+
+    def _ensure_shopping_user_for_customer(self, customer: CustomerModel) -> None:
+        rut = (customer.identification_number or "").strip()
+        if not rut:
+            raise HTTPException(status_code=401, detail="El cliente no tiene RUT registrado")
+
+        existing = self.db.query(UserModel).filter(UserModel.rut == rut).first()
+        if existing:
+            return
+
+        self.db.add(
+            UserModel(
+                rut=rut,
+                rol_id=5,
+                full_name=customer.social_reason or rut,
+                hashed_password=generate_bcrypt_hash("123456"),
+                email=customer.email,
+                phone=customer.phone,
+                added_date=datetime.now(),
+                updated_date=datetime.now(),
+            )
+        )
+        self.db.flush()
+
+    def create_campaign_access_token(
+        self,
+        customer_id: int,
+        *,
+        product_id: int | None = None,
+        campaign_id: int | None = None,
+        ttl_hours: int = 48,
+    ) -> str:
+        customer = (
+            self.db.query(CustomerModel)
+            .filter(CustomerModel.id == int(customer_id))
+            .first()
+        )
+        if not customer:
+            raise HTTPException(status_code=404, detail="Cliente no encontrado")
+        if not customer.identification_number:
+            raise HTTPException(status_code=400, detail="El cliente no tiene RUT registrado")
+
+        self._ensure_shopping_user_for_customer(customer)
+
+        code = self._generate_short_access_code()
+        now = datetime.now()
+        row = CampaignAccessTokenModel(
+            token=code,
+            customer_id=int(customer_id),
+            product_id=int(product_id) if product_id else None,
+            campaign_id=int(campaign_id) if campaign_id else None,
+            expires_at=now + timedelta(hours=int(ttl_hours)),
+            used_at=None,
+            added_date=now,
+            updated_date=now,
+        )
+        self.db.add(row)
+        self.db.commit()
+        return code
+
+    def authenticate_campaign_access_token(self, token: str) -> dict:
+        code = (token or "").strip()
+        if not code:
+            raise HTTPException(status_code=401, detail="Token inválido")
+
+        row = (
+            self.db.query(CampaignAccessTokenModel)
+            .filter(CampaignAccessTokenModel.token == code)
+            .first()
+        )
+        if not row:
+            raise HTTPException(status_code=401, detail="Token inválido")
+
+        now = datetime.now()
+        if row.expires_at and row.expires_at < now:
+            raise HTTPException(status_code=401, detail="El enlace expiró")
+
+        customer = (
+            self.db.query(CustomerModel)
+            .filter(CustomerModel.id == int(row.customer_id))
+            .first()
+        )
+        if not customer:
+            raise HTTPException(status_code=401, detail="Cliente no encontrado")
+
+        self._ensure_shopping_user_for_customer(customer)
+        user = self.authenticate_shopping_login(customer.identification_number)
+
+        if not row.used_at:
+            row.used_at = now
+            row.updated_date = now
+            self.db.commit()
+
+        product_payload = None
+        if row.product_id:
+            product = (
+                self.db.query(ProductModel)
+                .filter(ProductModel.id == int(row.product_id))
+                .first()
+            )
+            if product:
+                product_payload = {
+                    "id": int(product.id),
+                    "name": product.product,
+                    "photo": product.photo,
+                    "short_description": product.short_description,
+                }
+
+        return {
+            "user": user,
+            "customer_id": int(customer.id),
+            "customer_name": customer.social_reason,
+            "product_id": int(row.product_id) if row.product_id else None,
+            "product": product_payload,
+            "campaign_id": int(row.campaign_id) if row.campaign_id else None,
+        }

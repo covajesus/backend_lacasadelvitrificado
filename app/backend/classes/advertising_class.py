@@ -887,6 +887,7 @@ class AdvertisingClass(BaseDomainService):
                         customer_id,
                         customer_phone,
                         product_id=campaign_product_id,
+                        campaign_id=campaign_id,
                     )
                 ),
                 promotion_type_id=promotion_type_id,

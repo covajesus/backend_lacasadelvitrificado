@@ -2958,16 +2958,27 @@ class WhatsappClass:
         customer_id: int,
         phone: str,
         product_id: int | None = None,
+        campaign_id: int | None = None,
     ) -> str:
         from app.backend.classes.authentication_class import AuthenticationClass
 
         base = self.get_campaign_site_base_url()
-        token = AuthenticationClass(self.db).generate_campaign_login_token(int(customer_id), phone)
-        phone_param = re.sub(r'\D', '', str(phone or ''))
-        url = f"{base}/shoppings/login/c/{int(customer_id)}/{phone_param}/{token}"
-        if product_id:
-            url += f"/{int(product_id)}"
-        return url
+        try:
+            code = AuthenticationClass(self.db).create_campaign_access_token(
+                int(customer_id),
+                product_id=product_id,
+                campaign_id=campaign_id,
+            )
+            return f"{base}/wa/t/{code}"
+        except Exception as exc:
+            # Fallback al link legado si falla la creación del token corto
+            print(f"[campaign_access_token] fallback legacy URL: {exc}")
+            token = AuthenticationClass(self.db).generate_campaign_login_token(int(customer_id), phone)
+            phone_param = re.sub(r'\D', '', str(phone or ''))
+            url = f"{base}/shoppings/login/c/{int(customer_id)}/{phone_param}/{token}"
+            if product_id:
+                url += f"/{int(product_id)}"
+            return url
 
     def _campaign_url_button_suffix(self, site_url: str | None) -> str:
         """Sufijo dinámico para el botón URL de la plantilla (después del dominio)."""

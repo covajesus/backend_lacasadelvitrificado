@@ -585,3 +585,19 @@ class AdvertisingCampaignDeliveryModel(Base):
     read_date = Column(DateTime(), nullable=True)
     added_date = Column(DateTime(), default=datetime.now)
     updated_date = Column(DateTime(), default=datetime.now)
+
+
+class CampaignAccessTokenModel(Base):
+    """Token corto de acceso a la landing WhatsApp (/wa/t/{token})."""
+
+    __tablename__ = 'campaign_access_tokens'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    token = Column(String(32), nullable=False, unique=True, index=True)
+    customer_id = Column(Integer, nullable=False, index=True)
+    product_id = Column(Integer, nullable=True)
+    campaign_id = Column(Integer, nullable=True, index=True)
+    expires_at = Column(DateTime(), nullable=False, index=True)
+    used_at = Column(DateTime(), nullable=True)
+    added_date = Column(DateTime(), default=datetime.now)
+    updated_date = Column(DateTime(), default=datetime.now)

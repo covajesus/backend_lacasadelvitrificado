@@ -181,3 +181,44 @@ def campaign_login(
         raise
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Error al validar acceso: {exc}") from exc
+
+
+@authentications.get("/campaign_access/{token}")
+def campaign_access_login(
+    token: str,
+    db: Session = Depends(get_db),
+):
+    """
+    Login por token corto de landing WhatsApp (/wa/t/{token}).
+    Válido hasta expires_at; marca used_at en el primer uso.
+    """
+    try:
+        auth = AuthenticationClass(db)
+        payload = auth.authenticate_campaign_access_token(token)
+        user = payload["user"]
+        rol = RolClass(db).get('id', user["user_data"]["rol_id"])
+        token_expires = timedelta(minutes=120)
+        jwt_token = auth.create_token(
+            {'sub': str(user["user_data"]["rut"])},
+            token_expires,
+        )
+        return {
+            "access_token": jwt_token,
+            "user_id": user["user_data"]["id"],
+            "rut": user["user_data"]["rut"],
+            "rol_id": user["user_data"]["rol_id"],
+            "rol": rol.rol,
+            "full_name": user["user_data"]["full_name"],
+            "email": user["user_data"]["email"],
+            "token_type": "bearer",
+            "expires_in": token_expires.total_seconds(),
+            "customer_id": payload.get("customer_id"),
+            "customer_name": payload.get("customer_name"),
+            "product_id": payload.get("product_id"),
+            "product": payload.get("product"),
+            "campaign_id": payload.get("campaign_id"),
+        }
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Error al validar acceso: {exc}") from exc

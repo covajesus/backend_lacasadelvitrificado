@@ -789,6 +789,7 @@ class StoreUnitSaleRequest(BaseModel):
     notes: Optional[str] = None
     # 1 = Con DTE (boleta), 2 = Pago Sin DTE
     dte_status_id: int = 1
+    include_tax: bool = True
     items: List[UnitSaleRequestItemInput]
 
 class UpdateUnitSaleRequest(BaseModel):
@@ -798,6 +799,7 @@ class UpdateUnitSaleRequest(BaseModel):
     notes: Optional[str] = None
     # 1 = Con DTE (boleta), 2 = Pago Sin DTE
     dte_status_id: int = 1
+    include_tax: bool = True
     items: List[UnitSaleRequestItemInput]
 
 class InternalUseRequestList(BaseModel):
