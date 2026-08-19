@@ -146,6 +146,27 @@ class PromotionClass(BaseDomainService):
             'total_discount_per_unit': round(total_discount, 2),
         }
 
+    def expire_ended_promotions(self) -> int:
+        """Desactiva promociones cuya fecha de término ya pasó."""
+        now = datetime.utcnow()
+        rows = (
+            self.db.query(PromotionModel)
+            .filter(PromotionModel.status_id == 1)
+            .all()
+        )
+        changed = 0
+        for row in rows:
+            if not row.end_date:
+                continue
+            end = row.end_date.replace(hour=23, minute=59, second=59)
+            if now > end:
+                row.status_id = 0
+                row.updated_date = now
+                changed += 1
+        if changed:
+            self.db.commit()
+        return changed
+
     def get_all(
         self,
         page=0,
@@ -154,6 +175,7 @@ class PromotionClass(BaseDomainService):
         promotion_type_id=None,
         status_id=None,
     ):
+        self.expire_ended_promotions()
         query = (
             self.db.query(
                 PromotionModel.id,
@@ -201,6 +223,7 @@ class PromotionClass(BaseDomainService):
         )
 
     def get_list(self):
+        self.expire_ended_promotions()
         query = (
             self.db.query(
                 PromotionModel.id,
