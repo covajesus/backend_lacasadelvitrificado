@@ -538,6 +538,15 @@ class ShoppingList(BaseModel):
 class SendCustomsCompanyInput(BaseModel):
     customs_company_email: str
 
+class ResendShoppingEmailItem(BaseModel):
+    email_type: str
+    recipient: str
+    selected: bool = True
+    cc: Optional[List[str]] = None
+
+class ResendShoppingEmailsInput(BaseModel):
+    emails: List[ResendShoppingEmailItem]
+
 class StoreCustomsCompanyDocuments(BaseModel):
     maritime_freight: Optional[str] = None
     maritime_freight_dollar: Optional[str] = None

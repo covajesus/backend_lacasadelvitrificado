@@ -39,6 +39,9 @@ class ShoppingModel(Base):
     status_id = Column(Integer)
     shopping_number = Column(Integer)
     email = Column(String(255))
+    second_email = Column(String(255))
+    third_email = Column(String(255))
+    customs_company_email = Column(String(255))
     total = Column(Float)
     commission = Column(Float)
     maritime_freight = Column(Float)
@@ -438,6 +441,22 @@ class LogsModel(Base):
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     log = Column(String(255))
+    added_date = Column(DateTime(), default=datetime.now)
+    updated_date = Column(DateTime(), default=datetime.now)
+
+class EmailLogModel(Base):
+    __tablename__ = 'email_logs'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    entity_type = Column(String(50), nullable=False)
+    entity_id = Column(Integer, nullable=False)
+    email_type = Column(String(50), nullable=False)
+    recipient = Column(String(255))
+    cc = Column(String(500))
+    subject = Column(String(255))
+    status = Column(String(20), nullable=False)
+    error_message = Column(Text())
+    trigger_source = Column(String(50))
     added_date = Column(DateTime(), default=datetime.now)
     updated_date = Column(DateTime(), default=datetime.now)
 

@@ -20,9 +20,16 @@ from app.backend.db.models import (
 from app.backend.schemas import ShoppingCreateInput
 from app.backend.classes.product_class import ProductClass
 from app.backend.classes.inventory_stock import average_unit_cost_for_product
+from app.backend.classes.email_class import EmailClass
+from app.backend.classes.email_log_class import EmailLogClass
+from app.backend.classes.template_class import TemplateClass
 from collections import defaultdict, deque
 from datetime import datetime
 from sqlalchemy import or_, and_, func
+
+SHOPPING_EMAIL_SENDER = "bergerseidle@vitrificadoschile.com"
+SHOPPING_EMAIL_SENDER_NAME = "VitrificadosChile"
+SHOPPING_EMAIL_PASSWORD = "bhva zicx wfub duxg"
 
 class ShoppingClass:
     def __init__(self, db):
@@ -130,10 +137,340 @@ class ShoppingClass:
         return ShoppingCreateInput(
             shopping_number=shopping.shopping_number,
             supplier_id=shopping.supplier_id,
-            email=shopping.email,
-            total=float(shopping.total),
-            products=products
+            email=shopping.email or "",
+            second_email=getattr(shopping, "second_email", None),
+            third_email=getattr(shopping, "third_email", None),
+            prepaid_status_id=shopping.prepaid_status_id,
+            total=float(shopping.total or 0),
+            products=products,
         )
+
+    def _email_client(self) -> EmailClass:
+        return EmailClass(SHOPPING_EMAIL_SENDER, SHOPPING_EMAIL_SENDER_NAME, SHOPPING_EMAIL_PASSWORD)
+
+    def _settings_account_email(self):
+        settings = self.db.query(SettingModel).first()
+        return settings.account_email if settings and settings.account_email else None
+
+    def get_email_recipients(self, shopping_id: int) -> dict:
+        shopping = self.db.query(ShoppingModel).filter(ShoppingModel.id == shopping_id).first()
+        if not shopping:
+            return {"status": "error", "message": "Shopping not found"}
+
+        internal_email = self._settings_account_email() or (shopping.email or "")
+        cc_emails = [e for e in [shopping.second_email, shopping.third_email] if e]
+        customs_email = getattr(shopping, "customs_company_email", None) or ""
+
+        recipients = [
+            {
+                "email_type": "internal",
+                "label": "Correo interno",
+                "description": "PDF interno (español)",
+                "recipient": internal_email or "",
+                "cc": [],
+                "selected": False,
+            },
+            {
+                "email_type": "supplier",
+                "label": "Proveedor",
+                "description": "PDF proveedor (inglés)",
+                "recipient": shopping.email or "",
+                "cc": cc_emails,
+                "selected": False,
+            },
+            {
+                "email_type": "customs",
+                "label": "Empresa aduanera",
+                "description": "PDF aduana",
+                "recipient": customs_email,
+                "cc": [],
+                "selected": False,
+            },
+        ]
+
+        return {
+            "status": "success",
+            "shopping_id": shopping_id,
+            "status_id": shopping.status_id,
+            "recipients": recipients,
+            "total": len(recipients),
+        }
+
+    def _record_email_result(
+        self,
+        *,
+        shopping_id: int,
+        email_type: str,
+        recipient: str,
+        subject: str,
+        result: str,
+        trigger_source: str,
+        cc=None,
+    ) -> dict:
+        success = EmailLogClass.is_send_success(result)
+        item = {
+            "email_type": email_type,
+            "recipient": recipient,
+            "cc": [e for e in (cc or []) if e],
+            "subject": subject,
+            "status": "success" if success else "failed",
+            "message": result,
+        }
+        if not success:
+            EmailLogClass(self.db).log_failure(
+                entity_type="shopping",
+                entity_id=shopping_id,
+                email_type=email_type,
+                recipient=recipient,
+                subject=subject,
+                error_message=result or "Email send failed",
+                trigger_source=trigger_source,
+                cc=cc,
+            )
+        return item
+
+    def send_single_shopping_email(
+        self,
+        shopping_id: int,
+        email_type: str,
+        recipient: str,
+        trigger_source: str = "resend",
+        cc=None,
+        advance_status: bool = False,
+    ) -> dict:
+        shopping = self.db.query(ShoppingModel).filter(ShoppingModel.id == shopping_id).first()
+        if not shopping:
+            return {
+                "email_type": email_type,
+                "recipient": recipient or "",
+                "status": "failed",
+                "message": "Shopping not found",
+            }
+
+        email = (recipient or "").strip()
+        if not email:
+            return self._record_email_result(
+                shopping_id=shopping_id,
+                email_type=email_type,
+                recipient="",
+                subject="",
+                result="Debe indicar el correo de destino",
+                trigger_source=trigger_source,
+                cc=cc,
+            )
+
+        data = self.get_shopping_data(shopping_id)
+        shopping_number = str(data.shopping_number or shopping_id)
+        template = TemplateClass(self.db)
+        email_client = self._email_client()
+        cc_emails = [e for e in (cc or []) if e]
+
+        if email_type == "internal":
+            html_own = template.generate_shopping_html_for_own_company(data, shopping_id)
+            body = template.spanish_generate_email_content_html(data)
+            pdf_bytes = template.html_to_pdf_bytes(html_own)
+            subject = f"Orden de Compra - N° {shopping_number}"
+            if trigger_source == "store":
+                subject = f"Nueva Orden de Compra - N° {shopping_number}"
+            result_text = email_client.send_email(
+                receiver_email=email,
+                subject=subject,
+                message=body,
+                pdf_bytes=pdf_bytes,
+                pdf_filename="purcharse_order.pdf",
+            )
+            return self._record_email_result(
+                shopping_id=shopping_id,
+                email_type="internal",
+                recipient=email,
+                subject=subject,
+                result=result_text,
+                trigger_source=trigger_source,
+            )
+
+        if email_type == "supplier":
+            html_supplier = template.generate_shopping_html_for_supplier(data, shopping_id)
+            body = template.english_generate_email_content_html(data)
+            pdf_bytes = template.html_to_pdf_bytes(html_supplier)
+            subject = f"Purchase Order - N° {shopping_number}"
+            result_text = email_client.send_email(
+                receiver_email=email,
+                subject=subject,
+                message=body,
+                pdf_bytes=pdf_bytes,
+                pdf_filename="purcharse_order.pdf",
+                cc=cc_emails,
+            )
+            return self._record_email_result(
+                shopping_id=shopping_id,
+                email_type="supplier",
+                recipient=email,
+                subject=subject,
+                result=result_text,
+                trigger_source=trigger_source,
+                cc=cc_emails,
+            )
+
+        if email_type == "customs":
+            html_content = template.generate_shopping_html_for_customs_company(data, shopping_id)
+            body = template.spanish_generate_email_content_html(data)
+            pdf_bytes = template.html_to_pdf_bytes(html_content)
+            subject = "Purchase Order"
+            result_text = email_client.send_email(
+                receiver_email=email,
+                subject=subject,
+                message=body,
+                pdf_bytes=pdf_bytes,
+                pdf_filename="purcharse_order.pdf",
+            )
+            result = self._record_email_result(
+                shopping_id=shopping_id,
+                email_type="customs",
+                recipient=email,
+                subject=subject,
+                result=result_text,
+                trigger_source=trigger_source,
+            )
+            if result["status"] == "success":
+                shopping.customs_company_email = email
+                if advance_status:
+                    shopping.status_id = 3
+                shopping.updated_date = datetime.utcnow()
+                self.db.commit()
+            return result
+
+        return self._record_email_result(
+            shopping_id=shopping_id,
+            email_type=email_type,
+            recipient=email,
+            subject="",
+            result=f"Tipo de correo no válido: {email_type}",
+            trigger_source=trigger_source,
+            cc=cc_emails,
+        )
+
+    def send_order_emails(self, shopping_id: int, trigger_source: str = "resend") -> dict:
+        shopping = self.db.query(ShoppingModel).filter(ShoppingModel.id == shopping_id).first()
+        if not shopping:
+            return {"status": "error", "message": "Shopping not found"}
+
+        data = self.get_shopping_data(shopping_id)
+        internal_email = self._settings_account_email() or data.email
+        cc_emails = [e for e in [data.second_email, data.third_email] if e]
+        results = []
+
+        results.append(
+            self.send_single_shopping_email(
+                shopping_id,
+                "internal",
+                internal_email or "",
+                trigger_source=trigger_source,
+            )
+        )
+        results.append(
+            self.send_single_shopping_email(
+                shopping_id,
+                "supplier",
+                data.email or "",
+                trigger_source=trigger_source,
+                cc=cc_emails,
+            )
+        )
+
+        sent = sum(1 for r in results if r["status"] == "success")
+        failed = sum(1 for r in results if r["status"] == "failed")
+        return {
+            "status": "success",
+            "shopping_id": shopping_id,
+            "results": results,
+            "sent": sent,
+            "failed": failed,
+            "total": len(results),
+            "progress_percent": 100 if results else 0,
+        }
+
+    def send_customs_email(
+        self,
+        shopping_id: int,
+        customs_email: str,
+        trigger_source: str = "customs",
+        advance_status: bool = True,
+    ) -> dict:
+        result = self.send_single_shopping_email(
+            shopping_id,
+            "customs",
+            customs_email,
+            trigger_source=trigger_source,
+            advance_status=advance_status,
+        )
+        return {
+            "status": result["status"],
+            "message": result["message"],
+            "results": [result],
+            "sent": 1 if result["status"] == "success" else 0,
+            "failed": 0 if result["status"] == "success" else 1,
+            "total": 1,
+            "progress_percent": 100,
+        }
+
+    def resend_emails(self, shopping_id: int, emails=None) -> dict:
+        shopping = self.db.query(ShoppingModel).filter(ShoppingModel.id == shopping_id).first()
+        if not shopping:
+            return {"status": "error", "message": "Shopping not found"}
+
+        selected = []
+        for item in emails or []:
+            selected_flag = True
+            email_type = ""
+            recipient = ""
+            cc = []
+            if hasattr(item, "selected"):
+                selected_flag = bool(item.selected)
+                email_type = (item.email_type or "").strip()
+                recipient = (item.recipient or "").strip()
+                cc = list(item.cc or [])
+            elif isinstance(item, dict):
+                selected_flag = bool(item.get("selected", True))
+                email_type = str(item.get("email_type") or "").strip()
+                recipient = str(item.get("recipient") or "").strip()
+                cc = list(item.get("cc") or [])
+
+            if selected_flag and email_type:
+                selected.append(
+                    {
+                        "email_type": email_type,
+                        "recipient": recipient,
+                        "cc": [e for e in cc if e],
+                    }
+                )
+
+        if not selected:
+            return {"status": "error", "message": "Seleccione al menos un correo para enviar"}
+
+        results = []
+        for item in selected:
+            results.append(
+                self.send_single_shopping_email(
+                    shopping_id,
+                    item["email_type"],
+                    item["recipient"],
+                    trigger_source="resend",
+                    cc=item["cc"],
+                    advance_status=False,
+                )
+            )
+
+        sent = sum(1 for r in results if r["status"] == "success")
+        failed = sum(1 for r in results if r["status"] == "failed")
+        return {
+            "status": "success",
+            "shopping_id": shopping_id,
+            "results": results,
+            "sent": sent,
+            "failed": failed,
+            "total": len(results),
+            "progress_percent": 100 if results else 0,
+        }
         
     def get_all(self, page=0, items_per_page=10):
         try:
@@ -540,6 +877,9 @@ class ShoppingClass:
                 "supplier_id": data_query.supplier_id,
                 "status_id": data_query.status_id,
                 "email": data_query.email,
+                "second_email": getattr(data_query, "second_email", None),
+                "third_email": getattr(data_query, "third_email", None),
+                "customs_company_email": getattr(data_query, "customs_company_email", None),
                 "total": str(data_query.total) if data_query.total else None,
                 "supplier": supplier.supplier if supplier else None,
                 "added_date": data_query.added_date.strftime("%d-%m-%Y") if data_query.added_date else None,
@@ -694,6 +1034,8 @@ class ShoppingClass:
                     shopping_number=data.shopping_number,
                     supplier_id=data.supplier_id,
                     email=data.email,
+                    second_email=getattr(data, "second_email", None),
+                    third_email=getattr(data, "third_email", None),
                     prepaid_status_id=data.prepaid_status_id,
                     status_id=1,
                     total=data.total,
@@ -773,7 +1115,9 @@ class ShoppingClass:
             # Actualizar solo los datos que se guardan en la base de datos
             existing_shopping.shopping_number = data.shopping_number
             existing_shopping.supplier_id = data.supplier_id
-            existing_shopping.email = data.email  # Solo el email principal
+            existing_shopping.email = data.email
+            existing_shopping.second_email = getattr(data, "second_email", None)
+            existing_shopping.third_email = getattr(data, "third_email", None)
             existing_shopping.total = data.total
             existing_shopping.updated_date = datetime.utcnow()
             

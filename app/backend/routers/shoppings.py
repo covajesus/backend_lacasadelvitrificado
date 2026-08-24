@@ -1,11 +1,9 @@
 from fastapi import APIRouter, Depends, Query
 from app.backend.db.database import get_db
 from sqlalchemy.orm import Session
-from app.backend.schemas import UserLogin, PreInventoryStocks, ShoppingCreateInput, UpdateShopping, ShoppingList, StorePaymentDocuments, SendCustomsCompanyInput, StoreCustomsCompanyDocuments
-from app.backend.db.models import ShoppingModel, SettingModel, ShoppingProductModel, PreInventoryStockModel, ProductModel, LotItemModel, UnitFeatureModel, LotModel
+from app.backend.schemas import UserLogin, PreInventoryStocks, ShoppingCreateInput, UpdateShopping, ShoppingList, StorePaymentDocuments, SendCustomsCompanyInput, StoreCustomsCompanyDocuments, ResendShoppingEmailsInput
+from app.backend.db.models import ShoppingProductModel, PreInventoryStockModel, ProductModel, LotItemModel, UnitFeatureModel, LotModel
 from app.backend.classes.shopping_class import ShoppingClass
-from app.backend.classes.template_class import TemplateClass
-from app.backend.classes.email_class import EmailClass
 from app.backend.auth.auth_user import get_current_active_user
 from fastapi import HTTPException
 from datetime import datetime
@@ -121,71 +119,50 @@ def store(
         raise HTTPException(status_code=500, detail=f"Error al procesar: {str(e)}")
 
 @shoppings.post("/send_customs_company_email/{id}")
-def send_customs_company_email(id:int, send_customs_company_inputs:SendCustomsCompanyInput, db: Session = Depends(get_db)):
-    data = ShoppingClass(db).get_shopping_data(id)
-
-    html_content = TemplateClass(db).generate_shopping_html_for_customs_company(data, id)
-    email_html_content = TemplateClass(db).spanish_generate_email_content_html(data)
-    pdf_bytes = TemplateClass(db).html_to_pdf_bytes(html_content)
-
-    email_client = EmailClass("bergerseidle@vitrificadoschile.com", "VitrificadosChile", "bhva zicx wfub duxg")
-
-    result = email_client.send_email(
-        receiver_email=send_customs_company_inputs.customs_company_email,
-        subject="Purchase Order",
-        message=email_html_content,
-        pdf_bytes=pdf_bytes,
-        pdf_filename="purcharse_order.pdf"
+def send_customs_company_email(
+    id: int,
+    send_customs_company_inputs: SendCustomsCompanyInput,
+    db: Session = Depends(get_db),
+):
+    result = ShoppingClass(db).send_customs_email(
+        id,
+        send_customs_company_inputs.customs_company_email,
+        trigger_source="customs",
+        advance_status=True,
     )
+    if result.get("status") == "error":
+        raise HTTPException(status_code=400, detail=result.get("message") or "Error al enviar correo")
+    return {"message": result}
 
-    ShoppingClass(db).send_customs_company_email(id, send_customs_company_inputs.customs_company_email)
+@shoppings.get("/email_recipients/{id}")
+def email_recipients(
+    id: int,
+    session_user: UserLogin = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+):
+    data = ShoppingClass(db).get_email_recipients(id)
+    if data.get("status") == "error":
+        raise HTTPException(status_code=404, detail=data.get("message") or "Not found")
+    return {"message": data}
 
-    return {"message": 'Email sent successfully'}
+@shoppings.post("/resend_emails/{id}")
+def resend_emails(
+    id: int,
+    payload: ResendShoppingEmailsInput,
+    session_user: UserLogin = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+):
+    data = ShoppingClass(db).resend_emails(id, payload.emails)
+    if data.get("status") == "error":
+        raise HTTPException(status_code=400, detail=data.get("message") or "Error al reenviar correos")
+    return {"message": data}
 
 @shoppings.post("/store")
 def store_shopping(data: ShoppingCreateInput, db: Session = Depends(get_db)):
-    email_client = EmailClass("bergerseidle@vitrificadoschile.com", "VitrificadosChile", "bhva zicx wfub duxg")
-
-    # Obtener el email de configuración para correos internos
-    settings = db.query(SettingModel).first()
-    internal_email = settings.account_email if settings and settings.account_email else data.email
-
-    # Construir lista de destinatarios para proveedor
-    to_email = data.email
-    cc_emails = [email for email in [data.second_email, data.third_email] if email]
-
     shopping_data = ShoppingClass(db).store(data)
-    
-    # Usar shopping_number directamente del objeto data
-    shopping_number = str(data.shopping_number)
-
-    html_content_for_own_company = TemplateClass(db).generate_shopping_html_for_own_company(data, shopping_data["shopping_id"])
-    html_content_for_supplier = TemplateClass(db).generate_shopping_html_for_supplier(data, shopping_data["shopping_id"])
-    spanish_email_html_content = TemplateClass(db).spanish_generate_email_content_html(data)
-    english_email_html_content = TemplateClass(db).english_generate_email_content_html(data)
-    pdf_bytes_own = TemplateClass(db).html_to_pdf_bytes(html_content_for_own_company)
-    pdf_bytes_supplier = TemplateClass(db).html_to_pdf_bytes(html_content_for_supplier)
-
-    # Enviar correo interno a account_email
-    result = email_client.send_email(
-        receiver_email=internal_email,
-        subject="Nueva Orden de Compra - N° " + shopping_number,
-        message=spanish_email_html_content,
-        pdf_bytes=pdf_bytes_own,
-        pdf_filename="purcharse_order.pdf",
-    )
-
-    # Enviar correo al proveedor
-    result = email_client.send_email(
-        receiver_email=to_email,
-        subject="Purchase Order - N° " + shopping_number,
-        message=english_email_html_content,
-        pdf_bytes=pdf_bytes_supplier,
-        pdf_filename="purcharse_order.pdf",
-        cc=cc_emails  # <-- nuevo parámetro para copia
-    )
-
-    return {"message": result}
+    shopping_id = shopping_data["shopping_id"]
+    email_result = ShoppingClass(db).send_order_emails(shopping_id, trigger_source="store")
+    return {"message": {"shopping": shopping_data, "email": email_result}}
 
 @shoppings.get("/test")
 def test(db: Session = Depends(get_db)):
@@ -300,51 +277,10 @@ def test(db: Session = Depends(get_db)):
 
 @shoppings.post("/update/{id}")
 def update_shopping(id: int, data: UpdateShopping, session_user: UserLogin = Depends(get_current_active_user), db: Session = Depends(get_db)):
-    # Actualizar la compra
     result = ShoppingClass(db).update(id, data)
-    
+
     if result.get("status") == "success":
-        # Envío de correos igual que en store
-        email_client = EmailClass("bergerseidle@vitrificadoschile.com", "VitrificadosChile", "bhva zicx wfub duxg")
-
-        # Obtener el email de configuración para correos internos
-        settings = db.query(SettingModel).first()
-        internal_email = settings.account_email if settings and settings.account_email else data.email
-
-        # Construir lista de destinatarios para proveedor
-        to_email = data.email
-        cc_emails = [email for email in [data.second_email, data.third_email] if email]
-
-        # Generar contenido HTML y PDF
-        # Usar shopping_number directamente del objeto data
-        shopping_number = str(data.shopping_number)
-        
-        html_content_for_own_company = TemplateClass(db).generate_shopping_html_for_own_company(data, id)
-        html_content_for_supplier = TemplateClass(db).generate_shopping_html_for_supplier(data, id)
-        spanish_email_html_content = TemplateClass(db).spanish_generate_email_content_html(data)
-        english_email_html_content = TemplateClass(db).english_generate_email_content_html(data)
-        pdf_bytes_own = TemplateClass(db).html_to_pdf_bytes(html_content_for_own_company)
-        pdf_bytes_supplier = TemplateClass(db).html_to_pdf_bytes(html_content_for_supplier)
-
-        # Enviar correo interno a account_email
-        email_result = email_client.send_email(
-            receiver_email=internal_email,
-            subject="Orden de Compra Actualizada - N° " + shopping_number,
-            message=spanish_email_html_content,
-            pdf_bytes=pdf_bytes_own,
-            pdf_filename="purcharse_order.pdf",
-        )
-
-        # Enviar correo al proveedor
-        email_result = email_client.send_email(
-            receiver_email=to_email,
-            subject="Updated Purchase Order - N° " + shopping_number,
-            message=english_email_html_content,
-            pdf_bytes=pdf_bytes_supplier,
-            pdf_filename="purcharse_order.pdf",
-            cc=cc_emails
-        )
-
+        email_result = ShoppingClass(db).send_order_emails(id, trigger_source="update")
         return {"message": {"update": result, "email": email_result}}
     else:
         return {"message": result}
