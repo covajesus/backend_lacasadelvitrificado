@@ -269,9 +269,14 @@ class ShoppingClass:
             html_own = template.generate_shopping_html_for_own_company(data, shopping_id)
             body = template.spanish_generate_email_content_html(data)
             pdf_bytes = template.html_to_pdf_bytes(html_own)
-            subject = f"Orden de Compra - N° {shopping_number}"
             if trigger_source == "store":
                 subject = f"Nueva Orden de Compra - N° {shopping_number}"
+            elif trigger_source == "update":
+                subject = f"Orden de Compra Actualizada - N° {shopping_number}"
+            elif trigger_source == "resend":
+                subject = f"Reenvío Orden de Compra - N° {shopping_number}"
+            else:
+                subject = f"Orden de Compra - N° {shopping_number}"
             result_text = email_client.send_email(
                 receiver_email=email,
                 subject=subject,
@@ -292,7 +297,12 @@ class ShoppingClass:
             html_supplier = template.generate_shopping_html_for_supplier(data, shopping_id)
             body = template.english_generate_email_content_html(data)
             pdf_bytes = template.html_to_pdf_bytes(html_supplier)
-            subject = f"Purchase Order - N° {shopping_number}"
+            if trigger_source == "update":
+                subject = f"Updated Purchase Order - N° {shopping_number}"
+            elif trigger_source == "resend":
+                subject = f"Purchase Order Resend - N° {shopping_number}"
+            else:
+                subject = f"Purchase Order - N° {shopping_number}"
             result_text = email_client.send_email(
                 receiver_email=email,
                 subject=subject,
@@ -315,7 +325,10 @@ class ShoppingClass:
             html_content = template.generate_shopping_html_for_customs_company(data, shopping_id)
             body = template.spanish_generate_email_content_html(data)
             pdf_bytes = template.html_to_pdf_bytes(html_content)
-            subject = "Purchase Order"
+            if trigger_source == "resend":
+                subject = "Reenvío Purchase Order"
+            else:
+                subject = "Purchase Order"
             result_text = email_client.send_email(
                 receiver_email=email,
                 subject=subject,
