@@ -801,6 +801,7 @@ class StoreUnitSaleRequest(BaseModel):
     include_tax: bool = True
     # 1 = Sin despacho (retiro), 2 = Con despacho
     shipping_method_id: int = 1
+    delivery_address: Optional[str] = None
     items: List[UnitSaleRequestItemInput]
 
 class UpdateUnitSaleRequest(BaseModel):
@@ -813,6 +814,7 @@ class UpdateUnitSaleRequest(BaseModel):
     include_tax: bool = True
     # 1 = Sin despacho (retiro), 2 = Con despacho
     shipping_method_id: int = 1
+    delivery_address: Optional[str] = None
     items: List[UnitSaleRequestItemInput]
 
 class InternalUseRequestList(BaseModel):

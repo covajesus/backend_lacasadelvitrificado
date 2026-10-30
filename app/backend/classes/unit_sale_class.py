@@ -1,5 +1,6 @@
 from datetime import datetime
 from decimal import Decimal, ROUND_HALF_UP
+from typing import Optional
 
 from sqlalchemy import func
 
@@ -162,6 +163,7 @@ class UnitSaleClass(LinkedRequestService):
         payment_support = None
         shipping_method_id = 1
         shipping_cost = Decimal("0")
+        delivery_address = ""
         if request.sale_id:
             sale = self.db.query(SaleModel).filter(SaleModel.id == request.sale_id).first()
             if sale:
@@ -170,6 +172,9 @@ class UnitSaleClass(LinkedRequestService):
                 payment_support = sale.payment_support or None
                 shipping_method_id = int(sale.shipping_method_id or 1)
                 shipping_cost = Decimal(str(sale.shipping_cost or 0))
+                delivery_address = self._clean_delivery_address_for_edit(
+                    sale.delivery_address or ""
+                )
 
         if items:
             subtotal, tax, total = self._calculate_totals(
@@ -194,6 +199,7 @@ class UnitSaleClass(LinkedRequestService):
             "include_tax": include_tax,
             "shipping_method_id": shipping_method_id,
             "shipping_cost": float(shipping_cost),
+            "delivery_address": delivery_address,
             "payment_support": payment_support,
             "subtotal": float(subtotal),
             "tax": float(tax),
@@ -212,6 +218,20 @@ class UnitSaleClass(LinkedRequestService):
             return Decimal("0")
         return Decimal(str(setting.delivery_cost or 0)).quantize(Decimal("1"), rounding=ROUND_HALF_UP)
 
+    @staticmethod
+    def _clean_delivery_address_for_edit(raw_address: str) -> str:
+        text = (raw_address or "").strip()
+        if text.startswith("[VENTA UNITARIA #"):
+            # "[VENTA UNITARIA #12] ... · Con despacho · DIRECCION" o "· Sin despacho..."
+            if " · Con despacho · " in text:
+                return text.split(" · Con despacho · ", 1)[1].strip()
+            if " · Con despacho" in text:
+                return ""
+            return ""
+        if text in ("Retiro en tienda / sin envío",):
+            return ""
+        return text
+
     def _delivery_address(
         self,
         unit_sale_request_id,
@@ -219,22 +239,23 @@ class UnitSaleClass(LinkedRequestService):
         customer_rut,
         shipping_method_id: int = 1,
         customer_id=None,
+        delivery_address_override: Optional[str] = None,
     ):
         prefix = (
             f"[VENTA UNITARIA #{unit_sale_request_id}] {customer_name} · RUT {customer_rut}"
         )
         if int(shipping_method_id or 1) == 2:
-            address = None
-            if customer_id:
+            address = (delivery_address_override or "").strip()
+            if not address and customer_id:
                 customer = (
                     self.db.query(CustomerModel)
                     .filter(CustomerModel.id == customer_id)
                     .first()
                 )
                 address = (customer.address or "").strip() if customer else ""
-            if address:
-                return f"{prefix} · Con despacho · {address}"
-            return f"{prefix} · Con despacho"
+            if not address:
+                raise ValueError("Debe ingresar la dirección de despacho.")
+            return f"{prefix} · Con despacho · {address}"
         return f"{prefix} · Sin despacho (retiro) · Cobro aplicado · Descuento inventario automático"
 
     def _calculate_totals(
@@ -288,6 +309,7 @@ class UnitSaleClass(LinkedRequestService):
         dte_status_id: int = 1,
         include_tax: bool = True,
         shipping_method_id: int = 1,
+        delivery_address: Optional[str] = None,
     ):
         if not unit_sale_request.customer_id:
             raise ValueError("Cliente inválido para generar el pedido de venta unitaria.")
@@ -309,6 +331,7 @@ class UnitSaleClass(LinkedRequestService):
             unit_sale_request.customer_rut,
             shipping_method_id=method_id,
             customer_id=unit_sale_request.customer_id,
+            delivery_address_override=delivery_address,
         )
         self._validate_stock(items)
         return self._sale_linkage.create_or_refresh(
@@ -461,6 +484,7 @@ class UnitSaleClass(LinkedRequestService):
                 dte_status_id=getattr(unit_sale_inputs, 'dte_status_id', 1),
                 include_tax=bool(getattr(unit_sale_inputs, 'include_tax', True)),
                 shipping_method_id=getattr(unit_sale_inputs, 'shipping_method_id', 1),
+                delivery_address=getattr(unit_sale_inputs, 'delivery_address', None),
             )
             self.db.commit()
             return {
@@ -518,6 +542,7 @@ class UnitSaleClass(LinkedRequestService):
                 dte_status_id=getattr(unit_sale_inputs, 'dte_status_id', 1),
                 include_tax=bool(getattr(unit_sale_inputs, 'include_tax', True)),
                 shipping_method_id=getattr(unit_sale_inputs, 'shipping_method_id', 1),
+                delivery_address=getattr(unit_sale_inputs, 'delivery_address', None),
             )
             self.db.commit()
             return {
