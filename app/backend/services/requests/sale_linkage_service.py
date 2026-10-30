@@ -2,7 +2,7 @@
 
 from datetime import datetime
 from decimal import Decimal
-from typing import Any, Callable, Iterable, Optional
+from typing import Any, Callable, Iterable, Optional, Union
 
 from app.backend.core.constants import SaleStatus
 from app.backend.core.exceptions import ValidationError
@@ -34,6 +34,8 @@ class SaleLinkageService:
         dte_type_id: int = 2,
         dte_status_id: int = 2,
         status_id: int = SaleStatus.DELIVERED,
+        shipping_method_id: int = 1,
+        shipping_cost: Union[Decimal, int] = 0,
     ) -> int:
         if not customer_id:
             raise ValidationError("Cliente inválido para generar el pedido.")
@@ -43,6 +45,8 @@ class SaleLinkageService:
             persist_totals(request, subtotal, tax, total)
 
         sale_status = int(status_id or SaleStatus.DELIVERED)
+        method_id = int(shipping_method_id or 1)
+        cost = int(Decimal(str(shipping_cost or 0)))
         sale_id = getattr(request, "sale_id", None)
         if sale_id:
             sale = self.db.query(SaleModel).filter(SaleModel.id == sale_id).first()
@@ -59,19 +63,21 @@ class SaleLinkageService:
                     dte_type_id=dte_type_id,
                     dte_status_id=dte_status_id,
                     status_id=sale_status,
+                    shipping_method_id=method_id,
+                    shipping_cost=cost,
                 )
                 self.inventory_bridge.deduct_lines(sale.id, deduction_lines)
                 return sale.id
 
         new_sale = SaleModel(
             customer_id=customer_id,
-            shipping_method_id=1,
+            shipping_method_id=method_id,
             dte_type_id=int(dte_type_id),
             dte_status_id=int(dte_status_id),
             status_id=sale_status,
             subtotal=int(subtotal),
             tax=int(tax),
-            shipping_cost=0,
+            shipping_cost=cost,
             total=int(total),
             payment_support=None,
             delivery_address=delivery_address,
@@ -98,12 +104,15 @@ class SaleLinkageService:
         dte_type_id: int = 2,
         dte_status_id: int = 2,
         status_id: int = SaleStatus.DELIVERED,
+        shipping_method_id: int = 1,
+        shipping_cost: int = 0,
     ):
         sale.customer_id = customer_id
         sale.delivery_address = delivery_address
         sale.subtotal = int(subtotal)
         sale.tax = int(tax)
-        sale.shipping_cost = 0
+        sale.shipping_method_id = int(shipping_method_id or 1)
+        sale.shipping_cost = int(shipping_cost or 0)
         sale.total = int(total)
         sale.dte_type_id = int(dte_type_id)
         sale.dte_status_id = int(dte_status_id)

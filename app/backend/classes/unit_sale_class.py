@@ -16,6 +16,7 @@ from app.backend.db.models import (
     CustomerModel,
     CustomerProductDiscountModel,
     SaleModel,
+    SettingModel,
 )
 from app.backend.services.inventory.inventory_sale_bridge import InventorySaleBridge, SaleDeductionLine
 from app.backend.core.pagination import paginate_query
@@ -155,22 +156,31 @@ class UnitSaleClass(LinkedRequestService):
         items = items if items is not None else self._request_items(request.id)
         summary = items_summary or self._items_quantity_summary(items)
         include_tax = Decimal(str(request.tax or 0)) > 0
-        if items:
-            subtotal, tax, total = self._calculate_totals(items, include_tax=include_tax)
-        else:
-            subtotal = Decimal(str(request.subtotal or 0))
-            tax = Decimal(str(request.tax or 0))
-            total = Decimal(str(request.total or 0))
 
         dte_type_id = 1
         dte_status_id = 1
         payment_support = None
+        shipping_method_id = 1
+        shipping_cost = Decimal("0")
         if request.sale_id:
             sale = self.db.query(SaleModel).filter(SaleModel.id == request.sale_id).first()
             if sale:
                 dte_type_id = int(sale.dte_type_id or 1)
                 dte_status_id = int(sale.dte_status_id or 1)
                 payment_support = sale.payment_support or None
+                shipping_method_id = int(sale.shipping_method_id or 1)
+                shipping_cost = Decimal(str(sale.shipping_cost or 0))
+
+        if items:
+            subtotal, tax, total = self._calculate_totals(
+                items,
+                include_tax=include_tax,
+                shipping_cost=shipping_cost,
+            )
+        else:
+            subtotal = Decimal(str(request.subtotal or 0))
+            tax = Decimal(str(request.tax or 0))
+            total = Decimal(str(request.total or 0))
 
         return {
             "id": request.id,
@@ -182,6 +192,8 @@ class UnitSaleClass(LinkedRequestService):
             "dte_type_id": dte_type_id,
             "dte_status_id": dte_status_id,
             "include_tax": include_tax,
+            "shipping_method_id": shipping_method_id,
+            "shipping_cost": float(shipping_cost),
             "payment_support": payment_support,
             "subtotal": float(subtotal),
             "tax": float(tax),
@@ -192,20 +204,54 @@ class UnitSaleClass(LinkedRequestService):
             "updated_date": request.updated_date.strftime("%Y-%m-%d %H:%M:%S") if request.updated_date else None,
         }
 
-    def _delivery_address(self, unit_sale_request_id, customer_name, customer_rut):
-        return (
-            f"[VENTA UNITARIA #{unit_sale_request_id}] {customer_name} · RUT {customer_rut} · "
-            f"Cobro aplicado · Descuento inventario automático"
-        )
+    def _resolve_shipping_cost(self, shipping_method_id: int) -> Decimal:
+        if int(shipping_method_id or 1) != 2:
+            return Decimal("0")
+        setting = self.db.query(SettingModel).filter(SettingModel.id == 1).first()
+        if not setting:
+            return Decimal("0")
+        return Decimal(str(setting.delivery_cost or 0)).quantize(Decimal("1"), rounding=ROUND_HALF_UP)
 
-    def _calculate_totals(self, items, include_tax: bool = True):
+    def _delivery_address(
+        self,
+        unit_sale_request_id,
+        customer_name,
+        customer_rut,
+        shipping_method_id: int = 1,
+        customer_id=None,
+    ):
+        prefix = (
+            f"[VENTA UNITARIA #{unit_sale_request_id}] {customer_name} · RUT {customer_rut}"
+        )
+        if int(shipping_method_id or 1) == 2:
+            address = None
+            if customer_id:
+                customer = (
+                    self.db.query(CustomerModel)
+                    .filter(CustomerModel.id == customer_id)
+                    .first()
+                )
+                address = (customer.address or "").strip() if customer else ""
+            if address:
+                return f"{prefix} · Con despacho · {address}"
+            return f"{prefix} · Con despacho"
+        return f"{prefix} · Sin despacho (retiro) · Cobro aplicado · Descuento inventario automático"
+
+    def _calculate_totals(
+        self,
+        items,
+        include_tax: bool = True,
+        shipping_cost: Decimal = Decimal("0"),
+    ):
         subtotal = sum(Decimal(str(item.line_total or 0)) for item in items)
+        shipping = Decimal(str(shipping_cost or 0)).quantize(Decimal("1"), rounding=ROUND_HALF_UP)
+        base_for_tax = subtotal + shipping
         tax = (
-            (subtotal * TaxPolicy.UNIT_SALE_RATE).quantize(Decimal("1"), rounding=ROUND_HALF_UP)
+            (base_for_tax * TaxPolicy.UNIT_SALE_RATE).quantize(Decimal("1"), rounding=ROUND_HALF_UP)
             if include_tax
             else Decimal("0")
         )
-        total = subtotal + tax
+        total = base_for_tax + tax
         return subtotal, tax, total
 
     def _inventory_units(self, unit_quantity) -> int:
@@ -241,6 +287,7 @@ class UnitSaleClass(LinkedRequestService):
         items,
         dte_status_id: int = 1,
         include_tax: bool = True,
+        shipping_method_id: int = 1,
     ):
         if not unit_sale_request.customer_id:
             raise ValueError("Cliente inválido para generar el pedido de venta unitaria.")
@@ -249,11 +296,19 @@ class UnitSaleClass(LinkedRequestService):
         if not include_tax:
             # Sin IVA implica siempre pago sin DTE.
             status_id = 2
-        subtotal, tax, total = self._calculate_totals(items, include_tax=include_tax)
+        method_id = 2 if int(shipping_method_id or 1) == 2 else 1
+        shipping_cost = self._resolve_shipping_cost(method_id)
+        subtotal, tax, total = self._calculate_totals(
+            items,
+            include_tax=include_tax,
+            shipping_cost=shipping_cost,
+        )
         delivery = self._delivery_address(
             unit_sale_request.id,
             unit_sale_request.customer_name,
             unit_sale_request.customer_rut,
+            shipping_method_id=method_id,
+            customer_id=unit_sale_request.customer_id,
         )
         self._validate_stock(items)
         return self._sale_linkage.create_or_refresh(
@@ -269,6 +324,8 @@ class UnitSaleClass(LinkedRequestService):
             dte_type_id=1,
             dte_status_id=status_id,
             status_id=SaleStatus.PAYMENT_REVIEW,
+            shipping_method_id=method_id,
+            shipping_cost=shipping_cost,
         )
 
     @staticmethod
@@ -403,6 +460,7 @@ class UnitSaleClass(LinkedRequestService):
                 items,
                 dte_status_id=getattr(unit_sale_inputs, 'dte_status_id', 1),
                 include_tax=bool(getattr(unit_sale_inputs, 'include_tax', True)),
+                shipping_method_id=getattr(unit_sale_inputs, 'shipping_method_id', 1),
             )
             self.db.commit()
             return {
@@ -459,6 +517,7 @@ class UnitSaleClass(LinkedRequestService):
                 items,
                 dte_status_id=getattr(unit_sale_inputs, 'dte_status_id', 1),
                 include_tax=bool(getattr(unit_sale_inputs, 'include_tax', True)),
+                shipping_method_id=getattr(unit_sale_inputs, 'shipping_method_id', 1),
             )
             self.db.commit()
             return {

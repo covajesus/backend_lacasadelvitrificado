@@ -799,6 +799,8 @@ class StoreUnitSaleRequest(BaseModel):
     # 1 = Con DTE (boleta), 2 = Pago Sin DTE
     dte_status_id: int = 1
     include_tax: bool = True
+    # 1 = Sin despacho (retiro), 2 = Con despacho
+    shipping_method_id: int = 1
     items: List[UnitSaleRequestItemInput]
 
 class UpdateUnitSaleRequest(BaseModel):
@@ -809,6 +811,8 @@ class UpdateUnitSaleRequest(BaseModel):
     # 1 = Con DTE (boleta), 2 = Pago Sin DTE
     dte_status_id: int = 1
     include_tax: bool = True
+    # 1 = Sin despacho (retiro), 2 = Con despacho
+    shipping_method_id: int = 1
     items: List[UnitSaleRequestItemInput]
 
 class InternalUseRequestList(BaseModel):
