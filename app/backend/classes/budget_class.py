@@ -269,9 +269,30 @@ class BudgetClass:
                 "total": item.total
             } for item in products]
 
+            customer_data = None
+            if budget.customer_id:
+                customer = (
+                    self.db.query(CustomerModel)
+                    .filter(CustomerModel.id == budget.customer_id)
+                    .first()
+                )
+                if customer:
+                    customer_data = {
+                        "id": customer.id,
+                        "full_name": customer.social_reason,
+                        "social_reason": customer.social_reason,
+                        "identification_number": customer.identification_number,
+                        "phone": customer.phone,
+                        "email": customer.email,
+                        "address": customer.address,
+                        "region_id": customer.region_id,
+                        "commune_id": customer.commune_id,
+                    }
+
             return {
                 "budget": self.serialize_budget(budget),
-                "products": self._attach_promotion_to_budget_products(product_data)
+                "products": self._attach_promotion_to_budget_products(product_data),
+                "customer": customer_data,
             }
 
         except Exception as e:
@@ -340,6 +361,104 @@ class BudgetClass:
                 # No fallar el proceso si falla el WhatsApp
 
             return {"status": "success", "budget_id": new_budget.id}
+
+        except Exception as e:
+            self.db.rollback()
+            return {"status": "error", "message": str(e)}
+
+    def update(self, budget_id, budget_inputs):
+        """
+        Actualiza un presupuesto pendiente/rechazado, recalcula totales
+        y reenvía el WhatsApp de revisión al cliente.
+        """
+        try:
+            budget = (
+                self.db.query(BudgetModel)
+                .filter(BudgetModel.id == budget_id)
+                .first()
+            )
+            if not budget:
+                return {"status": "error", "message": "Presupuesto no encontrado"}
+
+            if int(budget.status_id or 0) == 1:
+                return {
+                    "status": "error",
+                    "message": "No se puede editar un presupuesto ya aceptado.",
+                }
+
+            customer = (
+                self.db.query(CustomerModel)
+                .filter(CustomerModel.id == budget_inputs.customer_id)
+                .first()
+            )
+            if not customer:
+                return {"status": "error", "message": "Customer not found"}
+
+            products_payload, calculated_subtotal = self._build_priced_budget_products(
+                budget_inputs.products,
+                customer_id=budget_inputs.customer_id,
+            )
+            if not products_payload:
+                return {
+                    "status": "error",
+                    "message": "Debe agregar al menos un producto al presupuesto.",
+                }
+
+            shipping = int(budget_inputs.shipping) if budget_inputs.shipping else 0
+            tax_percent = self._get_tax_percent()
+            tax = (
+                int(round((calculated_subtotal + shipping) * tax_percent / 100))
+                if tax_percent > 0
+                else 0
+            )
+            total = calculated_subtotal + shipping + tax
+
+            budget.customer_id = budget_inputs.customer_id
+            budget.status_id = 0
+            budget.subtotal = calculated_subtotal
+            budget.shipping = shipping
+            budget.tax = tax
+            budget.total = total
+            budget.updated_date = datetime.now()
+
+            self.db.query(BudgetProductModel).filter(
+                BudgetProductModel.budget_id == budget_id
+            ).delete()
+
+            now = datetime.now()
+            for product in products_payload:
+                self.db.add(
+                    BudgetProductModel(
+                        budget_id=budget.id,
+                        product_id=product["product_id"],
+                        quantity=product["quantity"],
+                        total=product["total"],
+                        added_date=now,
+                        updated_date=now,
+                    )
+                )
+
+            PromotionPricingService(self.db).record_product_discount_usages(
+                [p for p in products_payload if p.get("has_promotion")],
+                budget_id=budget.id,
+            )
+
+            self.db.commit()
+            self.db.refresh(budget)
+
+            try:
+                WhatsappClass(self.db).review_budget(
+                    budget_id=budget.id,
+                    total=total,
+                )
+            except Exception as whatsapp_error:
+                print(f"Error al enviar WhatsApp de review_budget (update): {str(whatsapp_error)}")
+
+            return {
+                "status": "success",
+                "budget_id": budget.id,
+                "message": "Presupuesto actualizado y WhatsApp reenviado",
+            }
 
         except Exception as e:
             self.db.rollback()

@@ -20,8 +20,69 @@ def index(inventory_inputs: InventoryList, session_user: UserLogin = Depends(get
 
 @inventories.post("/store")
 def store(inventory_inputs: StoreInventory, session_user: UserLogin = Depends(get_current_active_user), db: Session = Depends(get_db)):
-    data = InventoryClass(db).store(inventory_inputs)
+    from app.backend.classes.error_log_class import ErrorLogClass
 
+    try:
+        data = InventoryClass(db).store(inventory_inputs)
+    except Exception as exc:
+        ErrorLogClass.log(
+            message=str(exc) or "Error inesperado en inventories/store",
+            source="inventories.store",
+            method="POST",
+            path="/inventories/store",
+            status_code=500,
+            user_id=getattr(session_user, "user_id", None) or getattr(session_user, "id", None),
+            shopping_id=getattr(inventory_inputs, "shopping_id", None),
+            product_id=getattr(inventory_inputs, "product_id", None),
+            request_body=inventory_inputs.dict() if hasattr(inventory_inputs, "dict") else None,
+            exc=exc,
+        )
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    if isinstance(data, dict) and data.get("status") == "error":
+        ErrorLogClass.log(
+            message=str(data.get("message") or "Error al guardar inventario"),
+            level="warning",
+            source="inventories.store",
+            method="POST",
+            path="/inventories/store",
+            status_code=400,
+            user_id=getattr(session_user, "user_id", None) or getattr(session_user, "id", None),
+            shopping_id=getattr(inventory_inputs, "shopping_id", None),
+            product_id=getattr(inventory_inputs, "product_id", None),
+            detail=str(data),
+            request_body=inventory_inputs.dict() if hasattr(inventory_inputs, "dict") else None,
+        )
+        raise HTTPException(status_code=400, detail=data.get("message", "Error al guardar inventario"))
+    return {"message": data}
+
+
+@inventories.post("/reopen_shopping_inventory/{shopping_id}")
+def reopen_shopping_inventory(
+    shopping_id: int,
+    session_user: UserLogin = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Vuelve la compra a status 6 (precios/cantidades editables) si quedó
+    marcada como finalizada (7) tras un guardado parcial con error.
+    """
+    data = InventoryClass(db).reopen_shopping_for_inventory(shopping_id)
+    if isinstance(data, dict) and data.get("status") == "error":
+        raise HTTPException(status_code=400, detail=data.get("message", "No se pudo reabrir"))
+    return {"message": data}
+
+
+@inventories.post("/finalize_shopping_inventory/{shopping_id}")
+def finalize_shopping_inventory(
+    shopping_id: int,
+    session_user: UserLogin = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+):
+    """Marca la compra como finalizada (status 7) sin crear stock extra."""
+    data = InventoryClass(db).finalize_shopping_inventory(shopping_id)
+    if isinstance(data, dict) and data.get("status") == "error":
+        raise HTTPException(status_code=400, detail=data.get("message", "No se pudo finalizar"))
     return {"message": data}
 
 

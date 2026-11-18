@@ -54,6 +54,20 @@ def store(
 
     return {"message": data}
 
+@budgets.post("/update/{id}")
+def update(
+    id: int,
+    budget_inputs: StoreBudget,
+    session_user: UserLogin = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    data = BudgetClass(db).update(id, budget_inputs)
+
+    if isinstance(data, dict) and data.get("status") == "error":
+        raise HTTPException(status_code=400, detail=data["message"])
+
+    return {"message": data}
+
 @budgets.post("/store/without-customer")
 def store_without_customer(
     budget_inputs: StoreBudgetWithoutCustomer,

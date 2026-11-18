@@ -1,5 +1,8 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.exceptions import HTTPException as StarletteHTTPException
 import uvicorn
 import os
 from fastapi.middleware.cors import CORSMiddleware
@@ -28,9 +31,80 @@ from app.backend.routers.unit_sales import unit_sales
 from app.backend.routers.internal_uses import internal_uses
 from app.backend.routers.promotions import promotions
 from app.backend.routers.advertising import advertising
+from app.backend.routers.error_logs import error_logs
+from app.backend.classes.error_log_class import ErrorLogClass
 
 app = FastAPI(root_path="/api")
 application = app
+
+
+def _client_ip(request: Request) -> str | None:
+    forwarded = request.headers.get("x-forwarded-for")
+    if forwarded:
+        return forwarded.split(",")[0].strip()
+    if request.client:
+        return request.client.host
+    return None
+
+
+async def _safe_request_body(request: Request):
+    try:
+        return await request.body()
+    except Exception:
+        return None
+
+
+@app.exception_handler(StarletteHTTPException)
+async def http_exception_handler(request: Request, exc: StarletteHTTPException):
+    # Loguear 4xx/5xx de negocio (no 401 rutinarios de auth para no llenar la tabla)
+    if exc.status_code >= 400 and exc.status_code != 401:
+        body = await _safe_request_body(request)
+        ErrorLogClass.log(
+            message=str(exc.detail) if exc.detail is not None else f"HTTP {exc.status_code}",
+            level="warning" if 400 <= exc.status_code < 500 else "error",
+            source="http_exception",
+            method=request.method,
+            path=str(request.url.path),
+            status_code=exc.status_code,
+            detail=str(exc.detail),
+            request_body=body.decode("utf-8", errors="replace") if isinstance(body, (bytes, bytearray)) else body,
+            client_ip=_client_ip(request),
+            exc=exc if exc.status_code >= 500 else None,
+        )
+    return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    ErrorLogClass.log(
+        message="Error de validación de request",
+        level="warning",
+        source="validation",
+        method=request.method,
+        path=str(request.url.path),
+        status_code=422,
+        detail=str(exc.errors()),
+        request_body=exc.body if hasattr(exc, "body") else None,
+        client_ip=_client_ip(request),
+    )
+    return JSONResponse(status_code=422, content={"detail": exc.errors()})
+
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception):
+    body = await _safe_request_body(request)
+    ErrorLogClass.log(
+        message=str(exc) or type(exc).__name__,
+        level="error",
+        source="unhandled",
+        method=request.method,
+        path=str(request.url.path),
+        status_code=500,
+        request_body=body.decode("utf-8", errors="replace") if isinstance(body, (bytes, bytearray)) else body,
+        client_ip=_client_ip(request),
+        exc=exc,
+    )
+    return JSONResponse(status_code=500, content={"detail": "Internal Server Error"})
 
 #FILES_DIR = "C:/Users/jesus/OneDrive/Escritorio/backend-lacasadelvitrificado/files"
 
@@ -79,6 +153,7 @@ app.include_router(unit_sales)
 app.include_router(internal_uses)
 app.include_router(promotions)
 app.include_router(advertising)
+app.include_router(error_logs)
 
 if __name__ == "__main__":
     uvicorn.run("main:app", port=8000, reload=True)

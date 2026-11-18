@@ -702,6 +702,9 @@ class StoreInventory(BaseModel):
     lot_number: str
     arrival_date: date
     shopping_id: Optional[int] = None  # Para cálculo automático de unit_cost
+    # Solo True en el ÚLTIMO producto del lote: marca la compra como finalizada (status 7).
+    # Si se marca en el primero y falla a mitad, la compra queda bloqueada sin poder editar precios.
+    finalize_shopping: Optional[bool] = False
     # Edición: fila concreta en ``inventories_movements`` (solo esa fila recibe ``unit_cost``).
     inventory_movement_id: Optional[int] = None
     lot_item_id: Optional[int] = None

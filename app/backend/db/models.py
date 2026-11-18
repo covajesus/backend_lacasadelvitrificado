@@ -620,3 +620,25 @@ class CampaignAccessTokenModel(Base):
     used_at = Column(DateTime(), nullable=True)
     added_date = Column(DateTime(), default=datetime.now)
     updated_date = Column(DateTime(), default=datetime.now)
+
+
+class SystemErrorLogModel(Base):
+    """Registro persistente de errores de API / dominio para diagnóstico."""
+
+    __tablename__ = 'system_error_logs'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    level = Column(String(20), nullable=False, default='error')
+    source = Column(String(100), nullable=True)
+    method = Column(String(10), nullable=True)
+    path = Column(String(500), nullable=True)
+    status_code = Column(Integer, nullable=True)
+    user_id = Column(Integer, nullable=True)
+    shopping_id = Column(Integer, nullable=True)
+    product_id = Column(Integer, nullable=True)
+    message = Column(Text(), nullable=False)
+    detail = Column(Text(), nullable=True)
+    request_body = Column(Text(), nullable=True)
+    traceback = Column(Text(), nullable=True)
+    client_ip = Column(String(64), nullable=True)
+    added_date = Column(DateTime(), default=datetime.now)

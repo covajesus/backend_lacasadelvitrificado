@@ -6,6 +6,7 @@ import uuid
 import difflib
 import unicodedata
 from types import SimpleNamespace
+from pathlib import Path
 from dotenv import load_dotenv
 from datetime import datetime
 from app.backend.classes.setting_class import SettingClass
@@ -20,7 +21,10 @@ from app.backend.db.models import (
     SaleModel,
     CustomerProductDiscountModel,
 )
-load_dotenv() 
+
+# Cargar siempre backend/.env (no depende del cwd del proceso)
+_BACKEND_ROOT = Path(__file__).resolve().parents[3]
+load_dotenv(_BACKEND_ROOT / ".env", override=False) 
 
 class WhatsappClass:
     CAMPAIGN_SITE_BUTTON_LABEL = 'Ir a la promoción'

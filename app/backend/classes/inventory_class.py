@@ -547,6 +547,25 @@ class InventoryClass:
 
     def store(self, inventory_inputs):
         try:
+            public_price = int(inventory_inputs.public_sale_price or 0)
+            if public_price <= 0:
+                return {
+                    "status": "error",
+                    "message": "El precio de venta al público es obligatorio y debe ser mayor a 0.",
+                }
+            private_price = int(inventory_inputs.private_sale_price or 0)
+            if private_price <= 0:
+                return {
+                    "status": "error",
+                    "message": "El precio de venta privado es obligatorio y debe ser mayor a 0.",
+                }
+            stock_qty = float(inventory_inputs.stock or 0)
+            if stock_qty <= 0:
+                return {
+                    "status": "error",
+                    "message": "La cantidad de inventario debe ser mayor a 0.",
+                }
+
             # Verificar si el producto ya existe en la tabla inventory (solo por product_id)
             existing_inventory = (
                 self.db.query(InventoryModel)
@@ -594,23 +613,13 @@ class InventoryClass:
             # Confirmar transacción
             self.db.commit()
             self.db.refresh(new_lot)
-            
-            # Actualizar el status_id del shopping a 7 si viene de un shopping
-            if hasattr(inventory_inputs, 'shopping_id') and inventory_inputs.shopping_id:
-                from app.backend.db.models import ShoppingModel
-                shopping = self.db.query(ShoppingModel).filter(ShoppingModel.id == inventory_inputs.shopping_id).first()
-                if shopping:
-                    shopping.status_id = 7
-                    shopping.updated_date = datetime.now()
-                    self.db.commit()
-                    print(f"Shopping {inventory_inputs.shopping_id} actualizado a status_id = 7")
-            
+
             # Crear lote asociado
             new_lot_item = LotItemModel(
                 lot_id=new_lot.id,
                 product_id=inventory_inputs.product_id,
-                public_sale_price=inventory_inputs.public_sale_price,
-                private_sale_price=inventory_inputs.private_sale_price,
+                public_sale_price=public_price,
+                private_sale_price=private_price,
                 added_date=datetime.now(),
                 updated_date=datetime.now()
             )
@@ -654,6 +663,24 @@ class InventoryClass:
             # Confirmar transacción
             self.db.commit()
 
+            # Marcar compra finalizada SOLO si el cliente lo pide (último producto del lote).
+            # Antes se hacía al primer producto y un error a mitad dejaba la compra bloqueada.
+            should_finalize = bool(getattr(inventory_inputs, "finalize_shopping", False))
+            shopping_id = getattr(inventory_inputs, "shopping_id", None)
+            if should_finalize and shopping_id:
+                from app.backend.db.models import ShoppingModel
+
+                shopping = (
+                    self.db.query(ShoppingModel)
+                    .filter(ShoppingModel.id == shopping_id)
+                    .first()
+                )
+                if shopping:
+                    shopping.status_id = 7
+                    shopping.updated_date = datetime.now()
+                    self.db.commit()
+                    print(f"Shopping {shopping_id} actualizado a status_id = 7 (finalize_shopping)")
+
             message = "Inventario y lote creados exitosamente." if not existing_inventory else "Lote agregado a inventario existente."
             
             return {
@@ -664,6 +691,63 @@ class InventoryClass:
                 "lot_item_id": new_lot_item.id,
             }
 
+        except Exception as e:
+            self.db.rollback()
+            return {"status": "error", "message": str(e)}
+
+    def reopen_shopping_for_inventory(self, shopping_id: int):
+        """Permite seguir editando precios/cantidades si un guardado parcial dejó status 7."""
+        try:
+            from app.backend.db.models import ShoppingModel
+
+            shopping = (
+                self.db.query(ShoppingModel)
+                .filter(ShoppingModel.id == shopping_id)
+                .first()
+            )
+            if not shopping:
+                return {"status": "error", "message": "Compra no encontrada"}
+
+            if int(shopping.status_id or 0) != 7:
+                return {
+                    "status": "success",
+                    "message": f"La compra ya está en estado {shopping.status_id}; no requiere reapertura.",
+                    "status_id": shopping.status_id,
+                }
+
+            shopping.status_id = 6
+            shopping.updated_date = datetime.now()
+            self.db.commit()
+            return {
+                "status": "success",
+                "message": "Compra reabierta a estado 6 para completar inventario y precios.",
+                "status_id": 6,
+            }
+        except Exception as e:
+            self.db.rollback()
+            return {"status": "error", "message": str(e)}
+
+    def finalize_shopping_inventory(self, shopping_id: int):
+        """Marca status 7 sin crear movimientos (p. ej. cuando ya está todo guardado)."""
+        try:
+            from app.backend.db.models import ShoppingModel
+
+            shopping = (
+                self.db.query(ShoppingModel)
+                .filter(ShoppingModel.id == shopping_id)
+                .first()
+            )
+            if not shopping:
+                return {"status": "error", "message": "Compra no encontrada"}
+
+            shopping.status_id = 7
+            shopping.updated_date = datetime.now()
+            self.db.commit()
+            return {
+                "status": "success",
+                "message": "Compra marcada como finalizada (status 7).",
+                "status_id": 7,
+            }
         except Exception as e:
             self.db.rollback()
             return {"status": "error", "message": str(e)}
