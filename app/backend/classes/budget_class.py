@@ -190,28 +190,47 @@ class BudgetClass:
                     # Si no se encuentra el cliente, retornar lista vacía
                     query = query.filter(BudgetModel.customer_id == -1)
 
-            # Aplicar filtros de búsqueda si se proporcionan
+            # Aplicar filtros de búsqueda si se proporcionan (parcial, no exacto)
             if identification_number and identification_number.strip():
-                query = query.filter(CustomerModel.identification_number == identification_number.strip())
+                query = query.filter(
+                    CustomerModel.identification_number.ilike(f"%{identification_number.strip()}%")
+                )
 
             if social_reason and social_reason.strip():
                 query = query.filter(CustomerModel.social_reason.ilike(f"%{social_reason.strip()}%"))
 
             if page > 0:
                 total_items = query.count()
-                total_pages = max((total_items + items_per_page - 1) // items_per_page, 1) // items_per_page
+                total_pages = max((total_items + items_per_page - 1) // items_per_page, 1)
 
-                if page < 1 or (total_pages > 0 and page > total_pages):
-                    return {"status": "error", "message": "Invalid page number"}
+                if page < 1 or page > total_pages:
+                    return {
+                        "status": "error",
+                        "message": "Invalid page number",
+                        "total_items": total_items,
+                        "total_pages": total_pages,
+                        "current_page": page,
+                        "items_per_page": items_per_page,
+                        "data": [],
+                    }
 
                 data = query.offset((page - 1) * items_per_page).limit(items_per_page).all()
 
                 if not data:
-                    return {"status": "error", "message": "No data found"}
+                    return {
+                        "status": "success",
+                        "message": "No data found",
+                        "total_items": total_items,
+                        "total_pages": total_pages,
+                        "current_page": page,
+                        "items_per_page": items_per_page,
+                        "data": [],
+                    }
 
                 serialized_data = [self.serialize_budget(item) for item in data]
 
                 return {
+                    "status": "success",
                     "total_items": total_items,
                     "total_pages": total_pages,
                     "current_page": page,

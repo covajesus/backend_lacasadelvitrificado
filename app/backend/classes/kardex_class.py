@@ -131,7 +131,7 @@ class KardexClass:
 
             if page > 0:
                 total_items = query.count()
-                total_pages = max((total_items + items_per_page - 1) // items_per_page, 1) // items_per_page
+                total_pages = max((total_items + items_per_page - 1) // items_per_page, 1)
 
                 if page < 1 or page > total_pages:
                     return {"status": "error", "message": "Invalid page number"}
