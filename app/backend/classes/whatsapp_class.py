@@ -715,9 +715,12 @@ class WhatsappClass:
                 "private_sale_price": item["price"]
             })
 
-        doc_id = session.get("document_type_id")
-        if doc_id not in (33, 39):
-            doc_id = 39
+        # ERP interno: 1 = Boleta, 2 = Factura (SII 39/33 solo en emisión DTE)
+        raw_doc = session.get("document_type_id")
+        if raw_doc in (2, 33):
+            doc_id = 2
+        else:
+            doc_id = 1
 
         sale_input = SimpleNamespace(
             rol_id=5,
@@ -972,11 +975,14 @@ class WhatsappClass:
 
         bid = session.get("pending_budget_id")
         cid = session.get("customer_id")
-        doc_id = session.get("document_type_id")
+        raw_doc = session.get("document_type_id")
         if not bid or not cid:
             return {"ok": False, "error": "Datos incompletos"}
-        if doc_id not in (33, 39):
-            doc_id = 39
+        # ERP interno: 1 = Boleta, 2 = Factura (WhatsApp UI usa SII 39/33)
+        if raw_doc in (2, 33):
+            doc_id = 2
+        else:
+            doc_id = 1
 
         budget = self.db.query(BudgetModel).filter(BudgetModel.id == bid).first()
         if not budget:
@@ -994,6 +1000,7 @@ class WhatsappClass:
         accept_res = BudgetClass(self.db).accept(
             int(bid),
             dte_type_id=doc_id,
+            dte_status_id=1,
             delivery_address_override=delivery,
         )
         if isinstance(accept_res, dict) and accept_res.get("status") == "error":

@@ -30,11 +30,12 @@ class DteClass:
         region = self.db.query(RegionModel).filter(RegionModel.id == customer.region_id).first()
         
         # Validar que commune y region existan (necesarios para facturas)
-        if not commune and sale.dte_type_id != 1:
+        is_boleta_doc = sale.dte_type_id in (1, 39)
+        if not commune and not is_boleta_doc:
             print(f"[ERROR DTE] Comuna no encontrada para el cliente {customer.id}")
             return 0
         
-        if not region and sale.dte_type_id != 1:
+        if not region and not is_boleta_doc:
             print(f"[ERROR DTE] Región no encontrada para el cliente {customer.id}")
             return 0
 
@@ -90,8 +91,10 @@ class DteClass:
 
         print(f"[DEBUG DTE] Generando DTE para venta {id}")
         print(f"[DEBUG DTE] dte_type_id en venta: {sale.dte_type_id}")
-        if sale.dte_type_id == 1:
-            print(f"[DEBUG DTE] Generando BOLETA (dte_type_id = 1)")
+        # Interno: 1=Boleta, 2=Factura | legacy SII: 39=Boleta, 33=Factura
+        is_boleta = sale.dte_type_id in (1, 39)
+        if is_boleta:
+            print(f"[DEBUG DTE] Generando BOLETA (dte_type_id = {sale.dte_type_id})")
             # Armar el payload
             payload = {
                 "Documento": {
@@ -301,10 +304,10 @@ class DteClass:
             else:
                 token = setting_data["setting_data"]["simplefactura_token"]
             
-            # Determinar el código de tipo DTE
-            if sale.dte_type_id == 1:  # Boleta
+            # Determinar el código de tipo DTE (SII)
+            if sale.dte_type_id in (1, 39):  # Boleta
                 dte_type_id = 39
-            else:  # Factura
+            else:  # Factura (2 o 33)
                 dte_type_id = 33
             
             # Payload para la API de SimpleFactura

@@ -814,6 +814,7 @@ class SaleClass:
                 SaleProductModel.product_id,
                 SaleProductModel.quantity,
                 SaleProductModel.price,
+                SaleModel.customer_id,
                 SaleModel.subtotal,
                 SaleModel.shipping_cost,
                 SaleModel.tax,
@@ -825,11 +826,23 @@ class SaleClass:
                 SaleModel.delivery_address,
                 SaleModel.added_date,
                 ProductModel.product,
+                ProductModel.short_description,
                 CustomerModel.social_reason.label("customer_name")
             ).join(SaleModel, SaleModel.id == SaleProductModel.sale_id, isouter=True).join(ProductModel, ProductModel.id == SaleProductModel.product_id, isouter=True).join(CustomerModel, CustomerModel.id == SaleModel.customer_id, isouter=True).filter(SaleModel.id == id).all()
 
             if not data_query:
                 return {"error": "No se encontraron datos para el campo especificado."}
+
+            customer_id = data_query[0].customer_id
+            customer_discounts = {}
+            if customer_id:
+                from app.backend.db.models import CustomerProductDiscountModel
+                for row in (
+                    self.db.query(CustomerProductDiscountModel)
+                    .filter(CustomerProductDiscountModel.customer_id == int(customer_id))
+                    .all()
+                ):
+                    customer_discounts[int(row.product_id)] = float(row.discount_percentage or 0)
             
             unit_sale_items = self._unit_sale_items_for_sale_id(id)
             unit_sale_queues = {}
@@ -873,11 +886,15 @@ class SaleClass:
 
                 qty_item = us_item or iu_item
 
+                # Precio cobrado a ESTE cliente (ya incluye descuento/promo del momento de la venta)
+                charged = float(data.price or 0)
+
                 sale_details = {
                     "id": data.id,
                     "product_id": data.product_id,
                     "quantity": data.quantity,
-                    "price": data.price,
+                    "price": charged,
+                    "customer_unit_price": charged,
                     "is_unit_sale_order": is_unit_sale_order,
                     "is_internal_use_order": is_internal_use_order,
                     "is_unit_sale": us_item is not None,
@@ -897,13 +914,16 @@ class SaleClass:
                     "delivery_address": data.delivery_address,
                     "added_date": data.added_date.strftime("%d-%m-%Y %H:%M:%S"),
                     "product": data.product,
+                    "short_description": data.short_description or "",
                     "customer_name": data.customer_name
                 }
 
-                # Solo marcar promo si esta línea se cobró realmente a precio promocional
                 if data.product_id and not is_internal_use_order:
                     usage = sale_usages.get(int(data.product_id))
-                    charged = float(data.price or 0)
+                    cust_disc = customer_discounts.get(int(data.product_id), 0.0)
+                    list_price = float(pricing_service.get_product_public_price(int(data.product_id)) or 0)
+
+                    # Promo aplicada en esta venta
                     if usage:
                         promo_price = float(usage["promotional_price"] or 0)
                         original = float(usage["original_price"] or 0)
@@ -912,6 +932,18 @@ class SaleClass:
                             sale_details["promotion_discount_percent"] = usage["discount_percent"]
                             sale_details["public_sale_price_original"] = original
                             sale_details["public_sale_price"] = promo_price
+
+                    # Descuento particular del cliente (precio cobrado < lista)
+                    if cust_disc > 0:
+                        sale_details["has_customer_discount"] = True
+                        sale_details["customer_discount_percent"] = cust_disc
+                        if list_price > 0 and list_price > charged + 1:
+                            sale_details["public_sale_price_original"] = sale_details.get(
+                                "public_sale_price_original", list_price
+                            )
+                    elif list_price > 0 and list_price > charged + 1 and not sale_details.get("has_product_promotion"):
+                        # Precio especial distinto a lista aunque no haya % en tabla
+                        sale_details["public_sale_price_original"] = list_price
 
                 sale_data.append(sale_details)
 

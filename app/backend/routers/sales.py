@@ -200,7 +200,7 @@ def send_dte(db: Session = Depends(get_db)):
                         continue
                     
                     # Determinar tipo de DTE
-                    dte_type = "Boleta Electrónica" if sale.dte_type_id == 1 else "Factura Electrónica"
+                    dte_type = "Boleta Electrónica" if sale.dte_type_id in (1, 39) else "Factura Electrónica"
                     
                     # Formatear fecha
                     date_formatted = sale.added_date.strftime("%d-%m-%Y")

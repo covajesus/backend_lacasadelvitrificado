@@ -91,17 +91,17 @@ def store_without_customer(
 def accept_budget_with_dte_status(
     budget_id: int,
     dte_type_id: int,
+    dte_status_id: int = 1,
     session_user: UserLogin = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
     """
-    Acepta un presupuesto y crea una venta con dte_status_id en la URL.
-    Parámetros:
-    - budget_id: ID del presupuesto
-    - dte_status_id: 1 para Boleta (dte_type_id=1), 2 para Factura (dte_type_id=2)
+    Acepta un presupuesto y crea una venta.
+    - dte_type_id: 1 = Boleta, 2 = Factura
+    - dte_status_id: 1 = Con DTE, 2 = Sin DTE (query param opcional)
     """
-    # Si dte_status_id es 1, dte_type_id es 1 (Boleta). Si dte_status_id es 2, dte_type_id es 2 (Factura).
-    dte_status_id = 1
+    if dte_status_id not in (1, 2):
+        dte_status_id = 1
 
     data = BudgetClass(db).accept(budget_id, dte_type_id=dte_type_id, dte_status_id=dte_status_id)
 

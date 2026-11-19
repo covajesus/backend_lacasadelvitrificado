@@ -621,18 +621,25 @@ class BudgetClass:
                 delivery_address = "Retiro en tienda / sin envío"
 
             # Determinar dte_type_id y dte_status_id
-            # Si se pasan por parámetro, usar esos valores
-            # Si no, intentar obtener del presupuesto
+            # Códigos internos: 1 = Boleta, 2 = Factura (también se aceptan SII 39/33)
             final_dte_type_id = dte_type_id
             final_dte_status_id = dte_status_id
             
             if final_dte_type_id is None:
                 budget_dte_type_id = getattr(budget, 'dte_type_id', None) if hasattr(budget, 'dte_type_id') else None
                 final_dte_type_id = budget_dte_type_id
+
+            # Normalizar SII → interno
+            if final_dte_type_id in (33, 2):
+                final_dte_type_id = 2
+            elif final_dte_type_id in (39, 1):
+                final_dte_type_id = 1
+            else:
+                final_dte_type_id = 1  # default Boleta
             
-            # Si dte_status_id no se proporciona, usar None (no generar DTE)
+            # Por defecto marcar que corresponde emitir DTE al aceptar pago
             if final_dte_status_id is None:
-                final_dte_status_id = None
+                final_dte_status_id = 1
             
             print(f"[BUDGET_ACCEPT] Valores DTE finales: dte_type_id={final_dte_type_id}, dte_status_id={final_dte_status_id}")
             
